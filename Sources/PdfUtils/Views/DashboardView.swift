@@ -1,6 +1,8 @@
 import SwiftUI
 
 struct DashboardView: View {
+    @State private var showHelp = false
+
     private let columns = [
         GridItem(.adaptive(minimum: 200, maximum: 280), spacing: 20),
     ]
@@ -28,6 +30,13 @@ struct DashboardView: View {
         .toolbar {
             ToolbarItemGroup(placement: .primaryAction) {
                 Button {
+                    showHelp = true
+                } label: {
+                    Image(systemName: "questionmark.circle")
+                }
+                .help("About pdf-utils and toolbar controls")
+                .accessibilityLabel("Help")
+                Button {
                     FullScreenSupport.toggle()
                 } label: {
                     Image(systemName: "arrow.up.left.and.arrow.down.right")
@@ -37,13 +46,16 @@ struct DashboardView: View {
             }
         }
         .toolbarBackground(.ultraThinMaterial, for: .automatic)
+        .sheet(isPresented: $showHelp) {
+            DashboardHelpSheet()
+        }
     }
 
     private var header: some View {
         VStack(alignment: .leading, spacing: 8) {
             Text("Tools")
                 .font(.largeTitle.weight(.semibold))
-            Text("Pick a tool to work on your PDFs. Files stay on your Mac.")
+            Text("Pick a tool to work on your PDFs. Files stay on your Mac. Use the toolbar “?” for an overview of the window controls.")
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
         }

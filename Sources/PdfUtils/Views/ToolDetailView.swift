@@ -2,6 +2,7 @@ import SwiftUI
 
 struct ToolDetailView: View {
     let tool: Tool
+    @State private var showHelp = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -27,6 +28,13 @@ struct ToolDetailView: View {
         .toolbar {
             ToolbarItemGroup(placement: .primaryAction) {
                 Button {
+                    showHelp = true
+                } label: {
+                    Image(systemName: "questionmark.circle")
+                }
+                .help("Help for this tool")
+                .accessibilityLabel("Help")
+                Button {
                     FullScreenSupport.toggle()
                 } label: {
                     Image(systemName: "arrow.up.left.and.arrow.down.right")
@@ -34,6 +42,9 @@ struct ToolDetailView: View {
                 .help("Enter or exit full screen")
                 .accessibilityLabel("Toggle full screen")
             }
+        }
+        .sheet(isPresented: $showHelp) {
+            ToolHelpSheet(tool: tool)
         }
     }
 }

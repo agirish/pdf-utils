@@ -116,46 +116,35 @@ struct RotateToolView: View {
             return
         }
 
-        let access = inputURL.startAccessingSecurityScopedResource()
-        defer { if access { inputURL.stopAccessingSecurityScopedResource() } }
-
-        guard let doc = PDFDocument(url: inputURL) else {
-            alertMessage = PDFOperationError.couldNotOpen(inputURL).localizedDescription
-            return
-        }
-
-        let count = doc.pageCount
-        guard count > 0 else {
-            alertMessage = "This PDF has no pages."
-            return
-        }
-
-        let indices: [Int]
-        do {
-            switch scope {
-            case .all:
-                indices = Array(0..<count)
-            case .range:
-                indices = try PageRangeParser.parse(rangeText, pageCount: count)
-            }
-        } catch {
-            alertMessage = error.localizedDescription
-            return
-        }
-
         busy = true
         defer { busy = false }
 
         suggestedName = inputURL.deletingPathExtension().lastPathComponent + "-rotated.pdf"
 
         do {
-            let data = try PDFExportSupport.data { out in
-                try PDFToolkit.rotate(
-                    inputURL: inputURL,
-                    outputURL: out,
-                    pageIndices: indices,
-                    quarterTurns: quarterTurns
-                )
+            let data = try inputURL.withSecurityScopedAccess {
+                guard let doc = PDFDocument(url: inputURL) else {
+                    throw PDFOperationError.couldNotOpen(inputURL)
+                }
+                let count = doc.pageCount
+                guard count > 0 else {
+                    throw PDFOperationError.emptyPDF
+                }
+                let indices: [Int]
+                switch scope {
+                case .all:
+                    indices = Array(0..<count)
+                case .range:
+                    indices = try PageRangeParser.parse(rangeText, pageCount: count)
+                }
+                return try PDFExportSupport.data { out in
+                    try PDFToolkit.rotate(
+                        inputURL: inputURL,
+                        outputURL: out,
+                        pageIndices: indices,
+                        quarterTurns: quarterTurns
+                    )
+                }
             }
             exportDoc = PDFFileDocument(data: data)
             showExporter = true

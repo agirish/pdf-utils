@@ -11,6 +11,7 @@ enum PDFOperationError: LocalizedError {
     case noInputFiles
     case noPagesSelected
     case compressionFailed
+    case emptyPDF
 
     var errorDescription: String? {
         switch self {
@@ -34,6 +35,8 @@ enum PDFOperationError: LocalizedError {
             return "Select at least one page."
         case .compressionFailed:
             return "Compression failed while rebuilding the PDF."
+        case .emptyPDF:
+            return "This PDF has no pages."
         }
     }
 }

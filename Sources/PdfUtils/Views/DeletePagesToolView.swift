@@ -84,36 +84,24 @@ struct DeletePagesToolView: View {
             return
         }
 
-        let access = inputURL.startAccessingSecurityScopedResource()
-        defer { if access { inputURL.stopAccessingSecurityScopedResource() } }
-
-        guard let doc = PDFDocument(url: inputURL) else {
-            alertMessage = PDFOperationError.couldNotOpen(inputURL).localizedDescription
-            return
-        }
-
-        let count = doc.pageCount
-        guard count > 0 else {
-            alertMessage = "This PDF has no pages."
-            return
-        }
-
-        let indices: [Int]
-        do {
-            indices = try PageRangeParser.parse(rangeText, pageCount: count, emptyMeansAllPages: false)
-        } catch {
-            alertMessage = error.localizedDescription
-            return
-        }
-
         busy = true
         defer { busy = false }
 
         suggestedName = inputURL.deletingPathExtension().lastPathComponent + "-edited.pdf"
 
         do {
-            let data = try PDFExportSupport.data { out in
-                try PDFToolkit.deletePages(inputURL: inputURL, outputURL: out, pageIndices: indices)
+            let data = try inputURL.withSecurityScopedAccess {
+                guard let doc = PDFDocument(url: inputURL) else {
+                    throw PDFOperationError.couldNotOpen(inputURL)
+                }
+                let count = doc.pageCount
+                guard count > 0 else {
+                    throw PDFOperationError.emptyPDF
+                }
+                let indices = try PageRangeParser.parse(rangeText, pageCount: count, emptyMeansAllPages: false)
+                return try PDFExportSupport.data { out in
+                    try PDFToolkit.deletePages(inputURL: inputURL, outputURL: out, pageIndices: indices)
+                }
             }
             exportDoc = PDFFileDocument(data: data)
             showExporter = true

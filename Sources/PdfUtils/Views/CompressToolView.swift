@@ -106,14 +106,13 @@ struct CompressToolView: View {
         busy = true
         defer { busy = false }
 
-        let access = inputURL.startAccessingSecurityScopedResource()
-        defer { if access { inputURL.stopAccessingSecurityScopedResource() } }
-
         suggestedName = inputURL.deletingPathExtension().lastPathComponent + "-compressed.pdf"
 
         do {
-            let data = try PDFExportSupport.data { out in
-                try PDFToolkit.compress(inputURL: inputURL, outputURL: out, quality: quality)
+            let data = try inputURL.withSecurityScopedAccess {
+                try PDFExportSupport.data { out in
+                    try PDFToolkit.compress(inputURL: inputURL, outputURL: out, quality: quality)
+                }
             }
             exportDoc = PDFFileDocument(data: data)
             showExporter = true

@@ -112,28 +112,13 @@ struct MergeToolView: View {
         defer { busy = false }
 
         let urls = entries.map(\.url)
-        var startedAccess: [URL] = []
-        for url in urls {
-            guard url.startAccessingSecurityScopedResource() else {
-                for u in startedAccess {
-                    u.stopAccessingSecurityScopedResource()
-                }
-                alertMessage = "Could not access \(url.lastPathComponent)."
-                return
-            }
-            startedAccess.append(url)
-        }
-        defer {
-            for u in startedAccess {
-                u.stopAccessingSecurityScopedResource()
-            }
-        }
-
         suggestedName = "merged.pdf"
 
         do {
-            let data = try PDFExportSupport.data { out in
-                try PDFToolkit.merge(inputURLs: urls, outputURL: out)
+            let data = try URLCollectionSecurityScope.withAccess(urls) {
+                try PDFExportSupport.data { out in
+                    try PDFToolkit.merge(inputURLs: urls, outputURL: out)
+                }
             }
             exportDoc = PDFFileDocument(data: data)
             showExporter = true

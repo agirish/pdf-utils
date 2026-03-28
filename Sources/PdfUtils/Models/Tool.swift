@@ -34,6 +34,22 @@ enum Tool: String, CaseIterable, Identifiable, Hashable {
         }
     }
 
+    /// Short paragraph shown under the navigation area on each tool screen.
+    var headerDescription: String {
+        switch self {
+        case .compress:
+            return "Rebuilds each page as an image to reduce file size—best for scans and photos. Vector text may become non-selectable; use the quality slider to balance size and sharpness."
+        case .rotate:
+            return "Turn every page or only the pages you list. Rotation is written into a new PDF; your original file stays untouched until you save over it from the save panel."
+        case .merge:
+            return "Stack several PDFs into one file in the order shown. Use the arrows beside each row to change order, or remove a file from the list without deleting it from disk."
+        case .extract:
+            return "Copy chosen pages into a new PDF in the order you type (for example 5,1,2). Handy for pulling chapters or attachments out of a larger document."
+        case .deletePages:
+            return "Produce a new PDF without the pages you specify. You must list which pages to drop—an empty field will not delete everything. At least one page must remain."
+        }
+    }
+
     var symbolName: String {
         switch self {
         case .compress: return "arrow.down.doc"

@@ -396,6 +396,9 @@ struct MergeToolView: View {
 
 // MARK: - Drop helpers
 
+/// Isolate `loadItem` async helpers on the main actor so `NSItemProvider` is not sent across executors
+/// when SwiftUI’s drop handler resumes (providers are not `Sendable`).
+@MainActor
 private extension NSItemProvider {
     func resolvePDFItemURL() async -> URL? {
         if let url = await loadItemURL(typeIdentifier: UTType.pdf.identifier) {
@@ -405,7 +408,7 @@ private extension NSItemProvider {
         return url.pathExtension.lowercased() == "pdf" ? url : nil
     }
 
-    private func loadItemURL(typeIdentifier: String) async -> URL? {
+    func loadItemURL(typeIdentifier: String) async -> URL? {
         await withCheckedContinuation { continuation in
             loadItem(forTypeIdentifier: typeIdentifier, options: nil) { item, _ in
                 if let url = item as? URL {

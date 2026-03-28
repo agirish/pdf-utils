@@ -3,6 +3,8 @@ import SwiftUI
 
 @main
 struct PdfUtilsApp: App {
+    @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
+
     init() {
         // Enforce standard GUI activation policy. When running directly via `swift run` or as an unbundled executable,
         // this guarantees the app has a menu bar and natively supports full-screen spaces.

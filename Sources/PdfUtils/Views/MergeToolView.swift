@@ -198,7 +198,11 @@ struct MergeToolView: View {
         }
 
         busy = true
-        defer { busy = false }
+        AppStateManager.shared.beginOperation("Merge PDF")
+        defer {
+            busy = false
+            AppStateManager.shared.endOperation("Merge PDF")
+        }
 
         let urlsSnapshot = entries.map(\.url)
 

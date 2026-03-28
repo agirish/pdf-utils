@@ -87,7 +87,11 @@ struct ExtractToolView: View {
         }
 
         busy = true
-        defer { busy = false }
+        AppStateManager.shared.beginOperation("Extract Pages")
+        defer {
+            busy = false
+            AppStateManager.shared.endOperation("Extract Pages")
+        }
 
         suggestedName = fileURL.deletingPathExtension().lastPathComponent + "-extracted.pdf"
         let rangeSnapshot = rangeText

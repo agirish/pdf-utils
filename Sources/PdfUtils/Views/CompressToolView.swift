@@ -104,7 +104,11 @@ struct CompressToolView: View {
         }
 
         busy = true
-        defer { busy = false }
+        AppStateManager.shared.beginOperation("Compress PDF")
+        defer {
+            busy = false
+            AppStateManager.shared.endOperation("Compress PDF")
+        }
 
         suggestedName = fileURL.deletingPathExtension().lastPathComponent + "-compressed.pdf"
         let qualityValue = quality

@@ -89,7 +89,11 @@ struct DeletePagesToolView: View {
         }
 
         busy = true
-        defer { busy = false }
+        AppStateManager.shared.beginOperation("Delete Pages")
+        defer {
+            busy = false
+            AppStateManager.shared.endOperation("Delete Pages")
+        }
 
         suggestedName = fileURL.deletingPathExtension().lastPathComponent + "-edited.pdf"
 

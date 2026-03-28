@@ -117,7 +117,11 @@ struct RotateToolView: View {
         }
 
         busy = true
-        defer { busy = false }
+        AppStateManager.shared.beginOperation("Rotate Pages")
+        defer {
+            busy = false
+            AppStateManager.shared.endOperation("Rotate Pages")
+        }
 
         suggestedName = fileURL.deletingPathExtension().lastPathComponent + "-rotated.pdf"
         let scopeSnapshot = scope

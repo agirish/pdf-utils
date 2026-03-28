@@ -6,7 +6,7 @@ Native **macOS** app for everyday PDF tasks: a tile-based **dashboard** (similar
 
 | Tool | What it does |
 |------|----------------|
-| **Compress PDF** | Rebuilds pages as images with adjustable quality to reduce file size (best for scan-heavy PDFs; vector text may become rasterized). |
+| **Compress PDF** | Rebuilds pages as images with adjustable quality to reduce file size (best for scan-heavy PDFs; vector text may become rasterized). Uses CoreGraphics (`CGPDFPage` drawing transform) so intrinsic page rotation in the file is flattened into the bitmap; output pages use rotation 0 to avoid double-applying. |
 | **Rotate PDF** | Rotates all pages or a **page range** by 90° / 180° / 270°. |
 | **Merge PDF** | Combines multiple PDFs **top to bottom** in the list (reorder with **Edit**). |
 | **Extract PDF Pages** | Saves a new PDF containing only the pages you list (e.g. `1, 3-5`). Order matches what you type (`5,1,2` → page 5, then 1, then 2). Ranges expand forward (`3-5`) or backward (`5-3`). Leave the field empty to use all pages. |

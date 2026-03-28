@@ -1,4 +1,5 @@
 import AppKit
+import CoreGraphics
 import Foundation
 import PDFKit
 
@@ -116,7 +117,8 @@ enum PDFToolkit {
             guard let newPage = PDFPage(image: image) else {
                 throw PDFOperationError.compressionFailed
             }
-            newPage.rotation = page.rotation
+            // Bitmap already includes PDF rotation via CGPDFPage drawing transform; do not re-apply PDFPage.rotation.
+            newPage.rotation = 0
             output.insert(newPage, at: output.pageCount)
         }
 
@@ -129,25 +131,28 @@ enum PDFToolkit {
         }
     }
 
+    /// Renders using `CGPDFPage`’s drawing transform so page rotation from the PDF (and PDFKit’s `rotation`) appears upright in the bitmap.
     private static func renderPage(_ page: PDFPage, maxPixelDimension: CGFloat) -> NSImage? {
-        let rect = page.bounds(for: .mediaBox)
-        guard rect.width > 0, rect.height > 0 else { return nil }
+        let mediaRect = page.bounds(for: .mediaBox)
+        guard mediaRect.width > 0, mediaRect.height > 0 else { return nil }
 
-        let longest = max(rect.width, rect.height)
+        let cgPage = page.pageRef
+        let longest = max(mediaRect.width, mediaRect.height)
         let scale = min(1, maxPixelDimension / longest)
-        let pixelW = max(1, Int(rect.width * scale))
-        let pixelH = max(1, Int(rect.height * scale))
+        let pixelW = max(1, Int(mediaRect.width * scale))
+        let pixelH = max(1, Int(mediaRect.height * scale))
+        let targetRect = CGRect(x: 0, y: 0, width: CGFloat(pixelW), height: CGFloat(pixelH))
 
         let image = NSImage(size: NSSize(width: pixelW, height: pixelH), flipped: false) { _ in
             guard let ctx = NSGraphicsContext.current?.cgContext else { return false }
 
             ctx.setFillColor(NSColor.white.cgColor)
-            ctx.fill(CGRect(x: 0, y: 0, width: pixelW, height: pixelH))
+            ctx.fill(targetRect)
 
             ctx.saveGState()
-            ctx.translateBy(x: 0, y: CGFloat(pixelH))
-            ctx.scaleBy(x: CGFloat(pixelW) / rect.width, y: -CGFloat(pixelH) / rect.height)
-            page.draw(with: .mediaBox, to: ctx)
+            let transform = cgPage.getDrawingTransform(.mediaBox, rect: targetRect, rotate: 0, preserveAspectRatio: true)
+            ctx.concatenate(transform)
+            ctx.drawPDFPage(cgPage)
             ctx.restoreGState()
             return true
         }

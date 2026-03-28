@@ -1,12 +1,40 @@
 import AppKit
 import Foundation
 
+@MainActor
 enum FullScreenSupport {
+    /// `WindowGroup` content often runs when `keyWindow` / `mainWindow` are still nil; keep the concrete hosting window.
+    private static weak var hostingWindow: NSWindow?
+
+    /// Called from the root view hierarchy so full screen always has a real `NSWindow`.
+    static func noteHostingWindow(_ window: NSWindow?) {
+        guard let window else { return }
+        hostingWindow = window
+        window.collectionBehavior.insert(.fullScreenPrimary)
+    }
+
     /// Toggles full screen on the key window (standard macOS full-screen space).
     static func toggle() {
-        guard let window = NSApplication.shared.keyWindow ?? NSApplication.shared.mainWindow else {
+        guard let raw = hostingWindow
+            ?? NSApp.keyWindow
+            ?? NSApp.mainWindow
+            ?? NSApp.windows.reversed().first(where: eligibleForFullScreen)
+        else {
             return
         }
+
+        var window = raw
+        while window.isSheet, let parent = window.parentWindow {
+            window = parent
+        }
+
+        window.collectionBehavior.insert(.fullScreenPrimary)
         window.toggleFullScreen(nil)
+    }
+
+    private static func eligibleForFullScreen(_ window: NSWindow) -> Bool {
+        window.isVisible
+            && window.level == .normal
+            && !window.styleMask.contains(.nonactivatingPanel)
     }
 }

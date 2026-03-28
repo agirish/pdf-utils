@@ -3,6 +3,32 @@ import Foundation
 import PDFKit
 
 enum PDFToolkit {
+    /// Rotates selected pages by `quarterTurns` × 90° clockwise.
+    static func rotate(inputURL: URL, outputURL: URL, pageIndices: [Int], quarterTurns: Int) throws {
+        guard let doc = PDFDocument(url: inputURL) else {
+            throw PDFOperationError.couldNotOpen(inputURL)
+        }
+        let turns = ((quarterTurns % 4) + 4) % 4
+        guard turns != 0 else {
+            guard doc.write(to: outputURL) else { throw PDFOperationError.couldNotWrite(outputURL) }
+            return
+        }
+
+        let unique = Set(pageIndices)
+        for i in 0..<doc.pageCount {
+            guard unique.contains(i), let page = doc.page(at: i) else { continue }
+            var r = page.rotation
+            r += turns * 90
+            r %= 360
+            if r < 0 { r += 360 }
+            page.rotation = r
+        }
+
+        guard doc.write(to: outputURL) else {
+            throw PDFOperationError.couldNotWrite(outputURL)
+        }
+    }
+
     /// Rebuilds the PDF from rendered page images to reduce size. `quality` is 0...1 (JPEG-style tradeoff).
     static func compress(inputURL: URL, outputURL: URL, quality: Double) throws {
         guard let source = PDFDocument(url: inputURL) else {

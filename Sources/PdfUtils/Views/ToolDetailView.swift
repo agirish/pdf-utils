@@ -8,7 +8,9 @@ struct ToolDetailView: View {
             switch tool {
             case .compress:
                 CompressToolView()
-            case .rotate, .merge, .extract, .deletePages:
+            case .rotate:
+                RotateToolView()
+            case .merge, .extract, .deletePages:
                 toolPlaceholder
             }
         }

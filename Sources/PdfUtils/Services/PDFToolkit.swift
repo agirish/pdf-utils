@@ -3,6 +3,31 @@ import Foundation
 import PDFKit
 
 enum PDFToolkit {
+    /// Copies listed pages (zero-based) into a new PDF.
+    static func extract(inputURL: URL, outputURL: URL, pageIndices: [Int]) throws {
+        guard !pageIndices.isEmpty else { throw PDFOperationError.noPagesSelected }
+        guard let source = PDFDocument(url: inputURL) else {
+            throw PDFOperationError.couldNotOpen(inputURL)
+        }
+
+        let out = PDFDocument()
+        var insertAt = 0
+        for i in pageIndices {
+            guard let src = source.page(at: i) else {
+                throw PDFOperationError.pageOutOfBounds(i + 1)
+            }
+            guard let copy = src.copy() as? PDFPage else {
+                throw PDFOperationError.couldNotOpen(inputURL)
+            }
+            out.insert(copy, at: insertAt)
+            insertAt += 1
+        }
+
+        guard out.write(to: outputURL) else {
+            throw PDFOperationError.couldNotWrite(outputURL)
+        }
+    }
+
     /// Rotates selected pages by `quarterTurns` × 90° clockwise.
     static func rotate(inputURL: URL, outputURL: URL, pageIndices: [Int], quarterTurns: Int) throws {
         guard let doc = PDFDocument(url: inputURL) else {

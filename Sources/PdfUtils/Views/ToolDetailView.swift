@@ -10,7 +10,11 @@ struct ToolDetailView: View {
                 CompressToolView()
             case .rotate:
                 RotateToolView()
-            case .merge, .extract, .deletePages:
+            case .merge:
+                toolPlaceholder
+            case .extract:
+                ExtractToolView()
+            case .deletePages:
                 toolPlaceholder
             }
         }

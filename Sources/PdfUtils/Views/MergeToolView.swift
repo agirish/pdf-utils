@@ -18,9 +18,7 @@ struct MergeToolView: View {
     @State private var busy = false
     @State private var alertMessage: String?
     @State private var showImporter = false
-    @State private var showExporter = false
-    @State private var exportDoc: PDFFileDocument?
-    @State private var suggestedName = "merged.pdf"
+
     
     @State private var previewPages: [PreviewPage] = []
     @State private var thumbnailSize: CGFloat = 120
@@ -154,15 +152,7 @@ struct MergeToolView: View {
                 alertMessage = err.localizedDescription
             }
         }
-        .fileExporter(
-            isPresented: $showExporter,
-            document: exportDoc,
-            contentType: .pdf,
-            defaultFilename: (suggestedName as NSString).deletingPathExtension
-        ) { result in
-            exportDoc = nil
-            if case .failure(let err) = result { alertMessage = err.localizedDescription }
-        }
+
         .alert("pdf-utils", isPresented: Binding(
             get: { alertMessage != nil },
             set: { if !$0 { alertMessage = nil } }
@@ -199,22 +189,25 @@ struct MergeToolView: View {
             return
         }
 
+        let panel = NSSavePanel()
+        panel.allowedContentTypes = [.pdf]
+        panel.nameFieldStringValue = "merged.pdf"
+        
+        guard panel.runModal() == .OK, let outputURL = panel.url else {
+            return // User cancelled
+        }
+
         busy = true
         defer { busy = false }
 
         let urlsSnapshot = entries.map(\.url)
-        suggestedName = "merged.pdf"
 
         do {
-            let data = try await PDFBackgroundWork.run {
+            try await PDFBackgroundWork.run {
                 try URLCollectionSecurityScope.withAccess(urlsSnapshot) {
-                    try PDFExportSupport.data { out in
-                        try PDFToolkit.merge(inputURLs: urlsSnapshot, outputURL: out)
-                    }
+                    try PDFToolkit.merge(inputURLs: urlsSnapshot, outputURL: outputURL)
                 }
             }
-            exportDoc = PDFFileDocument(data: data)
-            showExporter = true
         } catch {
             alertMessage = error.localizedDescription
         }

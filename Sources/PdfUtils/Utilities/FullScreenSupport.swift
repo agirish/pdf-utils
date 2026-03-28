@@ -16,7 +16,11 @@ enum FullScreenSupport {
     private static func configureHostingWindow(_ window: NSWindow) {
         window.tabbingMode = .disallowed
         window.styleMask.formUnion([.titled, .closable, .miniaturizable, .resizable])
+        // Recent macOS uses a “+” / “Move & Resize” popover for tiling when the window is treated as
+        // tile-friendly. Prefer classic full-screen spaces (and avoid mixing allows+disallows, which throws).
+        window.collectionBehavior.remove(.fullScreenAllowsTiling)
         window.collectionBehavior.insert(.fullScreenPrimary)
+        window.collectionBehavior.insert(.fullScreenDisallowsTiling)
         window.standardWindowButton(.closeButton)?.isHidden = false
         window.standardWindowButton(.miniaturizeButton)?.isHidden = false
         window.standardWindowButton(.zoomButton)?.isHidden = false
@@ -37,7 +41,9 @@ enum FullScreenSupport {
             window = parent
         }
 
+        window.collectionBehavior.remove(.fullScreenAllowsTiling)
         window.collectionBehavior.insert(.fullScreenPrimary)
+        window.collectionBehavior.insert(.fullScreenDisallowsTiling)
         window.toggleFullScreen(nil)
     }
 

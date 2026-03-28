@@ -8,6 +8,10 @@ private struct MainWindowAccessor: NSViewRepresentable {
 
     func updateNSView(_ nsView: NSView, context: Context) {
         FullScreenSupport.noteHostingWindow(nsView.window)
+        // SwiftUI may reset `NSWindow` chrome after this pass; re-apply on the next main-queue turn.
+        DispatchQueue.main.async {
+            FullScreenSupport.noteHostingWindow(nsView.window)
+        }
     }
 }
 

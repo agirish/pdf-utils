@@ -32,11 +32,13 @@ struct MergeToolView: View {
     @State private var previewTask: Task<Void, Never>? = nil
     
     @State private var mergeResult: MergeResult? = nil
+    @State private var columnVisibility = NavigationSplitViewVisibility.all
 
     var body: some View {
-        ToolFormContainer {
+        Group {
             if let result = mergeResult {
-                VStack(spacing: 24) {
+                ToolFormContainer {
+                    VStack(spacing: 24) {
                     Image(systemName: "checkmark.circle.fill")
                         .font(.system(size: 48))
                         .foregroundStyle(.green)
@@ -72,115 +74,141 @@ struct MergeToolView: View {
                 }
                 .padding(40)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else {
-                VStack(alignment: .leading, spacing: 12) {
-                HStack {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("PDF files").font(.subheadline.weight(.semibold))
-                        Text(subtitle)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                    Spacer()
-                    Button("Add PDFs…") { showImporter = true }
                 }
-
-                if !entries.isEmpty {
-                    List {
-                        ForEach(Array(entries.enumerated()), id: \.element.id) { index, entry in
-                            HStack(spacing: 8) {
-                                Text("\(index + 1).")
+            } else {
+                NavigationSplitView(columnVisibility: $columnVisibility) {
+                    VStack(spacing: 0) {
+                        VStack(alignment: .leading, spacing: 12) {
+                            HStack {
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text("PDF files").font(.subheadline.weight(.semibold))
+                                    Text(subtitle)
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
+                                Spacer()
+                                Button("Add PDFs…") { showImporter = true }
+                            }
+                            .padding([.horizontal, .top], 16)
+                            
+                            if !entries.isEmpty {
+                                List {
+                                    ForEach(Array(entries.enumerated()), id: \.element.id) { index, entry in
+                                        HStack(spacing: 8) {
+                                            Text("\(index + 1).")
+                                                .foregroundStyle(.secondary)
+                                                .frame(width: 28, alignment: .leading)
+                                            Text(entry.url.lastPathComponent)
+                                                .lineLimit(1)
+                                                .truncationMode(.middle)
+                                            Spacer(minLength: 8)
+                                            Button {
+                                                moveEntry(from: index, by: -1)
+                                            } label: {
+                                                Image(systemName: "chevron.up")
+                                            }
+                                            .buttonStyle(.borderless)
+                                            .disabled(index == 0)
+                                            .help("Move up")
+                                            Button {
+                                                moveEntry(from: index, by: 1)
+                                            } label: {
+                                                Image(systemName: "chevron.down")
+                                            }
+                                            .buttonStyle(.borderless)
+                                            .disabled(index == entries.count - 1)
+                                            .help("Move down")
+                                            Button(role: .destructive) {
+                                                removeEntry(at: index)
+                                            } label: {
+                                                Image(systemName: "trash")
+                                            }
+                                            .buttonStyle(.borderless)
+                                            .help("Remove from list")
+                                        }
+                                    }
+                                }
+                                .listStyle(.inset)
+                            } else {
+                                Spacer()
+                                Text("No files added")
                                     .foregroundStyle(.secondary)
-                                    .frame(width: 28, alignment: .leading)
-                                Text(entry.url.lastPathComponent)
-                                    .lineLimit(1)
-                                    .truncationMode(.middle)
-                                Spacer(minLength: 8)
-                                Button {
-                                    moveEntry(from: index, by: -1)
-                                } label: {
-                                    Image(systemName: "chevron.up")
-                                }
-                                .buttonStyle(.borderless)
-                                .disabled(index == 0)
-                                .help("Move up")
-                                Button {
-                                    moveEntry(from: index, by: 1)
-                                } label: {
-                                    Image(systemName: "chevron.down")
-                                }
-                                .buttonStyle(.borderless)
-                                .disabled(index == entries.count - 1)
-                                .help("Move down")
-                                Button(role: .destructive) {
-                                    removeEntry(at: index)
-                                } label: {
-                                    Image(systemName: "trash")
-                                }
-                                .buttonStyle(.borderless)
-                                .help("Remove from list")
+                                Spacer()
                             }
                         }
+                        
+                        Spacer(minLength: 0)
+                        
+                        Divider()
+                        
+                        RunActionButton(title: "Merge & save…", busy: busy) {
+                            Task { await runMerge() }
+                        }
+                        .padding(16)
+                        .background(Color(NSColor.windowBackgroundColor))
                     }
-                    .frame(minHeight: 180)
-                    .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-                }
-            }
-            .padding(16)
-            .formCard()
-
-            if !previewPages.isEmpty || isGeneratingPreviews {
-                VStack(alignment: .leading, spacing: 12) {
-                    HStack {
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text("Preview").font(.subheadline.weight(.semibold))
-                            Text("Visual order of the merged pages.")
-                                .font(.caption)
+                    .navigationSplitViewColumnWidth(min: 250, ideal: 300, max: 400)
+                } detail: {
+                    if !previewPages.isEmpty || isGeneratingPreviews {
+                        VStack(alignment: .leading, spacing: 0) {
+                            HStack {
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text("Preview").font(.subheadline.weight(.semibold))
+                                    Text("Visual order of the merged pages.")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
+                                Spacer()
+                                if isGeneratingPreviews {
+                                    ProgressView().controlSize(.small)
+                                } else {
+                                    Slider(value: $thumbnailSize, in: 60...240)
+                                        .frame(width: 120)
+                                }
+                            }
+                            .padding(16)
+                            
+                            Divider()
+                            
+                            ScrollView(.vertical, showsIndicators: true) {
+                                LazyVGrid(columns: [GridItem(.adaptive(minimum: thumbnailSize))], spacing: 16) {
+                                    ForEach(previewPages) { page in
+                                        ZStack(alignment: .bottomTrailing) {
+                                            Image(nsImage: page.image)
+                                                .resizable()
+                                                .aspectRatio(contentMode: .fit)
+                                                .frame(width: thumbnailSize)
+                                                .background(Color.white)
+                                                .clipShape(RoundedRectangle(cornerRadius: 6))
+                                                .shadow(color: .black.opacity(0.1), radius: 3, y: 1)
+                                                
+                                            Text("\(page.number)")
+                                                .font(.caption2.weight(.bold))
+                                                .foregroundStyle(.white)
+                                                .padding(.horizontal, 6)
+                                                .padding(.vertical, 2)
+                                                .background(Color.accentColor)
+                                                .clipShape(Capsule())
+                                                .padding(4)
+                                        }
+                                    }
+                                }
+                                .padding(16)
+                            }
+                        }
+                        .background(Color(NSColor.underPageBackgroundColor))
+                    } else {
+                        VStack(spacing: 16) {
+                            Image(systemName: "doc.on.doc")
+                                .font(.system(size: 64))
+                                .foregroundStyle(.tertiary)
+                            Text("No PDFs selected for merge.")
+                                .font(.title3)
                                 .foregroundStyle(.secondary)
                         }
-                        Spacer()
-                        if isGeneratingPreviews {
-                            ProgressView().controlSize(.small)
-                        } else {
-                            Slider(value: $thumbnailSize, in: 60...240)
-                                .frame(width: 120)
-                        }
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .background(Color(NSColor.underPageBackgroundColor))
                     }
-                    
-                    ScrollView(.horizontal, showsIndicators: true) {
-                        LazyHGrid(rows: [GridItem(.fixed(thumbnailSize))], spacing: 16) {
-                            ForEach(previewPages) { page in
-                                ZStack(alignment: .bottomTrailing) {
-                                    Image(nsImage: page.image)
-                                        .resizable()
-                                        .aspectRatio(contentMode: .fit)
-                                        .frame(height: thumbnailSize)
-                                        .background(Color.white)
-                                        .clipShape(RoundedRectangle(cornerRadius: 6))
-                                        .shadow(color: .black.opacity(0.1), radius: 3, y: 1)
-                                        
-                                    Text("\(page.number)")
-                                        .font(.caption2.weight(.bold))
-                                        .foregroundStyle(.white)
-                                        .padding(.horizontal, 6)
-                                        .padding(.vertical, 2)
-                                        .background(Color.accentColor)
-                                        .clipShape(Capsule())
-                                        .padding(4)
-                                }
-                            }
-                        }
-                        .padding(.vertical, 8)
-                        .padding(.horizontal, 4)
-                    }
-                    .frame(height: thumbnailSize + 24)
-                }
-                .padding(16)
-                .formCard()
-            }
-
-                RunActionButton(title: "Merge & save…", busy: busy) {
-                    Task { await runMerge() }
                 }
             }
         }

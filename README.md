@@ -54,7 +54,14 @@ Sources/PdfUtils/
 ## Capabilities & privacy
 
 - No network calls; no analytics in this codebase.
-- Uses **security-scoped** access from the file importer for chosen files.
+- Uses **security-scoped** access from the file importer for chosen files. If macOS denies that access, the app shows a clear error instead of a generic PDF open failure.
+- Heavy work runs **off the main thread** so the UI stays responsive on large files.
+
+### Behaviour notes
+
+- **Delete PDF Pages** requires an explicit page list. An empty field does *not* mean “all pages” (that would delete the entire document).
+- You cannot remove **every** page; at least one page must remain in the output PDF.
+- **Extract** / **Rotate (range)** still treat a blank range field as “all pages”, matching the on-screen hint.
 
 ## License
 

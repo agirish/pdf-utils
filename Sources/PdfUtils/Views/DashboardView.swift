@@ -25,6 +25,17 @@ struct DashboardView: View {
         .navigationDestination(for: Tool.self) { tool in
             ToolDetailView(tool: tool)
         }
+        .toolbar {
+            ToolbarItemGroup(placement: .primaryAction) {
+                Button {
+                    FullScreenSupport.toggle()
+                } label: {
+                    Image(systemName: "arrow.up.left.and.arrow.down.right")
+                }
+                .help("Enter or exit full screen")
+                .accessibilityLabel("Toggle full screen")
+            }
+        }
         .toolbarBackground(.ultraThinMaterial, for: .automatic)
     }
 

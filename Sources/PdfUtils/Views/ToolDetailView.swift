@@ -21,5 +21,16 @@ struct ToolDetailView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(DashboardBackground())
         .navigationTitle(tool.title)
+        .toolbar {
+            ToolbarItemGroup(placement: .primaryAction) {
+                Button {
+                    FullScreenSupport.toggle()
+                } label: {
+                    Image(systemName: "arrow.up.left.and.arrow.down.right")
+                }
+                .help("Enter or exit full screen")
+                .accessibilityLabel("Toggle full screen")
+            }
+        }
     }
 }

@@ -48,14 +48,19 @@ enum PDFToolkit {
         }
     }
 
-    /// Removes pages (zero-based). Indices should be unique; removed from highest index first.
+    /// Removes pages (zero-based). Duplicates are ignored. Removed from highest index first.
     static func deletePages(inputURL: URL, outputURL: URL, pageIndices: [Int]) throws {
         guard !pageIndices.isEmpty else { throw PDFOperationError.noPagesSelected }
         guard let doc = PDFDocument(url: inputURL) else {
             throw PDFOperationError.couldNotOpen(inputURL)
         }
 
-        for index in pageIndices.sorted(by: >) {
+        let unique = Set(pageIndices)
+        guard unique.count < doc.pageCount else {
+            throw PDFOperationError.cannotRemoveEveryPage
+        }
+
+        for index in unique.sorted(by: >) {
             guard index >= 0, index < doc.pageCount else {
                 throw PDFOperationError.pageOutOfBounds(index + 1)
             }
@@ -82,9 +87,9 @@ enum PDFToolkit {
         for i in 0..<doc.pageCount {
             guard unique.contains(i), let page = doc.page(at: i) else { continue }
             var r = page.rotation
+            r = ((r % 360) + 360) % 360
             r += turns * 90
-            r %= 360
-            if r < 0 { r += 360 }
+            r = ((r % 360) + 360) % 360
             page.rotation = r
         }
 

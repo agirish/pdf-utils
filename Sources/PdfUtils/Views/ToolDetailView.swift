@@ -15,7 +15,7 @@ struct ToolDetailView: View {
             case .extract:
                 ExtractToolView()
             case .deletePages:
-                toolPlaceholder
+                DeletePagesToolView()
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)

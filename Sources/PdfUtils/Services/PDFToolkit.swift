@@ -28,6 +28,25 @@ enum PDFToolkit {
         }
     }
 
+    /// Removes pages (zero-based). Indices should be unique; removed from highest index first.
+    static func deletePages(inputURL: URL, outputURL: URL, pageIndices: [Int]) throws {
+        guard !pageIndices.isEmpty else { throw PDFOperationError.noPagesSelected }
+        guard let doc = PDFDocument(url: inputURL) else {
+            throw PDFOperationError.couldNotOpen(inputURL)
+        }
+
+        for index in pageIndices.sorted(by: >) {
+            guard index >= 0, index < doc.pageCount else {
+                throw PDFOperationError.pageOutOfBounds(index + 1)
+            }
+            doc.removePage(at: index)
+        }
+
+        guard doc.write(to: outputURL) else {
+            throw PDFOperationError.couldNotWrite(outputURL)
+        }
+    }
+
     /// Rotates selected pages by `quarterTurns` × 90° clockwise.
     static func rotate(inputURL: URL, outputURL: URL, pageIndices: [Int], quarterTurns: Int) throws {
         guard let doc = PDFDocument(url: inputURL) else {

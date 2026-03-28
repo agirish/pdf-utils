@@ -13,6 +13,12 @@ private struct PreviewPage: Identifiable {
     let number: Int
 }
 
+private struct MergeResult {
+    let outputURL: URL
+    let totalPages: Int
+    let fileBytes: Int64
+}
+
 struct MergeToolView: View {
     @State private var entries: [MergeEntry] = []
     @State private var busy = false
@@ -24,10 +30,50 @@ struct MergeToolView: View {
     @State private var thumbnailSize: CGFloat = 120
     @State private var isGeneratingPreviews = false
     @State private var previewTask: Task<Void, Never>? = nil
+    
+    @State private var mergeResult: MergeResult? = nil
 
     var body: some View {
         ToolFormContainer {
-            VStack(alignment: .leading, spacing: 12) {
+            if let result = mergeResult {
+                VStack(spacing: 24) {
+                    Image(systemName: "checkmark.circle.fill")
+                        .font(.system(size: 48))
+                        .foregroundStyle(.green)
+                    
+                    VStack(spacing: 8) {
+                        Text("Merged successfully")
+                            .font(.title2.weight(.bold))
+                        
+                        Text(result.outputURL.path)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                    }
+                    
+                    HStack(spacing: 32) {
+                        StatBox(title: "SIZE", value: formatBytes(result.fileBytes))
+                        StatBox(title: "PAGES", value: "\(result.totalPages)")
+                        StatBox(title: "FILES", value: "\(entries.count)")
+                    }
+                    .padding(.top, 16)
+                    
+                    Button("Start Over") {
+                        withAnimation {
+                            entries.removeAll()
+                            previewPages.removeAll()
+                            mergeResult = nil
+                        }
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.large)
+                    .padding(.top, 16)
+                }
+                .padding(40)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                VStack(alignment: .leading, spacing: 12) {
                 HStack {
                     VStack(alignment: .leading, spacing: 4) {
                         Text("PDF files").font(.subheadline.weight(.semibold))
@@ -133,8 +179,9 @@ struct MergeToolView: View {
                 .formCard()
             }
 
-            RunActionButton(title: "Merge & save…", busy: busy) {
-                Task { await runMerge() }
+                RunActionButton(title: "Merge & save…", busy: busy) {
+                    Task { await runMerge() }
+                }
             }
         }
         .overlay {
@@ -212,6 +259,18 @@ struct MergeToolView: View {
                     try PDFToolkit.merge(inputURLs: urlsSnapshot, outputURL: outputURL)
                 }
             }
+            
+            let attrs = try FileManager.default.attributesOfItem(atPath: outputURL.path)
+            let bytes = attrs[.size] as? Int64 ?? 0
+            
+            let finalPages = try await PDFBackgroundWork.run {
+                let doc = PDFDocument(url: outputURL)
+                return doc?.pageCount ?? 0
+            }
+            
+            withAnimation {
+                self.mergeResult = MergeResult(outputURL: outputURL, totalPages: finalPages, fileBytes: bytes)
+            }
         } catch {
             alertMessage = error.localizedDescription
         }
@@ -265,5 +324,34 @@ struct MergeToolView: View {
                 }
             }
         }
+    }
+
+    private func formatBytes(_ bytes: Int64) -> String {
+        let formatter = ByteCountFormatter()
+        formatter.allowedUnits = [.useAll]
+        formatter.countStyle = .file
+        return formatter.string(fromByteCount: bytes)
+    }
+}
+
+private struct StatBox: View {
+    let title: String
+    let value: String
+    
+    var body: some View {
+        VStack(spacing: 6) {
+            Text(title)
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(.secondary)
+                .textCase(.uppercase)
+            Text(value)
+                .font(.title3.weight(.medium))
+        }
+        .frame(minWidth: 80)
+        .padding(.vertical, 12)
+        .padding(.horizontal, 16)
+        .background(Color(NSColor.windowBackgroundColor))
+        .clipShape(RoundedRectangle(cornerRadius: 12))
+        .shadow(color: .black.opacity(0.05), radius: 2, y: 1)
     }
 }

@@ -4,16 +4,27 @@ struct ToolDetailView: View {
     let tool: Tool
 
     var body: some View {
-        ContentUnavailableView {
-            Label(tool.title, systemImage: tool.symbolName)
-        } description: {
-            Text(
-                "This screen is a placeholder. The next commits will connect each tool to on-device PDF processing."
-            )
-            .multilineTextAlignment(.center)
+        Group {
+            switch tool {
+            case .compress:
+                CompressToolView()
+            case .rotate, .merge, .extract, .deletePages:
+                toolPlaceholder
+            }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(DashboardBackground())
         .navigationTitle(tool.title)
+    }
+
+    private var toolPlaceholder: some View {
+        ContentUnavailableView {
+            Label(tool.title, systemImage: tool.symbolName)
+        } description: {
+            Text(
+                "This tool is not wired up yet. Upcoming commits will add PDF processing here."
+            )
+            .multilineTextAlignment(.center)
+        }
     }
 }

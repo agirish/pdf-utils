@@ -3,6 +3,26 @@ import Foundation
 import PDFKit
 
 enum PDFToolkit {
+    /// Merges PDFs in the order given. Pages are moved out of each temporary document into the result.
+    static func merge(inputURLs: [URL], outputURL: URL) throws {
+        guard !inputURLs.isEmpty else { throw PDFOperationError.noInputFiles }
+
+        let merged = PDFDocument()
+        for url in inputURLs {
+            guard let doc = PDFDocument(url: url) else {
+                throw PDFOperationError.couldNotOpen(url)
+            }
+            while doc.pageCount > 0 {
+                guard let page = doc.page(at: 0) else { break }
+                merged.insert(page, at: merged.pageCount)
+            }
+        }
+
+        guard merged.write(to: outputURL) else {
+            throw PDFOperationError.couldNotWrite(outputURL)
+        }
+    }
+
     /// Copies listed pages (zero-based) into a new PDF.
     static func extract(inputURL: URL, outputURL: URL, pageIndices: [Int]) throws {
         guard !pageIndices.isEmpty else { throw PDFOperationError.noPagesSelected }

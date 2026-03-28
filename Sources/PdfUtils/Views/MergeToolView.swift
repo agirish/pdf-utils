@@ -1,9 +1,16 @@
 import SwiftUI
 import UniformTypeIdentifiers
+import PDFKit
 
-private struct MergeEntry: Identifiable {
+private struct MergeEntry: Identifiable, Equatable {
     let id = UUID()
     let url: URL
+}
+
+private struct PreviewPage: Identifiable {
+    let id = UUID()
+    let image: NSImage
+    let number: Int
 }
 
 struct MergeToolView: View {
@@ -14,6 +21,11 @@ struct MergeToolView: View {
     @State private var showExporter = false
     @State private var exportDoc: PDFFileDocument?
     @State private var suggestedName = "merged.pdf"
+    
+    @State private var previewPages: [PreviewPage] = []
+    @State private var thumbnailSize: CGFloat = 120
+    @State private var isGeneratingPreviews = false
+    @State private var previewTask: Task<Void, Never>? = nil
 
     var body: some View {
         ToolFormContainer {
@@ -73,6 +85,56 @@ struct MergeToolView: View {
             .padding(16)
             .formCard()
 
+            if !previewPages.isEmpty || isGeneratingPreviews {
+                VStack(alignment: .leading, spacing: 12) {
+                    HStack {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("Preview").font(.subheadline.weight(.semibold))
+                            Text("Visual order of the merged pages.")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        if isGeneratingPreviews {
+                            ProgressView().controlSize(.small)
+                        } else {
+                            Slider(value: $thumbnailSize, in: 60...240)
+                                .frame(width: 120)
+                        }
+                    }
+                    
+                    ScrollView(.horizontal, showsIndicators: true) {
+                        LazyHGrid(rows: [GridItem(.fixed(thumbnailSize))], spacing: 16) {
+                            ForEach(previewPages) { page in
+                                ZStack(alignment: .bottomTrailing) {
+                                    Image(nsImage: page.image)
+                                        .resizable()
+                                        .aspectRatio(contentMode: .fit)
+                                        .frame(height: thumbnailSize)
+                                        .background(Color.white)
+                                        .clipShape(RoundedRectangle(cornerRadius: 6))
+                                        .shadow(color: .black.opacity(0.1), radius: 3, y: 1)
+                                        
+                                    Text("\(page.number)")
+                                        .font(.caption2.weight(.bold))
+                                        .foregroundStyle(.white)
+                                        .padding(.horizontal, 6)
+                                        .padding(.vertical, 2)
+                                        .background(Color.accentColor)
+                                        .clipShape(Capsule())
+                                        .padding(4)
+                                }
+                            }
+                        }
+                        .padding(.vertical, 8)
+                        .padding(.horizontal, 4)
+                    }
+                    .frame(height: thumbnailSize + 24)
+                }
+                .padding(16)
+                .formCard()
+            }
+
             RunActionButton(title: "Merge & save…", busy: busy) {
                 Task { await runMerge() }
             }
@@ -108,6 +170,9 @@ struct MergeToolView: View {
             Button("OK", role: .cancel) { alertMessage = nil }
         } message: {
             Text(alertMessage ?? "")
+        }
+        .onChange(of: entries) {
+            generatePreviews()
         }
     }
 
@@ -152,6 +217,56 @@ struct MergeToolView: View {
             showExporter = true
         } catch {
             alertMessage = error.localizedDescription
+        }
+    }
+
+    private func generatePreviews() {
+        previewTask?.cancel()
+        guard !entries.isEmpty else {
+            previewPages = []
+            isGeneratingPreviews = false
+            return
+        }
+        
+        isGeneratingPreviews = true
+        let urlsSnapshot = entries.map(\.url)
+        
+        previewTask = Task {
+            do {
+                let loadedPages: [PreviewPage] = try await PDFBackgroundWork.run {
+                    var bgPreviews: [PreviewPage] = []
+                    var globalPageNum = 1
+                    try URLCollectionSecurityScope.withAccess(urlsSnapshot) {
+                        for url in urlsSnapshot {
+                            try Task.checkCancellation()
+                            guard let doc = PDFDocument(url: url) else { continue }
+                            for i in 0..<doc.pageCount {
+                                try Task.checkCancellation()
+                                guard let page = doc.page(at: i) else { continue }
+                                
+                                let size = page.bounds(for: .mediaBox).size
+                                let longest = max(size.width, size.height)
+                                let scale = min(1.0, 400.0 / longest)
+                                let thumbSize = NSSize(width: max(1, size.width * scale), height: max(1, size.height * scale))
+                                
+                                let image = page.thumbnail(of: thumbSize, for: .mediaBox)
+                                bgPreviews.append(PreviewPage(image: image, number: globalPageNum))
+                                globalPageNum += 1
+                            }
+                        }
+                    }
+                    return bgPreviews
+                }
+                
+                if !Task.isCancelled {
+                    self.previewPages = loadedPages
+                    self.isGeneratingPreviews = false
+                }
+            } catch {
+                if !Task.isCancelled {
+                    self.isGeneratingPreviews = false
+                }
+            }
         }
     }
 }

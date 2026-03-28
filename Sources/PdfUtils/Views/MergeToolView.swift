@@ -198,7 +198,6 @@ struct MergeToolView: View {
 
     private func mergeRow(for entry: MergeEntry) -> some View {
         let index = entries.firstIndex(where: { $0.id == entry.id }) ?? 0
-        let pages = pagesByEntryID[entry.id]
         return HStack(alignment: .center, spacing: 12) {
             ZStack {
                 RoundedRectangle(cornerRadius: 8, style: .continuous)
@@ -285,23 +284,17 @@ struct MergeToolView: View {
     }
 
     private func consumeDroppedProviders(_ providers: [NSItemProvider]) {
-        Task {
-            let urls = await Self.resolvePDFURLs(from: providers)
+        // Resolve on the main actor so `[NSItemProvider]` is not sent across isolation (it is not `Sendable`).
+        Task { @MainActor in
+            var urls: [URL] = []
+            for p in providers {
+                if let url = await p.resolvePDFItemURL() {
+                    urls.append(url)
+                }
+            }
             guard !urls.isEmpty else { return }
-            await MainActor.run {
-                appendUnique(urls)
-            }
+            appendUnique(urls)
         }
-    }
-
-    private nonisolated static func resolvePDFURLs(from providers: [NSItemProvider]) async -> [URL] {
-        var out: [URL] = []
-        for p in providers {
-            if let url = await p.resolvePDFItemURL() {
-                out.append(url)
-            }
-        }
-        return out
     }
 
     private func moveEntries(from source: IndexSet, to destination: Int) {

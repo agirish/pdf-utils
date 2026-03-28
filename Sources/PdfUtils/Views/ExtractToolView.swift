@@ -18,7 +18,9 @@ struct ExtractToolView: View {
 
             VStack(alignment: .leading, spacing: 8) {
                 Text("Pages to extract").font(.subheadline.weight(.semibold))
-                Text("Use page numbers like 1, 3-5, 8. Leave empty for all pages.")
+                Text(
+                    "List order is kept (e.g. 5,1,2 → page 5, then 1, then 2). Ranges: 3-5 → 3,4,5; 5-3 → 5,4,3. Leave empty for all pages."
+                )
                     .font(.caption)
                     .foregroundStyle(.secondary)
                 TextField("e.g. 1, 3-5", text: $rangeText)
@@ -99,7 +101,7 @@ struct ExtractToolView: View {
                     guard count > 0 else {
                         throw PDFOperationError.emptyPDF
                     }
-                    let indices = try PageRangeParser.parse(rangeText, pageCount: count)
+                    let indices = try PageRangeParser.parse(rangeText, pageCount: count, preserveOrder: true)
                     return try PDFExportSupport.data { out in
                         try PDFToolkit.extract(inputURL: inputURL, outputURL: out, pageIndices: indices)
                     }

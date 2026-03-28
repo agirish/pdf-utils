@@ -9,7 +9,7 @@ Native **macOS** app for everyday PDF tasks: a tile-based **dashboard** (similar
 | **Compress PDF** | Rebuilds pages as images with adjustable quality to reduce file size (best for scan-heavy PDFs; vector text may become rasterized). |
 | **Rotate PDF** | Rotates all pages or a **page range** by 90° / 180° / 270°. |
 | **Merge PDF** | Combines multiple PDFs **top to bottom** in the list (reorder with **Edit**). |
-| **Extract PDF Pages** | Saves a new PDF containing only the pages you list (e.g. `1, 3-5`). Leave the field empty to use all pages. |
+| **Extract PDF Pages** | Saves a new PDF containing only the pages you list (e.g. `1, 3-5`). Order matches what you type (`5,1,2` → page 5, then 1, then 2). Ranges expand forward (`3-5`) or backward (`5-3`). Leave the field empty to use all pages. |
 | **Delete PDF Pages** | Writes a new PDF with listed pages removed (original file is not modified). |
 
 ### Page range syntax
@@ -61,7 +61,7 @@ Sources/PdfUtils/
 
 - **Delete PDF Pages** requires an explicit page list. An empty field does *not* mean “all pages” (that would delete the entire document).
 - You cannot remove **every** page; at least one page must remain in the output PDF.
-- **Extract** / **Rotate (range)** still treat a blank range field as “all pages”, matching the on-screen hint.
+- **Extract** / **Rotate (range)** still treat a blank range field as “all pages”, matching the on-screen hint. **Extract** keeps the order you list; **Rotate** and **Delete** still treat ranges as a set of unique pages (sorted internally where needed).
 
 ## License
 

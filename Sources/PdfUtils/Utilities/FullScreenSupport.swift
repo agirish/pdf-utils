@@ -10,7 +10,16 @@ enum FullScreenSupport {
     static func noteHostingWindow(_ window: NSWindow?) {
         guard let window else { return }
         hostingWindow = window
+        configureHostingWindow(window)
+    }
+
+    private static func configureHostingWindow(_ window: NSWindow) {
+        window.tabbingMode = .disallowed
+        window.styleMask.formUnion([.titled, .closable, .miniaturizable, .resizable])
         window.collectionBehavior.insert(.fullScreenPrimary)
+        window.standardWindowButton(.closeButton)?.isHidden = false
+        window.standardWindowButton(.miniaturizeButton)?.isHidden = false
+        window.standardWindowButton(.zoomButton)?.isHidden = false
     }
 
     /// Toggles full screen on the key window (standard macOS full-screen space).

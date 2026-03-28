@@ -4,6 +4,12 @@ import Foundation
 import PDFKit
 
 enum PDFToolkit {
+    /// Quick page count for UI summaries; the URL must already be readable (e.g. under active security scope).
+    static func pageCount(at url: URL) -> Int? {
+        guard let doc = PDFDocument(url: url) else { return nil }
+        return doc.pageCount
+    }
+
     /// Merges PDFs in the order given. Pages are moved out of each temporary document into the result.
     static func merge(inputURLs: [URL], outputURL: URL) throws {
         guard !inputURLs.isEmpty else { throw PDFOperationError.noInputFiles }
@@ -13,9 +19,9 @@ enum PDFToolkit {
             guard let doc = PDFDocument(url: url) else {
                 throw PDFOperationError.couldNotOpen(url)
             }
-            for i in 0..<doc.pageCount {
-                guard let page = doc.page(at: i), let copy = page.copy() as? PDFPage else { continue }
-                merged.insert(copy, at: merged.pageCount)
+            while doc.pageCount > 0 {
+                guard let page = doc.page(at: 0) else { break }
+                merged.insert(page, at: merged.pageCount)
             }
         }
 

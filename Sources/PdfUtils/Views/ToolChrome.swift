@@ -31,7 +31,9 @@ extension View {
 
 struct RunActionButton: View {
     let title: String
-    let busy: Bool
+    var busy: Bool = false
+    /// When false, the button is disabled (e.g. no inputs yet).
+    var canRun: Bool = true
     let action: () -> Void
 
     var body: some View {
@@ -50,6 +52,6 @@ struct RunActionButton: View {
             .padding(.vertical, 12)
         }
         .buttonStyle(.borderedProminent)
-        .disabled(busy)
+        .disabled(busy || !canRun)
     }
 }

@@ -55,8 +55,8 @@ extension Tool {
                 overview:
                     "Merge concatenates whole PDFs in list order: first file’s pages, then the second’s, and so on. The same file can appear twice if you add it twice.",
                 steps: [
-                    "Click Add PDFs… and select one or more PDFs (⌘-click for multiple).",
-                    "Reorder with the chevron up / down buttons on each row; trash removes that file from the merge list only.",
+                    "Click Add PDFs… and select one or more PDFs (⌘-click for multiple), or drag PDFs from Finder onto the dashed area or list.",
+                    "Reorder by dragging rows in the list or with the chevron buttons; Delete removes the selected row; trash removes that file from the merge list only.",
                     "Click Merge & save… and choose where to save the combined PDF.",
                 ],
                 controls: [

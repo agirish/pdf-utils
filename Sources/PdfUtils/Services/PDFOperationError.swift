@@ -5,6 +5,9 @@ enum PDFOperationError: LocalizedError {
     case couldNotWrite(URL)
     case invalidPageRange(String)
     case pageOutOfBounds(Int)
+    case pageRangeRequired
+    case cannotRemoveEveryPage
+    case fileAccessDenied(URL)
     case noInputFiles
     case noPagesSelected
     case compressionFailed
@@ -19,6 +22,12 @@ enum PDFOperationError: LocalizedError {
             return "Invalid page range: \(s)"
         case .pageOutOfBounds(let n):
             return "Page \(n) is not in this document."
+        case .pageRangeRequired:
+            return "Enter at least one page number (for example 1 or 2-5)."
+        case .cannotRemoveEveryPage:
+            return "You cannot remove every page from a PDF. Leave at least one page."
+        case .fileAccessDenied(let url):
+            return "Could not access “\(url.lastPathComponent)”. Try choosing the file again."
         case .noInputFiles:
             return "Choose at least one PDF file."
         case .noPagesSelected:

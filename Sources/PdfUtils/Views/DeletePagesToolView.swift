@@ -100,7 +100,7 @@ struct DeletePagesToolView: View {
 
         let indices: [Int]
         do {
-            indices = try PageRangeParser.parse(rangeText, pageCount: count)
+            indices = try PageRangeParser.parse(rangeText, pageCount: count, emptyMeansAllPages: false)
         } catch {
             alertMessage = error.localizedDescription
             return

@@ -1,10 +1,15 @@
 import Foundation
 
 enum PageRangeParser {
-    /// Parses "1, 3-5, 8" into zero-based indices. Empty input means all pages.
-    static func parse(_ text: String, pageCount: Int) throws -> [Int] {
+    /// Parses "1, 3-5, 8" into zero-based indices.
+    /// When `emptyMeansAllPages` is true, blank input selects every page (used by Extract / Rotate “all” semantics).
+    /// When false, blank input throws `pageRangeRequired` (used by Delete so an empty field cannot mean “delete everything”).
+    static func parse(_ text: String, pageCount: Int, emptyMeansAllPages: Bool = true) throws -> [Int] {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else {
+            guard emptyMeansAllPages else {
+                throw PDFOperationError.pageRangeRequired
+            }
             return Array(0..<pageCount)
         }
 

@@ -24,7 +24,7 @@ enum FullScreenSupport {
         }
 
         var window = raw
-        while window.isSheet, let parent = window.parentWindow {
+        while window.isSheet, let parent = window.parent {
             window = parent
         }
 

@@ -13,9 +13,9 @@ enum PDFToolkit {
             guard let doc = PDFDocument(url: url) else {
                 throw PDFOperationError.couldNotOpen(url)
             }
-            while doc.pageCount > 0 {
-                guard let page = doc.page(at: 0) else { break }
-                merged.insert(page, at: merged.pageCount)
+            for i in 0..<doc.pageCount {
+                guard let page = doc.page(at: i), let copy = page.copy() as? PDFPage else { continue }
+                merged.insert(copy, at: merged.pageCount)
             }
         }
 

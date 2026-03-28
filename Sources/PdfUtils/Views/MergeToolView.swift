@@ -115,9 +115,11 @@ struct MergeToolView: View {
         suggestedName = "merged.pdf"
 
         do {
-            let data = try URLCollectionSecurityScope.withAccess(urls) {
-                try PDFExportSupport.data { out in
-                    try PDFToolkit.merge(inputURLs: urls, outputURL: out)
+            let data = try await PDFBackgroundWork.run {
+                try URLCollectionSecurityScope.withAccess(urls) {
+                    try PDFExportSupport.data { out in
+                        try PDFToolkit.merge(inputURLs: urls, outputURL: out)
+                    }
                 }
             }
             exportDoc = PDFFileDocument(data: data)

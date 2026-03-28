@@ -90,17 +90,19 @@ struct DeletePagesToolView: View {
         suggestedName = inputURL.deletingPathExtension().lastPathComponent + "-edited.pdf"
 
         do {
-            let data = try inputURL.withSecurityScopedAccess {
-                guard let doc = PDFDocument(url: inputURL) else {
-                    throw PDFOperationError.couldNotOpen(inputURL)
-                }
-                let count = doc.pageCount
-                guard count > 0 else {
-                    throw PDFOperationError.emptyPDF
-                }
-                let indices = try PageRangeParser.parse(rangeText, pageCount: count, emptyMeansAllPages: false)
-                return try PDFExportSupport.data { out in
-                    try PDFToolkit.deletePages(inputURL: inputURL, outputURL: out, pageIndices: indices)
+            let data = try await PDFBackgroundWork.run {
+                try inputURL.withSecurityScopedAccess {
+                    guard let doc = PDFDocument(url: inputURL) else {
+                        throw PDFOperationError.couldNotOpen(inputURL)
+                    }
+                    let count = doc.pageCount
+                    guard count > 0 else {
+                        throw PDFOperationError.emptyPDF
+                    }
+                    let indices = try PageRangeParser.parse(rangeText, pageCount: count, emptyMeansAllPages: false)
+                    return try PDFExportSupport.data { out in
+                        try PDFToolkit.deletePages(inputURL: inputURL, outputURL: out, pageIndices: indices)
+                    }
                 }
             }
             exportDoc = PDFFileDocument(data: data)

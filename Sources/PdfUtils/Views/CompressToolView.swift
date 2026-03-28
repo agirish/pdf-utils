@@ -109,9 +109,11 @@ struct CompressToolView: View {
         suggestedName = inputURL.deletingPathExtension().lastPathComponent + "-compressed.pdf"
 
         do {
-            let data = try inputURL.withSecurityScopedAccess {
-                try PDFExportSupport.data { out in
-                    try PDFToolkit.compress(inputURL: inputURL, outputURL: out, quality: quality)
+            let data = try await PDFBackgroundWork.run {
+                try inputURL.withSecurityScopedAccess {
+                    try PDFExportSupport.data { out in
+                        try PDFToolkit.compress(inputURL: inputURL, outputURL: out, quality: quality)
+                    }
                 }
             }
             exportDoc = PDFFileDocument(data: data)

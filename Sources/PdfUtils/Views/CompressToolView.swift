@@ -48,7 +48,7 @@ struct CompressToolView: View {
         }
         .fileExporter(
             isPresented: $showExporter,
-            document: $exportDoc,
+            document: exportDoc,
             contentType: .pdf,
             defaultFilename: stem(suggestedName)
         ) { result in
@@ -98,7 +98,7 @@ struct CompressToolView: View {
 
     @MainActor
     private func runCompress() async {
-        guard let inputURL else {
+        guard let fileURL = inputURL else {
             alertMessage = PDFOperationError.noInputFiles.localizedDescription
             return
         }
@@ -106,13 +106,14 @@ struct CompressToolView: View {
         busy = true
         defer { busy = false }
 
-        suggestedName = inputURL.deletingPathExtension().lastPathComponent + "-compressed.pdf"
+        suggestedName = fileURL.deletingPathExtension().lastPathComponent + "-compressed.pdf"
+        let qualityValue = quality
 
         do {
             let data = try await PDFBackgroundWork.run {
-                try inputURL.withSecurityScopedAccess {
+                try fileURL.withSecurityScopedAccess {
                     try PDFExportSupport.data { out in
-                        try PDFToolkit.compress(inputURL: inputURL, outputURL: out, quality: quality)
+                        try PDFToolkit.compress(inputURL: fileURL, outputURL: out, quality: qualityValue)
                     }
                 }
             }

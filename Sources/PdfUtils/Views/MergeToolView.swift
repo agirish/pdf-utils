@@ -26,29 +26,44 @@ struct MergeToolView: View {
                             .foregroundStyle(.secondary)
                     }
                     Spacer()
-                    if !entries.isEmpty {
-                        EditButton()
-                    }
                     Button("Add PDFs…") { showImporter = true }
                 }
 
                 if !entries.isEmpty {
                     List {
                         ForEach(Array(entries.enumerated()), id: \.element.id) { index, entry in
-                            HStack {
+                            HStack(spacing: 8) {
                                 Text("\(index + 1).")
                                     .foregroundStyle(.secondary)
                                     .frame(width: 28, alignment: .leading)
                                 Text(entry.url.lastPathComponent)
                                     .lineLimit(1)
                                     .truncationMode(.middle)
+                                Spacer(minLength: 8)
+                                Button {
+                                    moveEntry(from: index, by: -1)
+                                } label: {
+                                    Image(systemName: "chevron.up")
+                                }
+                                .buttonStyle(.borderless)
+                                .disabled(index == 0)
+                                .help("Move up")
+                                Button {
+                                    moveEntry(from: index, by: 1)
+                                } label: {
+                                    Image(systemName: "chevron.down")
+                                }
+                                .buttonStyle(.borderless)
+                                .disabled(index == entries.count - 1)
+                                .help("Move down")
+                                Button(role: .destructive) {
+                                    removeEntry(at: index)
+                                } label: {
+                                    Image(systemName: "trash")
+                                }
+                                .buttonStyle(.borderless)
+                                .help("Remove from list")
                             }
-                        }
-                        .onMove { from, to in
-                            entries.move(fromOffsets: from, toOffset: to)
-                        }
-                        .onDelete { offsets in
-                            entries.remove(atOffsets: offsets)
                         }
                     }
                     .frame(minHeight: 180)
@@ -79,7 +94,7 @@ struct MergeToolView: View {
         }
         .fileExporter(
             isPresented: $showExporter,
-            document: $exportDoc,
+            document: exportDoc,
             contentType: .pdf,
             defaultFilename: (suggestedName as NSString).deletingPathExtension
         ) { result in
@@ -98,7 +113,18 @@ struct MergeToolView: View {
 
     private var subtitle: String {
         if entries.isEmpty { return "None selected — order is top to bottom in the merged PDF." }
-        return "\(entries.count) file(s) — use Edit to reorder or delete rows."
+        return "\(entries.count) file(s) — use ↑ ↓ to reorder; trash removes a row from the merge list."
+    }
+
+    private func moveEntry(from index: Int, by delta: Int) {
+        let target = index + delta
+        guard entries.indices.contains(target) else { return }
+        entries.swapAt(index, target)
+    }
+
+    private func removeEntry(at index: Int) {
+        guard entries.indices.contains(index) else { return }
+        entries.remove(at: index)
     }
 
     @MainActor
@@ -111,14 +137,14 @@ struct MergeToolView: View {
         busy = true
         defer { busy = false }
 
-        let urls = entries.map(\.url)
+        let urlsSnapshot = entries.map(\.url)
         suggestedName = "merged.pdf"
 
         do {
             let data = try await PDFBackgroundWork.run {
-                try URLCollectionSecurityScope.withAccess(urls) {
+                try URLCollectionSecurityScope.withAccess(urlsSnapshot) {
                     try PDFExportSupport.data { out in
-                        try PDFToolkit.merge(inputURLs: urls, outputURL: out)
+                        try PDFToolkit.merge(inputURLs: urlsSnapshot, outputURL: out)
                     }
                 }
             }

@@ -4,6 +4,7 @@ import UniformTypeIdentifiers
 
 struct PDFFileDocument: FileDocument {
     static var readableContentTypes: [UTType] { [.pdf] }
+    static var writableContentTypes: [UTType] { [.pdf] }
 
     var data: Data
 

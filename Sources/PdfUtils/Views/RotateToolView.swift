@@ -75,7 +75,7 @@ struct RotateToolView: View {
         }
         .fileExporter(
             isPresented: $showExporter,
-            document: $exportDoc,
+            document: exportDoc,
             contentType: .pdf,
             defaultFilename: (suggestedName as NSString).deletingPathExtension
         ) { result in
@@ -111,7 +111,7 @@ struct RotateToolView: View {
 
     @MainActor
     private func runRotate() async {
-        guard let inputURL else {
+        guard let fileURL = inputURL else {
             alertMessage = PDFOperationError.noInputFiles.localizedDescription
             return
         }
@@ -119,31 +119,34 @@ struct RotateToolView: View {
         busy = true
         defer { busy = false }
 
-        suggestedName = inputURL.deletingPathExtension().lastPathComponent + "-rotated.pdf"
+        suggestedName = fileURL.deletingPathExtension().lastPathComponent + "-rotated.pdf"
+        let scopeSnapshot = scope
+        let rangeSnapshot = rangeText
+        let quarterTurnsSnapshot = quarterTurns
 
         do {
             let data = try await PDFBackgroundWork.run {
-                try inputURL.withSecurityScopedAccess {
-                    guard let doc = PDFDocument(url: inputURL) else {
-                        throw PDFOperationError.couldNotOpen(inputURL)
+                try fileURL.withSecurityScopedAccess {
+                    guard let doc = PDFDocument(url: fileURL) else {
+                        throw PDFOperationError.couldNotOpen(fileURL)
                     }
                     let count = doc.pageCount
                     guard count > 0 else {
                         throw PDFOperationError.emptyPDF
                     }
                     let indices: [Int]
-                    switch scope {
+                    switch scopeSnapshot {
                     case .all:
                         indices = Array(0..<count)
                     case .range:
-                        indices = try PageRangeParser.parse(rangeText, pageCount: count)
+                        indices = try PageRangeParser.parse(rangeSnapshot, pageCount: count)
                     }
                     return try PDFExportSupport.data { out in
                         try PDFToolkit.rotate(
-                            inputURL: inputURL,
+                            inputURL: fileURL,
                             outputURL: out,
                             pageIndices: indices,
-                            quarterTurns: quarterTurns
+                            quarterTurns: quarterTurnsSnapshot
                         )
                     }
                 }

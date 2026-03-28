@@ -136,7 +136,7 @@ enum PDFToolkit {
         let mediaRect = page.bounds(for: .mediaBox)
         guard mediaRect.width > 0, mediaRect.height > 0 else { return nil }
 
-        let cgPage = page.pageRef
+        guard let cgPage = page.pageRef else { return nil }
         let longest = max(mediaRect.width, mediaRect.height)
         let scale = min(1, maxPixelDimension / longest)
         let pixelW = max(1, Int(mediaRect.width * scale))

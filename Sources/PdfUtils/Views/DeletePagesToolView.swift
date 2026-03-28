@@ -43,9 +43,9 @@ struct DeletePagesToolView: View {
         }
         .fileExporter(
             isPresented: $showExporter,
-            document: $exportDoc,
-            contentType: .pdf,
-            defaultFilename: (suggestedName as NSString).deletingPathExtension
+            document: exportDoc,
+            contentType: UTType.pdf,
+            defaultFilename: stem(suggestedName)
         ) { result in
             exportDoc = nil
             if case .failure(let err) = result { alertMessage = err.localizedDescription }
@@ -58,6 +58,10 @@ struct DeletePagesToolView: View {
         } message: {
             Text(alertMessage ?? "")
         }
+    }
+
+    private func stem(_ name: String) -> String {
+        (name as NSString).deletingPathExtension
     }
 
     private var fileRow: some View {
@@ -79,7 +83,7 @@ struct DeletePagesToolView: View {
 
     @MainActor
     private func runDelete() async {
-        guard let inputURL else {
+        guard let fileURL = inputURL else {
             alertMessage = PDFOperationError.noInputFiles.localizedDescription
             return
         }
@@ -87,21 +91,23 @@ struct DeletePagesToolView: View {
         busy = true
         defer { busy = false }
 
-        suggestedName = inputURL.deletingPathExtension().lastPathComponent + "-edited.pdf"
+        suggestedName = fileURL.deletingPathExtension().lastPathComponent + "-edited.pdf"
+
+        let pagesSpec = rangeText
 
         do {
             let data = try await PDFBackgroundWork.run {
-                try inputURL.withSecurityScopedAccess {
-                    guard let doc = PDFDocument(url: inputURL) else {
-                        throw PDFOperationError.couldNotOpen(inputURL)
+                try fileURL.withSecurityScopedAccess {
+                    guard let doc = PDFDocument(url: fileURL) else {
+                        throw PDFOperationError.couldNotOpen(fileURL)
                     }
                     let count = doc.pageCount
                     guard count > 0 else {
                         throw PDFOperationError.emptyPDF
                     }
-                    let indices = try PageRangeParser.parse(rangeText, pageCount: count, emptyMeansAllPages: false)
+                    let indices = try PageRangeParser.parse(pagesSpec, pageCount: count, emptyMeansAllPages: false)
                     return try PDFExportSupport.data { out in
-                        try PDFToolkit.deletePages(inputURL: inputURL, outputURL: out, pageIndices: indices)
+                        try PDFToolkit.deletePages(inputURL: fileURL, outputURL: out, pageIndices: indices)
                     }
                 }
             }

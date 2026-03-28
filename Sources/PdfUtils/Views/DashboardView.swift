@@ -36,13 +36,7 @@ struct DashboardView: View {
                 }
                 .help("About pdf-utils and toolbar controls")
                 .accessibilityLabel("Help")
-                Button {
-                    FullScreenSupport.toggle()
-                } label: {
-                    Image(systemName: "arrow.up.left.and.arrow.down.right")
-                }
-                .help("Enter or exit full screen")
-                .accessibilityLabel("Toggle full screen")
+
             }
         }
         .toolbarBackground(.ultraThinMaterial, for: .automatic)

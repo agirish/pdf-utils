@@ -34,13 +34,7 @@ struct ToolDetailView: View {
                 }
                 .help("Help for this tool")
                 .accessibilityLabel("Help")
-                Button {
-                    FullScreenSupport.toggle()
-                } label: {
-                    Image(systemName: "arrow.up.left.and.arrow.down.right")
-                }
-                .help("Enter or exit full screen")
-                .accessibilityLabel("Toggle full screen")
+
             }
         }
         .sheet(isPresented: $showHelp) {

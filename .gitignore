@@ -1,0 +1,4 @@
+.build/
+.swiftpm/xcode/
+*.xcodeproj/xcuserdata/
+DerivedData/

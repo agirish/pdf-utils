@@ -19,9 +19,9 @@ struct DashboardHelpSheet: View {
                         Text("Toolbar")
                             .font(.headline)
                         Label {
-                            Text("Full screen: use the green window button in the title bar, or View → Enter Full Screen in the menu bar.")
+                            Text("Full screen toggles the window in and out of macOS full-screen (same idea as View → Enter Full Screen).")
                         } icon: {
-                            Image(systemName: "macwindow")
+                            Image(systemName: "arrow.up.left.and.arrow.down.right")
                         }
                         .font(.subheadline)
                         Label {

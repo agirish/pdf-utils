@@ -176,16 +176,16 @@ struct MergeToolView: View {
 
     /// Title + actions on one row; subtitle full-width below so buttons never wrap mid-label (e.g. “Clear” / “all”).
     private var headerRow: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(alignment: .center, spacing: 10) {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .center, spacing: 12) {
                 Image(systemName: "square.stack.3d.up.fill")
                     .symbolRenderingMode(.hierarchical)
                     .foregroundStyle(Tool.merge.accent)
-                    .font(.title2)
+                    .font(.title)
                 Text("PDF files")
-                    .font(.subheadline.weight(.semibold))
+                    .font(.title3.weight(.semibold))
                 Spacer(minLength: 8)
-                HStack(spacing: 8) {
+                HStack(spacing: 10) {
                     if !entries.isEmpty {
                         Button("Clear all") {
                             previewTask?.cancel()
@@ -196,18 +196,20 @@ struct MergeToolView: View {
                             selectedEntryID = nil
                         }
                         .buttonStyle(.borderless)
+                        .font(.subheadline.weight(.medium))
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
                         .fixedSize(horizontal: true, vertical: false)
                         .help("Remove every file from the list")
                     }
                     Button("Add PDFs…") { showImporter = true }
+                        .font(.subheadline.weight(.medium))
                         .lineLimit(1)
                         .fixedSize(horizontal: true, vertical: false)
                 }
             }
             Text(sidebarSubtitle)
-                .font(.caption)
+                .font(.subheadline)
                 .foregroundStyle(.secondary)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .fixedSize(horizontal: false, vertical: true)
@@ -221,9 +223,9 @@ struct MergeToolView: View {
                 .symbolRenderingMode(.hierarchical)
                 .foregroundStyle(Tool.merge.accent.opacity(0.85))
             Text("Drop PDFs here or add files")
-                .font(.headline.weight(.medium))
+                .font(.title3.weight(.semibold))
             Text("Files are combined top to bottom. Preview updates on the right.")
-                .font(.subheadline)
+                .font(.body)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
                 .frame(maxWidth: 400)
@@ -250,7 +252,7 @@ struct MergeToolView: View {
         VStack(alignment: .leading, spacing: 8) {
             if totalPages > 0 {
                 Text("\(totalPages) pages across \(entries.count) files")
-                    .font(.caption.weight(.medium))
+                    .font(.subheadline.weight(.medium))
                     .foregroundStyle(.secondary)
                     .padding(.horizontal, 4)
             }
@@ -287,28 +289,28 @@ struct MergeToolView: View {
         let index = entries.firstIndex(where: { $0.id == entry.id }) ?? 0
         return HStack(alignment: .center, spacing: 12) {
             ZStack {
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
                     .fill(Tool.merge.accent.opacity(0.14))
-                    .frame(width: 36, height: 36)
+                    .frame(width: 40, height: 40)
                 Text("\(index + 1)")
-                    .font(.caption.weight(.bold))
+                    .font(.body.weight(.bold))
                     .monospacedDigit()
                     .foregroundStyle(Tool.merge.accent)
             }
             .accessibilityHidden(true)
 
-            VStack(alignment: .leading, spacing: 2) {
+            VStack(alignment: .leading, spacing: 4) {
                 Text(entry.url.lastPathComponent)
                     .lineLimit(1)
                     .truncationMode(.middle)
-                    .font(.body)
+                    .font(.callout.weight(.medium))
                 if let pages = pagesByEntryID[entry.id] {
                     Text("\(pages) page\(pages == 1 ? "" : "s")")
-                        .font(.caption)
+                        .font(.subheadline)
                         .foregroundStyle(.secondary)
                 } else if pageSummaryLoading {
                     Text("Reading…")
-                        .font(.caption)
+                        .font(.subheadline)
                         .foregroundStyle(.tertiary)
                 }
             }
@@ -319,6 +321,7 @@ struct MergeToolView: View {
                     moveEntry(from: index, by: -1)
                 } label: {
                     Image(systemName: "chevron.up")
+                        .font(.body.weight(.medium))
                 }
                 .buttonStyle(.borderless)
                 .disabled(index == 0)
@@ -328,13 +331,14 @@ struct MergeToolView: View {
                     moveEntry(from: index, by: 1)
                 } label: {
                     Image(systemName: "chevron.down")
+                        .font(.body.weight(.medium))
                 }
                 .buttonStyle(.borderless)
                 .disabled(index == entries.count - 1)
                 .help("Move down")
             }
-            .padding(.horizontal, 6)
-            .padding(.vertical, 3)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
             .background {
                 Capsule()
                     .fill(Color(nsColor: .controlBackgroundColor).opacity(0.65))
@@ -366,41 +370,58 @@ struct MergeToolView: View {
         Group {
             if !previewPages.isEmpty || isGeneratingPreviews {
                 VStack(alignment: .leading, spacing: 0) {
-                    VStack(alignment: .leading, spacing: 10) {
+                    VStack(alignment: .leading, spacing: 14) {
                         HStack(alignment: .center) {
                             Text("Preview")
-                                .font(.subheadline.weight(.semibold))
+                                .font(.title3.weight(.semibold))
                             Spacer(minLength: 8)
                             if isGeneratingPreviews {
                                 ProgressView()
-                                    .controlSize(.small)
+                                    .controlSize(.regular)
                             }
                         }
                         Text("Visual order of the merged pages.")
-                            .font(.caption)
+                            .font(.subheadline)
                             .foregroundStyle(.secondary)
                             .frame(maxWidth: .infinity, alignment: .leading)
 
-                        HStack(alignment: .center, spacing: 12) {
+                        // Compact slider: fixed max width so it does not stretch across the pane; S/L anchors read clearly.
+                        VStack(alignment: .leading, spacing: 8) {
                             Text("Thumbnail size")
-                                .font(.caption)
+                                .font(.subheadline.weight(.semibold))
+                            HStack(alignment: .center, spacing: 10) {
+                                Text("S")
+                                    .font(.subheadline.weight(.semibold))
+                                    .foregroundStyle(.secondary)
+                                    .frame(width: 22, alignment: .center)
+                                Slider(value: $thumbnailSize, in: 60...240)
+                                    .controlSize(.regular)
+                                    .disabled(isGeneratingPreviews)
+                                    .opacity(isGeneratingPreviews ? 0.45 : 1)
+                                Text("L")
+                                    .font(.subheadline.weight(.semibold))
+                                    .foregroundStyle(.secondary)
+                                    .frame(width: 22, alignment: .center)
+                            }
+                            Text("\(Int(thumbnailSize)) pt")
+                                .font(.subheadline.monospacedDigit())
                                 .foregroundStyle(.secondary)
-                            Slider(value: $thumbnailSize, in: 60...240)
-                                .frame(minWidth: 140)
-                                .layoutPriority(1)
-                                .disabled(isGeneratingPreviews)
-                                .opacity(isGeneratingPreviews ? 0.5 : 1)
-                            Text("\(Int(thumbnailSize))")
-                                .font(.caption.monospacedDigit())
-                                .foregroundStyle(.secondary)
-                                .frame(minWidth: 32, alignment: .trailing)
+                                .frame(maxWidth: .infinity, alignment: .trailing)
+                                .padding(.trailing, 4)
+                        }
+                        .padding(14)
+                        .frame(maxWidth: 360, alignment: .leading)
+                        .background {
+                            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                .strokeBorder(Color.primary.opacity(0.12), lineWidth: 1)
                         }
                         .accessibilityElement(children: .combine)
-                        .accessibilityLabel("Thumbnail size")
+                        .accessibilityLabel("Thumbnail size, \(Int(thumbnailSize)) points")
                     }
-                    .padding(16)
+                    .padding(18)
 
                     Divider()
+                        .opacity(0.35)
 
                     ScrollView {
                         LazyVGrid(columns: [GridItem(.adaptive(minimum: thumbnailSize), spacing: 16)], spacing: 16) {
@@ -415,7 +436,7 @@ struct MergeToolView: View {
                                         .shadow(color: .black.opacity(0.1), radius: 4, y: 2)
 
                                     Text("\(page.number)")
-                                        .font(.caption2.weight(.bold))
+                                        .font(.caption.weight(.bold))
                                         .foregroundStyle(.white)
                                         .padding(.horizontal, 6)
                                         .padding(.vertical, 2)
@@ -429,18 +450,18 @@ struct MergeToolView: View {
                     }
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .background(Color(nsColor: .underPageBackgroundColor))
+                .background(Color.white)
             } else {
                 VStack(spacing: 16) {
                     Image(systemName: "doc.on.doc")
                         .font(.system(size: 56))
                         .foregroundStyle(.tertiary)
                     Text("No PDFs selected for merge.")
-                        .font(.title3)
+                        .font(.title2)
                         .foregroundStyle(.secondary)
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .background(Color(nsColor: .underPageBackgroundColor))
+                .background(Color.white)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)

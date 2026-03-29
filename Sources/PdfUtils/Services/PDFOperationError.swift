@@ -12,6 +12,8 @@ enum PDFOperationError: LocalizedError {
     case noPagesSelected
     case compressionFailed
     case emptyPDF
+    case noRedactions
+    case redactionFailed
 
     var errorDescription: String? {
         switch self {
@@ -37,6 +39,10 @@ enum PDFOperationError: LocalizedError {
             return "Compression failed while rebuilding the PDF."
         case .emptyPDF:
             return "This PDF has no pages."
+        case .noRedactions:
+            return "Draw at least one redaction rectangle on a page before saving."
+        case .redactionFailed:
+            return "Redaction failed while rebuilding the PDF."
         }
     }
 }

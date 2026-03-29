@@ -3,6 +3,19 @@ import CoreGraphics
 import Foundation
 import PDFKit
 
+struct PDFRedactionExportOptions: Sendable {
+    /// When true, removes every annotation (highlights, comments, ink, etc.) from pages that are copied without rasterization.
+    /// Redacted pages are always rebuilt as images, so their prior content under the marks is gone.
+    var stripAnnotationsFromUnredactedPages: Bool
+    /// Longest edge cap when rasterizing a page that has redactions (higher = sharper, larger files).
+    var maxPixelDimension: CGFloat
+
+    static let `default` = PDFRedactionExportOptions(
+        stripAnnotationsFromUnredactedPages: false,
+        maxPixelDimension: 2400
+    )
+}
+
 enum PDFToolkit {
     /// Quick page count for UI summaries; the URL must already be readable (e.g. under active security scope).
     static func pageCount(at url: URL) -> Int? {
@@ -135,6 +148,138 @@ enum PDFToolkit {
         guard output.write(to: outputURL) else {
             throw PDFOperationError.couldNotWrite(outputURL)
         }
+    }
+
+    /// Permanently removes visual content inside the given rectangles by rasterizing affected pages and painting solid black over those regions—
+    /// underlying text and vectors in those areas cannot be copied out afterward (same model as professional “burn-in” redaction). Unmarked pages are copied as PDF unless `options.stripAnnotationsFromUnredactedPages` is true.
+    static func redact(
+        inputURL: URL,
+        outputURL: URL,
+        marks: [RedactionMark],
+        options: PDFRedactionExportOptions = .default
+    ) throws {
+        guard !marks.isEmpty else { throw PDFOperationError.noRedactions }
+        guard let source = PDFDocument(url: inputURL) else {
+            throw PDFOperationError.couldNotOpen(inputURL)
+        }
+        guard source.pageCount > 0 else { throw PDFOperationError.emptyPDF }
+
+        let grouped = Dictionary(grouping: marks, by: \.pageIndex)
+        for key in grouped.keys {
+            guard key >= 0, key < source.pageCount else {
+                throw PDFOperationError.pageOutOfBounds(key + 1)
+            }
+        }
+
+        let output = PDFDocument()
+        for pageIndex in 0..<source.pageCount {
+            guard let page = source.page(at: pageIndex) else { continue }
+            let rectsForPage = (grouped[pageIndex] ?? []).map(\.rect)
+
+            if rectsForPage.isEmpty {
+                try Self.insertUnredactedPage(
+                    into: output,
+                    from: page,
+                    stripAnnotations: options.stripAnnotationsFromUnredactedPages
+                )
+            } else {
+                guard
+                    let image = renderPageWithRedactions(
+                        page,
+                        redactionRects: rectsForPage,
+                        maxPixelDimension: options.maxPixelDimension
+                    ),
+                    let imagePage = PDFPage(image: image)
+                else {
+                    throw PDFOperationError.redactionFailed
+                }
+                imagePage.rotation = 0
+                output.insert(imagePage, at: output.pageCount)
+            }
+        }
+
+        guard output.pageCount > 0 else { throw PDFOperationError.redactionFailed }
+        guard output.write(to: outputURL) else {
+            throw PDFOperationError.couldNotWrite(outputURL)
+        }
+    }
+
+    private static func renderPageWithRedactions(
+        _ page: PDFPage,
+        redactionRects: [CGRect],
+        maxPixelDimension: CGFloat
+    ) -> NSImage? {
+        let mediaRect = page.bounds(for: .mediaBox)
+        guard mediaRect.width > 0, mediaRect.height > 0, let cgPage = page.pageRef else { return nil }
+
+        let merged = mergeOverlappingRedactions(redactionRects, mediaBox: mediaRect)
+        guard !merged.isEmpty else { return nil }
+
+        let longest = max(mediaRect.width, mediaRect.height)
+        let scale = min(1, maxPixelDimension / longest)
+        let pixelW = max(1, Int(mediaRect.width * scale))
+        let pixelH = max(1, Int(mediaRect.height * scale))
+        let targetRect = CGRect(x: 0, y: 0, width: CGFloat(pixelW), height: CGFloat(pixelH))
+
+        let image = NSImage(size: NSSize(width: pixelW, height: pixelH), flipped: false) { _ in
+            guard let ctx = NSGraphicsContext.current?.cgContext else { return false }
+
+            ctx.setFillColor(NSColor.white.cgColor)
+            ctx.fill(targetRect)
+
+            ctx.saveGState()
+            let transform = cgPage.getDrawingTransform(.mediaBox, rect: targetRect, rotate: 0, preserveAspectRatio: true)
+            ctx.concatenate(transform)
+            ctx.drawPDFPage(cgPage)
+
+            ctx.setBlendMode(.normal)
+            ctx.setFillColor(NSColor.black.cgColor)
+            for r in merged {
+                ctx.fill(r)
+            }
+            ctx.restoreGState()
+            return true
+        }
+        return image
+    }
+
+    /// Keep redaction passes from leaving thin gaps between adjacent user rectangles.
+    private static func mergeOverlappingRedactions(_ rects: [CGRect], mediaBox: CGRect) -> [CGRect] {
+        var list: [CGRect] = rects.compactMap { RedactionMarkGeometry.clipToMediaBox($0, mediaBox: mediaBox) }
+        guard !list.isEmpty else { return [] }
+
+        var merged = true
+        while merged {
+            merged = false
+            outer: for i in 0..<list.count {
+                for j in (i + 1)..<list.count {
+                    if list[i].intersects(list[j]) || list[i].insetBy(dx: -1, dy: -1).intersects(list[j]) {
+                        list[i] = list[i].union(list[j])
+                        list.remove(at: j)
+                        merged = true
+                        break outer
+                    }
+                }
+            }
+        }
+        return list
+    }
+
+    private static func insertUnredactedPage(
+        into output: PDFDocument,
+        from page: PDFPage,
+        stripAnnotations: Bool
+    ) throws {
+        guard let copy = page.copy() as? PDFPage else {
+            throw PDFOperationError.redactionFailed
+        }
+        if stripAnnotations {
+            let stale = copy.annotations
+            for ann in stale {
+                copy.removeAnnotation(ann)
+            }
+        }
+        output.insert(copy, at: output.pageCount)
     }
 
     /// Renders using `CGPDFPage`’s drawing transform so page rotation from the PDF (and PDFKit’s `rotation`) appears upright in the bitmap.

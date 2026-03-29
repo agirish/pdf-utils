@@ -106,6 +106,28 @@ extension Tool {
                     "If nothing seems to happen, confirm macOS allowed access to the file (try choosing it again).",
                 ]
             )
+        case .redact:
+            return ToolHelpContent(
+                overview:
+                    "Redaction permanently destroys content inside rectangles you draw: those page regions are rebuilt as images with solid black fills, so text and graphics there cannot be copied or searched in the export. Your original file is not changed until you save over it.",
+                steps: [
+                    "Choose or drop a PDF.",
+                    "Hold ⇧ Shift, then drag on the preview to draw each redaction rectangle (stay on one page per drag).",
+                    "Review the region list on the left; remove mistakes with the trash button or Clear all.",
+                    "Optional: enable removing annotations from pages you did not redact to avoid leaking hidden comments.",
+                    "Click Redact & save… and pick a new filename for the sanitized PDF.",
+                ],
+                controls: [
+                    ("⇧ Shift-drag", "Required modifier so normal scrolling and selection still work. Each drag must begin and end on the same page."),
+                    ("Regions list", "Lists page numbers for each mark. Delete individual marks or use Clear all."),
+                    ("Remove highlights & notes from other pages", "Strips all PDF annotations from pages that were not rasterized—stronger hygiene for sharing."),
+                    ("Redact & save…", "Builds a new PDF on disk; work stays on your Mac."),
+                ],
+                tips: [
+                    "Like browser tools such as Smallpdf’s redactor, redaction is irreversible—double-check marks before exporting.",
+                    "Very small rectangles may be ignored; drag a box at least a few points on each side.",
+                ]
+            )
         }
     }
 }

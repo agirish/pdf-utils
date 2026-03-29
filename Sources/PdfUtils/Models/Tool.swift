@@ -6,6 +6,7 @@ enum Tool: String, CaseIterable, Identifiable, Hashable {
     case merge
     case extract
     case deletePages
+    case redact
 
     var id: String { rawValue }
 
@@ -16,6 +17,7 @@ enum Tool: String, CaseIterable, Identifiable, Hashable {
         case .merge: return "Merge PDF"
         case .extract: return "Extract PDF Pages"
         case .deletePages: return "Delete PDF Pages"
+        case .redact: return "Redact PDF"
         }
     }
 
@@ -31,6 +33,8 @@ enum Tool: String, CaseIterable, Identifiable, Hashable {
             return "Save selected pages as a new PDF"
         case .deletePages:
             return "Remove unwanted pages"
+        case .redact:
+            return "Permanently black out sensitive areas"
         }
     }
 
@@ -47,6 +51,8 @@ enum Tool: String, CaseIterable, Identifiable, Hashable {
             return "Copy chosen pages into a new PDF in the order you type (for example 5,1,2). Handy for pulling chapters or attachments out of a larger document."
         case .deletePages:
             return "Produce a new PDF without the pages you specify. You must list which pages to drop—an empty field will not delete everything. At least one page must remain."
+        case .redact:
+            return "Draw rectangles over names, account numbers, or images you want gone for good. Marked regions are rebuilt as solid black—text there can’t be copied or searched. Everything runs on your Mac; review marks before exporting."
         }
     }
 
@@ -58,6 +64,7 @@ enum Tool: String, CaseIterable, Identifiable, Hashable {
         case .extract: return "doc.on.clipboard"
         // Badge-style "doc" symbols can look blank with hierarchical tinting on dashboard tiles; use a solid portrait-page + minus.
         case .deletePages: return "minus.rectangle.portrait.fill"
+        case .redact: return "eraser.line.dashed"
         }
     }
 
@@ -68,6 +75,7 @@ enum Tool: String, CaseIterable, Identifiable, Hashable {
         case .merge: return .purple
         case .extract: return .teal
         case .deletePages: return .pink
+        case .redact: return Color(red: 0.78, green: 0.16, blue: 0.22)
         }
     }
 }

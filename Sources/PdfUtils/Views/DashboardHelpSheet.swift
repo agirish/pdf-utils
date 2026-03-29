@@ -36,7 +36,7 @@ struct DashboardHelpSheet: View {
                         Text("Settings")
                             .font(.headline)
                         Label {
-                            Text("Open pdf-utils Settings (⌘,) for Liquid glass hue and strength, flat background modes, and preview panes (Merge, Compress, Rotate).")
+                            Text("Open pdf-utils Settings (⌘,) for Liquid glass hue and strength, flat background modes, and tool preview panes.")
                         } icon: {
                             Image(systemName: "gearshape")
                         }

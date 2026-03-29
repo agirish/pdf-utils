@@ -165,7 +165,7 @@ struct SettingsView: View {
 
     private var mergePreviewSection: some View {
         VStack(alignment: .leading, spacing: 14) {
-            sectionLabel("Tool preview (Merge, Compress, Rotate)")
+            sectionLabel("Tool preview panes")
 
             VStack(alignment: .leading, spacing: 10) {
                 Picker("Preview pane", selection: $mergePreviewBackgroundRaw) {

@@ -1,7 +1,7 @@
 import AppKit
 import SwiftUI
 
-/// Preview column backdrop from Settings (`MergePreviewBackgroundStyle`); shared by Merge, Compress, and Rotate.
+/// Preview column backdrop from Settings (`MergePreviewBackgroundStyle`); shared by all tools with a preview column.
 struct ToolPreviewPaneBackground: View {
     @AppStorage(SettingsKeys.mergePreviewBackground)
     private var mergeRaw: String = MergePreviewBackgroundStyle.white.rawValue

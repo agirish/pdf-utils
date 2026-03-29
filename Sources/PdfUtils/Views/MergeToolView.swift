@@ -450,7 +450,7 @@ struct MergeToolView: View {
                     }
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .background(MergePreviewBackground())
+                .background(ToolPreviewPaneBackground())
             } else {
                 VStack(spacing: 16) {
                     Image(systemName: "doc.on.doc")
@@ -461,7 +461,7 @@ struct MergeToolView: View {
                         .foregroundStyle(.secondary)
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .background(MergePreviewBackground())
+                .background(ToolPreviewPaneBackground())
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -663,86 +663,6 @@ struct MergeToolView: View {
         formatter.allowedUnits = [.useAll]
         formatter.countStyle = .file
         return formatter.string(fromByteCount: bytes)
-    }
-}
-
-// MARK: - Drop helpers
-
-/// Isolate `loadItem` async helpers on the main actor so `NSItemProvider` is not sent across executors
-/// when SwiftUI’s drop handler resumes (providers are not `Sendable`).
-@MainActor
-private extension NSItemProvider {
-    func resolvePDFItemURL() async -> URL? {
-        if let url = await loadItemURL(typeIdentifier: UTType.pdf.identifier) {
-            return url.pathExtension.lowercased() == "pdf" ? url : nil
-        }
-        guard let url = await loadItemURL(typeIdentifier: UTType.fileURL.identifier) else { return nil }
-        return url.pathExtension.lowercased() == "pdf" ? url : nil
-    }
-
-    func loadItemURL(typeIdentifier: String) async -> URL? {
-        await withCheckedContinuation { continuation in
-            loadItem(forTypeIdentifier: typeIdentifier, options: nil) { item, _ in
-                if let url = item as? URL {
-                    continuation.resume(returning: url)
-                    return
-                }
-                if let data = item as? Data, let url = URL(dataRepresentation: data, relativeTo: nil) {
-                    continuation.resume(returning: url)
-                    return
-                }
-                continuation.resume(returning: nil)
-            }
-        }
-    }
-}
-
-// MARK: - Merge preview column backdrop
-
-/// Preview pane background from Settings (`MergePreviewBackgroundStyle`). Kept in this file so Xcode targets
-/// that only compile a subset of `Views/*.swift` still resolve the type.
-private struct MergePreviewBackground: View {
-    @AppStorage(SettingsKeys.mergePreviewBackground)
-    private var mergeRaw: String = MergePreviewBackgroundStyle.white.rawValue
-
-    @AppStorage(SettingsKeys.mainWindowBackground)
-    private var mainRaw: String = MainWindowBackgroundStyle.liquidGlass.rawValue
-
-    @AppStorage(LiquidGlass.intensityKey)
-    private var glassIntensity: Double = 0.65
-
-    @AppStorage(LiquidGlass.hueKey)
-    private var glassHueRaw: String = LiquidGlassHue.purple.rawValue
-
-    private var mergeStyle: MergePreviewBackgroundStyle {
-        MergePreviewBackgroundStyle(rawValue: mergeRaw) ?? .white
-    }
-
-    private var mainStyle: MainWindowBackgroundStyle {
-        if mainRaw == "accentGradient" { return .liquidGlass }
-        return MainWindowBackgroundStyle(rawValue: mainRaw) ?? .liquidGlass
-    }
-
-    private var glassHue: LiquidGlassHue {
-        LiquidGlassHue(rawValue: glassHueRaw) ?? .purple
-    }
-
-    var body: some View {
-        Group {
-            switch mergeStyle {
-            case .white:
-                Color.white
-            case .systemWindow:
-                Color(nsColor: .windowBackgroundColor)
-            case .matchMain:
-                MainWindowBackgroundLayer(
-                    style: mainStyle,
-                    glassIntensity: glassIntensity,
-                    glassHue: glassHue,
-                    liquidGlassRespectsTopSafeArea: false
-                )
-            }
-        }
     }
 }
 

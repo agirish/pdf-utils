@@ -1,6 +1,6 @@
 import Foundation
 
-/// Background for the merge tool’s right-hand preview column.
+/// Background for right-hand preview columns (Merge, Compress, Rotate).
 enum MergePreviewBackgroundStyle: String, CaseIterable, Identifiable {
     case white
     case systemWindow

@@ -5,8 +5,6 @@ import UniformTypeIdentifiers
 struct RedactToolView: View {
     @AppStorage(SettingsKeys.redactRasterLongEdge)
     private var rasterLongEdge: Double = 4000
-    @AppStorage(SettingsKeys.redactEmbedOCR)
-    private var embedSearchableOCR: Bool = true
 
     @State private var inputURL: URL?
     @State private var pdfDocument: PDFDocument?
@@ -264,14 +262,6 @@ struct RedactToolView: View {
                     .foregroundStyle(.secondary)
             }
 
-            Toggle("Searchable text on redacted pages (on-device OCR)", isOn: $embedSearchableOCR)
-                .font(.subheadline)
-            Text(
-                "Adds an invisible text layer when saving so you can select and search visible wording again. Text covered by black bars is not recovered. Processing stays on your Mac."
-            )
-            .font(.caption2)
-            .foregroundStyle(.tertiary)
-            .fixedSize(horizontal: false, vertical: true)
         }
         .padding(16)
         .formCard()
@@ -402,8 +392,7 @@ struct RedactToolView: View {
         let strip = stripAnnotationsFromOtherPages
         let options = PDFRedactionExportOptions(
             stripAnnotationsFromUnredactedPages: strip,
-            maxPixelDimension: CGFloat(min(max(rasterLongEdge, 2400), 7200)),
-            embedSearchableOCR: embedSearchableOCR
+            maxPixelDimension: CGFloat(min(max(rasterLongEdge, 2400), 7200))
         )
 
         do {

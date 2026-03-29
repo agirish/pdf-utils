@@ -10,13 +10,10 @@ struct PDFRedactionExportOptions: Sendable {
     /// Target length in **pixels** of the page’s longest edge when rasterizing a redacted page (higher = sharper, larger files and slower export).
     /// Unlike compression, this **supersamples** past 1× PDF points so text stays crisp (e.g. 4000 ≈ ~5× on US Letter height).
     var maxPixelDimension: CGFloat
-    /// When true, `write` runs on-device OCR so image-based pages get an invisible, selectable text layer where content is still visible (not under solid black).
-    var embedSearchableOCR: Bool
 
     static let `default` = PDFRedactionExportOptions(
         stripAnnotationsFromUnredactedPages: false,
-        maxPixelDimension: 4000,
-        embedSearchableOCR: true
+        maxPixelDimension: 4000
     )
 }
 
@@ -198,52 +195,49 @@ enum PDFToolkit {
                         redactionRects: rectsForPage,
                         maxPixelDimension: options.maxPixelDimension
                     ),
-                    let imagePage = Self.makePDFPageFromRaster(cgImage: cgImage, mediaBox: mediaRect)
+                    let pdfData = Self.singlePagePDFData(cgImage: cgImage, sourceMediaBox: mediaRect),
+                    let tempDoc = PDFDocument(data: pdfData),
+                    let newPage = tempDoc.page(at: 0)
                 else {
                     throw PDFOperationError.redactionFailed
                 }
-                output.insert(imagePage, at: output.pageCount)
+                // Move the page into `output` so we never rely on `PDFPage.copy()` for image-heavy pages
+                // (copy has dropped resolution / MediaBox issues). `insert` removes the page from `tempDoc`.
+                newPage.rotation = 0
+                output.insert(newPage, at: output.pageCount)
             }
         }
 
         guard output.pageCount > 0 else { throw PDFOperationError.redactionFailed }
-        // OCR can re-encode image pages; keep “screen optimize” off so pages stay full resolution in points.
-        let writeOptions: [PDFDocumentWriteOption: Any]? = options.embedSearchableOCR
-            ? [
-                .saveTextFromOCR: true,
-                .optimizeImagesForScreen: false,
-                .saveImagesAsJPEG: false,
-            ]
-            : nil
-        guard output.write(to: outputURL, withOptions: writeOptions) else {
+        // Do not pass `saveTextFromOCROption`: PDFKit’s OCR-on-save pass re-encodes image-based pages and
+        // reliably produced thumbnail-sized redacted pages in testing (even with screen-optimize off).
+        guard output.write(to: outputURL) else {
             throw PDFOperationError.couldNotWrite(outputURL)
         }
     }
 
-    /// Builds a `PDFPage` by writing a one-page PDF with CoreGraphics so the **MediaBox** and image frame
-    /// match the source. `PDFPage(image:)` / `NSImage` sizing is unreliable here; that path produced
-    /// thumbnail-sized redacted pages for some documents and OS versions.
-    private static func makePDFPageFromRaster(cgImage: CGImage, mediaBox: CGRect) -> PDFPage? {
-        guard mediaBox.width > 0, mediaBox.height > 0 else { return nil }
+    /// Media box for the emitted page: origin at zero, size from the source (avoids odd origins confusing viewers).
+    private static func normalizedMediaRectForOutput(_ mediaBox: CGRect) -> CGRect {
+        CGRect(x: 0, y: 0, width: abs(mediaBox.width), height: abs(mediaBox.height))
+    }
+
+    /// One-page PDF with explicit Core Graphics MediaBox and bitmap drawn into the full page rect.
+    private static func singlePagePDFData(cgImage: CGImage, sourceMediaBox: CGRect) -> Data? {
+        let pageRect = normalizedMediaRectForOutput(sourceMediaBox)
+        guard pageRect.width > 0.5, pageRect.height > 0.5 else { return nil }
 
         let data = NSMutableData()
         guard let consumer = CGDataConsumer(data: data as CFMutableData) else { return nil }
-        var box = mediaBox
+        var box = pageRect
         guard let pdfContext = CGContext(consumer: consumer, mediaBox: &box, nil) else { return nil }
 
         pdfContext.beginPDFPage(nil)
         pdfContext.interpolationQuality = .high
-        pdfContext.draw(cgImage, in: mediaBox)
+        pdfContext.draw(cgImage, in: pageRect)
         pdfContext.endPDFPage()
         pdfContext.closePDF()
 
-        guard let doc = PDFDocument(data: data as Data),
-              let src = doc.page(at: 0),
-              let copy = src.copy() as? PDFPage
-        else { return nil }
-
-        copy.rotation = 0
-        return copy
+        return data as Data
     }
 
     private static func renderPageWithRedactions(

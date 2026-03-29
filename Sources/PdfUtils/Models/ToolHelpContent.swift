@@ -114,7 +114,7 @@ extension Tool {
                     "Choose or drop a PDF.",
                     "Hold ⇧ Shift, then drag on the preview to draw each redaction rectangle (stay on one page per drag).",
                     "Review the region list on the left; remove mistakes with the trash button or Clear all.",
-                    "Optional: raise Redacted page sharpness for crisper bitmap pages, and keep Searchable text (OCR) on unless you want a purely visual PDF.",
+                    "Optional: raise Redacted page sharpness for crisper bitmap pages on the pages you marked.",
                     "Optional: enable removing annotations from pages you did not redact to avoid leaking hidden comments.",
                     "Click Redact & save… and pick a new filename for the sanitized PDF.",
                 ],
@@ -122,13 +122,13 @@ extension Tool {
                     ("⇧ Shift-drag", "Required modifier so normal scrolling and selection still work. Each drag must begin and end on the same page."),
                     ("Regions list", "Lists page numbers for each mark. Delete individual marks or use Clear all."),
                     ("Redacted page sharpness", "More pixels on the longest edge when rasterizing only the pages you marked—helps text stay readable after export."),
-                    ("Searchable text (on-device OCR)", "When saving, PDFKit can add an invisible text layer on image pages so copy/search works for visible content (not under black bars)."),
                     ("Remove highlights & notes from other pages", "Strips all PDF annotations from pages that were not rasterized—stronger hygiene for sharing."),
                     ("Redact & save…", "Builds a new PDF on disk; work stays on your Mac."),
                 ],
                 tips: [
                     "Like browser tools such as Smallpdf’s redactor, redaction is irreversible—double-check marks before exporting.",
                     "Very small rectangles may be ignored; drag a box at least a few points on each side.",
+                    "Redacted pages are saved as full-page images. PDFKit’s OCR-on-save option is not used here because it re-encoded those pages as tiny thumbnails in testing.",
                 ]
             )
         }

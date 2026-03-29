@@ -1,4 +1,5 @@
 import AppKit
+import PDFKit
 import SwiftUI
 import UniformTypeIdentifiers
 
@@ -7,46 +8,52 @@ private struct MergeEntry: Identifiable, Equatable {
     let url: URL
 }
 
+private struct PreviewPage: Identifiable {
+    var id: Int { number }
+    let image: NSImage
+    let number: Int
+}
+
+private struct MergeResult {
+    let outputURL: URL
+    let totalPages: Int
+    let fileBytes: Int64
+}
+
 struct MergeToolView: View {
     @State private var entries: [MergeEntry] = []
     @State private var busy = false
     @State private var alertMessage: String?
     @State private var showImporter = false
-    @State private var showExporter = false
-    @State private var exportDoc: PDFFileDocument?
-    @State private var suggestedName = "merged.pdf"
     @State private var selectedEntryID: UUID?
     @State private var isDropTargeted = false
     @State private var pagesByEntryID: [UUID: Int] = [:]
     @State private var totalPages = 0
     @State private var pageSummaryLoading = false
 
+    @State private var previewPages: [PreviewPage] = []
+    @State private var thumbnailSize: CGFloat = 120
+    @State private var isGeneratingPreviews = false
+    @State private var previewTask: Task<Void, Never>?
+
+    @State private var mergeResult: MergeResult?
+    @State private var columnVisibility = NavigationSplitViewVisibility.all
+
     private var entriesSignature: String {
         entries.map { "\($0.id.uuidString)|\($0.url.path)" }.joined(separator: "\u{1e}")
     }
 
     var body: some View {
-        ToolFormContainer {
-            VStack(alignment: .leading, spacing: 14) {
-                headerRow
-
-                Group {
-                    if entries.isEmpty {
-                        emptyMergeDropZone
-                    } else {
-                        listCard
-                    }
+        Group {
+            if let result = mergeResult {
+                successView(result)
+            } else {
+                NavigationSplitView(columnVisibility: $columnVisibility) {
+                    sidebarColumn
+                        .navigationSplitViewColumnWidth(min: 260, ideal: 320, max: 440)
+                } detail: {
+                    previewDetailColumn
                 }
-                .onDrop(of: [.pdf, .fileURL], isTargeted: $isDropTargeted) { providers in
-                    consumeDroppedProviders(providers)
-                    return true
-                }
-            }
-            .padding(18)
-            .formCard()
-
-            RunActionButton(title: "Merge & save…", busy: busy, canRun: !entries.isEmpty) {
-                Task { await runMerge() }
             }
         }
         .overlay {
@@ -64,15 +71,6 @@ struct MergeToolView: View {
                 alertMessage = err.localizedDescription
             }
         }
-        .fileExporter(
-            isPresented: $showExporter,
-            document: exportDoc,
-            contentType: .pdf,
-            defaultFilename: stem(suggestedName)
-        ) { result in
-            exportDoc = nil
-            if case .failure(let err) = result { alertMessage = err.localizedDescription }
-        }
         .alert("pdf-utils", isPresented: Binding(
             get: { alertMessage != nil },
             set: { if !$0 { alertMessage = nil } }
@@ -84,9 +82,94 @@ struct MergeToolView: View {
         .task(id: entriesSignature) {
             await refreshPageSummary()
         }
+        .onChange(of: entries) { _, _ in
+            generatePreviews()
+        }
         .onChange(of: entries.isEmpty) { _, isEmpty in
             if isEmpty { selectedEntryID = nil }
         }
+    }
+
+    // MARK: - Success
+
+    private func successView(_ result: MergeResult) -> some View {
+        ToolFormContainer {
+            VStack(spacing: 24) {
+                Image(systemName: "checkmark.circle.fill")
+                    .font(.system(size: 48))
+                    .foregroundStyle(.green)
+
+                VStack(spacing: 8) {
+                    Text("Merged successfully")
+                        .font(.title2.weight(.bold))
+
+                    Text(result.outputURL.path)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                }
+
+                HStack(spacing: 32) {
+                    StatBox(title: "SIZE", value: formatBytes(result.fileBytes))
+                    StatBox(title: "PAGES", value: "\(result.totalPages)")
+                    StatBox(title: "FILES", value: "\(entries.count)")
+                }
+                .padding(.top, 16)
+
+                Button("Start over") {
+                    withAnimation {
+                        previewTask?.cancel()
+                        entries.removeAll()
+                        previewPages.removeAll()
+                        pagesByEntryID = [:]
+                        totalPages = 0
+                        mergeResult = nil
+                    }
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.large)
+                .padding(.top, 16)
+            }
+            .padding(40)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+    }
+
+    // MARK: - Sidebar
+
+    private var sidebarColumn: some View {
+        VStack(spacing: 0) {
+            VStack(alignment: .leading, spacing: 14) {
+                headerRow
+
+                Group {
+                    if entries.isEmpty {
+                        emptyMergeDropZone
+                    } else {
+                        listCard
+                    }
+                }
+                .onDrop(of: [.pdf, .fileURL], isTargeted: $isDropTargeted) { providers in
+                    consumeDroppedProviders(providers)
+                    return true
+                }
+            }
+            .padding(18)
+            .formCard()
+            .padding([.horizontal, .top], 12)
+
+            Spacer(minLength: 0)
+
+            Divider()
+
+            RunActionButton(title: "Merge & save…", busy: busy, canRun: !entries.isEmpty) {
+                Task { await runMerge() }
+            }
+            .padding(16)
+            .background(Color(nsColor: .windowBackgroundColor))
+        }
+        .background(Color(nsColor: .windowBackgroundColor))
     }
 
     private var headerRow: some View {
@@ -95,7 +178,7 @@ struct MergeToolView: View {
                 VStack(alignment: .leading, spacing: 3) {
                     Text("PDF files")
                         .font(.subheadline.weight(.semibold))
-                    Text(subtitle)
+                    Text(sidebarSubtitle)
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
@@ -113,7 +196,9 @@ struct MergeToolView: View {
             HStack(spacing: 8) {
                 if !entries.isEmpty {
                     Button("Clear all") {
+                        previewTask?.cancel()
                         entries.removeAll()
+                        previewPages.removeAll()
                         pagesByEntryID = [:]
                         totalPages = 0
                         selectedEntryID = nil
@@ -135,7 +220,7 @@ struct MergeToolView: View {
                 .foregroundStyle(Tool.merge.accent.opacity(0.85))
             Text("Drop PDFs here or add files")
                 .font(.headline.weight(.medium))
-            Text("Files are combined top to bottom. You can reorder after adding.")
+            Text("Files are combined top to bottom. Preview updates on the right.")
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
@@ -145,8 +230,8 @@ struct MergeToolView: View {
                 .controlSize(.large)
         }
         .frame(maxWidth: .infinity)
-        .padding(.vertical, 36)
-        .padding(.horizontal, 20)
+        .padding(.vertical, 28)
+        .padding(.horizontal, 16)
         .background {
             RoundedRectangle(cornerRadius: 14, style: .continuous)
                 .strokeBorder(
@@ -179,7 +264,7 @@ struct MergeToolView: View {
             }
             .listStyle(.plain)
             .scrollContentBackground(.hidden)
-            .frame(minHeight: 200, idealHeight: 280, maxHeight: 420)
+            .frame(minHeight: 160, idealHeight: 240, maxHeight: 360)
             .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
             .overlay {
                 RoundedRectangle(cornerRadius: 12, style: .continuous)
@@ -266,16 +351,83 @@ struct MergeToolView: View {
         .accessibilityLabel("Position \(index + 1), \(entry.url.lastPathComponent)")
     }
 
-    private var subtitle: String {
+    private var sidebarSubtitle: String {
         if entries.isEmpty {
-            return "Add two or more PDFs. Order is top to bottom. Drag files from Finder or use Add PDFs."
+            return "Add PDFs — order is top to bottom in the merged file. Preview appears on the right."
         }
-        return "Drag more PDFs onto the list to append. Reorder with the arrows or by dragging rows; Delete removes the selection."
+        return "Drag more PDFs here to append. Reorder rows or use arrows; Delete removes the selection."
     }
 
-    private func stem(_ name: String) -> String {
-        (name as NSString).deletingPathExtension
+    // MARK: - Preview (detail)
+
+    private var previewDetailColumn: some View {
+        Group {
+            if !previewPages.isEmpty || isGeneratingPreviews {
+                VStack(alignment: .leading, spacing: 0) {
+                    HStack {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("Preview")
+                                .font(.subheadline.weight(.semibold))
+                            Text("Visual order of the merged pages.")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        if isGeneratingPreviews {
+                            ProgressView()
+                                .controlSize(.small)
+                        } else {
+                            Slider(value: $thumbnailSize, in: 60...240)
+                                .frame(width: 140)
+                        }
+                    }
+                    .padding(16)
+
+                    Divider()
+
+                    ScrollView {
+                        LazyVGrid(columns: [GridItem(.adaptive(minimum: thumbnailSize), spacing: 16)], spacing: 16) {
+                            ForEach(previewPages) { page in
+                                ZStack(alignment: .bottomTrailing) {
+                                    Image(nsImage: page.image)
+                                        .resizable()
+                                        .aspectRatio(contentMode: .fit)
+                                        .frame(width: thumbnailSize)
+                                        .background(Color.white)
+                                        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                                        .shadow(color: .black.opacity(0.1), radius: 4, y: 2)
+
+                                    Text("\(page.number)")
+                                        .font(.caption2.weight(.bold))
+                                        .foregroundStyle(.white)
+                                        .padding(.horizontal, 6)
+                                        .padding(.vertical, 2)
+                                        .background(Tool.merge.accent)
+                                        .clipShape(Capsule())
+                                        .padding(6)
+                                }
+                            }
+                        }
+                        .padding(16)
+                    }
+                }
+                .background(Color(nsColor: .underPageBackgroundColor))
+            } else {
+                VStack(spacing: 16) {
+                    Image(systemName: "doc.on.doc")
+                        .font(.system(size: 56))
+                        .foregroundStyle(.tertiary)
+                    Text("No PDFs selected for merge.")
+                        .font(.title3)
+                        .foregroundStyle(.secondary)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .background(Color(nsColor: .underPageBackgroundColor))
+            }
+        }
     }
+
+    // MARK: - Actions
 
     private func appendUnique(_ urls: [URL]) {
         let existing = Set(entries.map { $0.url.standardizedFileURL })
@@ -284,7 +436,6 @@ struct MergeToolView: View {
     }
 
     private func consumeDroppedProviders(_ providers: [NSItemProvider]) {
-        // Resolve on the main actor so `[NSItemProvider]` is not sent across isolation (it is not `Sendable`).
         Task { @MainActor in
             var urls: [URL] = []
             for p in providers {
@@ -361,6 +512,62 @@ struct MergeToolView: View {
         }
     }
 
+    private func generatePreviews() {
+        previewTask?.cancel()
+        guard !entries.isEmpty else {
+            previewPages = []
+            isGeneratingPreviews = false
+            return
+        }
+
+        isGeneratingPreviews = true
+        let urlsSnapshot = entries.map(\.url)
+
+        previewTask = Task {
+            do {
+                let loadedPages: [PreviewPage] = try await PDFBackgroundWork.run {
+                    var bgPreviews: [PreviewPage] = []
+                    var globalPageNum = 1
+                    try URLCollectionSecurityScope.withAccess(urlsSnapshot) {
+                        for url in urlsSnapshot {
+                            try Task.checkCancellation()
+                            guard let doc = PDFDocument(url: url) else { continue }
+                            for i in 0..<doc.pageCount {
+                                try Task.checkCancellation()
+                                guard let page = doc.page(at: i) else { continue }
+
+                                let size = page.bounds(for: .mediaBox).size
+                                let longest = max(size.width, size.height)
+                                let scale = min(1.0, 400.0 / longest)
+                                let thumbSize = NSSize(
+                                    width: max(1, size.width * scale),
+                                    height: max(1, size.height * scale)
+                                )
+
+                                let image = page.thumbnail(of: thumbSize, for: .mediaBox)
+                                bgPreviews.append(PreviewPage(image: image, number: globalPageNum))
+                                globalPageNum += 1
+                            }
+                        }
+                    }
+                    return bgPreviews
+                }
+
+                await MainActor.run {
+                    guard !Task.isCancelled else { return }
+                    previewPages = loadedPages
+                    isGeneratingPreviews = false
+                }
+            } catch {
+                await MainActor.run {
+                    if !Task.isCancelled {
+                        isGeneratingPreviews = false
+                    }
+                }
+            }
+        }
+    }
+
     @MainActor
     private func runMerge() async {
         guard !entries.isEmpty else {
@@ -368,29 +575,54 @@ struct MergeToolView: View {
             return
         }
 
-        busy = true
-        defer { busy = false }
-
-        let urlsSnapshot = entries.map(\.url)
+        let panel = NSSavePanel()
+        panel.allowedContentTypes = [.pdf]
         if let first = entries.first?.url {
-            suggestedName = first.deletingPathExtension().lastPathComponent + "-merged.pdf"
+            panel.nameFieldStringValue = first.deletingPathExtension().lastPathComponent + "-merged.pdf"
         } else {
-            suggestedName = "merged.pdf"
+            panel.nameFieldStringValue = "merged.pdf"
         }
 
+        guard panel.runModal() == .OK, let outputURL = panel.url else {
+            return
+        }
+
+        busy = true
+        AppStateManager.shared.beginOperation("Merge PDF")
+        defer {
+            busy = false
+            AppStateManager.shared.endOperation("Merge PDF")
+        }
+
+        let urlsSnapshot = entries.map(\.url)
+
         do {
-            let data = try await PDFBackgroundWork.run {
+            try await PDFBackgroundWork.run {
                 try URLCollectionSecurityScope.withAccess(urlsSnapshot) {
-                    try PDFExportSupport.data { out in
-                        try PDFToolkit.merge(inputURLs: urlsSnapshot, outputURL: out)
-                    }
+                    try PDFToolkit.merge(inputURLs: urlsSnapshot, outputURL: outputURL)
                 }
             }
-            exportDoc = PDFFileDocument(data: data)
-            showExporter = true
+
+            let attrs = try FileManager.default.attributesOfItem(atPath: outputURL.path)
+            let bytes = attrs[.size] as? Int64 ?? 0
+
+            let finalPages = try await PDFBackgroundWork.run {
+                PDFToolkit.pageCount(at: outputURL) ?? 0
+            }
+
+            withAnimation {
+                mergeResult = MergeResult(outputURL: outputURL, totalPages: finalPages, fileBytes: bytes)
+            }
         } catch {
             alertMessage = error.localizedDescription
         }
+    }
+
+    private func formatBytes(_ bytes: Int64) -> String {
+        let formatter = ByteCountFormatter()
+        formatter.allowedUnits = [.useAll]
+        formatter.countStyle = .file
+        return formatter.string(fromByteCount: bytes)
     }
 }
 
@@ -422,5 +654,29 @@ private extension NSItemProvider {
                 continuation.resume(returning: nil)
             }
         }
+    }
+}
+
+// MARK: - Success stats
+
+private struct StatBox: View {
+    let title: String
+    let value: String
+
+    var body: some View {
+        VStack(spacing: 6) {
+            Text(title)
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(.secondary)
+                .textCase(.uppercase)
+            Text(value)
+                .font(.title3.weight(.medium))
+        }
+        .frame(minWidth: 80)
+        .padding(.vertical, 12)
+        .padding(.horizontal, 16)
+        .background(Color(nsColor: .windowBackgroundColor))
+        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .shadow(color: .black.opacity(0.05), radius: 2, y: 1)
     }
 }

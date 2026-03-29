@@ -57,13 +57,16 @@ extension Tool {
                 steps: [
                     "Click Add PDFs… and select one or more PDFs (⌘-click for multiple), or drag PDFs from Finder onto the dashed area or list.",
                     "Reorder by dragging rows in the list or with the chevron buttons; Delete removes the selected row; trash removes that file from the merge list only.",
-                    "Click Merge & save… and choose where to save the combined PDF.",
+                    "Watch the preview column on the right: it shows every page in merge order; use the slider to change thumbnail size.",
+                    "Click Merge & save…, choose a path in the save panel, then use Start over on the success screen to merge again.",
                 ],
                 controls: [
                     ("Add PDFs…", "Appends chosen PDFs to the list. Order is top to bottom in the merged file."),
+                    ("Clear all", "Empties the list and clears the preview."),
                     ("↑ / ↓", "Swaps the row with its neighbor—handy for fixing order without re-importing."),
                     ("Trash", "Removes that entry from the list; it does not delete the file from disk."),
-                    ("Merge & save…", "Reads every listed PDF with security-scoped access, then writes one output file."),
+                    ("Preview slider", "Resizes page thumbnails in the right-hand preview."),
+                    ("Merge & save…", "Opens the save panel, then writes one combined PDF from every listed file."),
                 ],
                 tips: [
                     "Large merges can take a moment; the window should stay responsive while working.",

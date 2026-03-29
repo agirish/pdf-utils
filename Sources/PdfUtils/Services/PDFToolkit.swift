@@ -137,7 +137,11 @@ enum PDFToolkit {
             guard let image = renderPage(page, maxPixelDimension: maxPixel) else {
                 throw PDFOperationError.compressionFailed
             }
-            guard let newPage = PDFPage(image: image) else {
+            let media = page.bounds(for: .mediaBox)
+            let imageOpts: [PDFPage.ImageInitializationOption: Any] = [
+                .mediaBox: NSValue(rect: media),
+            ]
+            guard let newPage = PDFPage(image: image, options: imageOpts) else {
                 throw PDFOperationError.compressionFailed
             }
             // Bitmap already includes PDF rotation via CGPDFPage drawing transform; do not re-apply PDFPage.rotation.
@@ -187,14 +191,20 @@ enum PDFToolkit {
                     stripAnnotations: options.stripAnnotationsFromUnredactedPages
                 )
             } else {
+                let mediaRect = page.bounds(for: .mediaBox)
                 guard
                     let image = renderPageWithRedactions(
                         page,
                         redactionRects: rectsForPage,
                         maxPixelDimension: options.maxPixelDimension
-                    ),
-                    let imagePage = PDFPage(image: image)
+                    )
                 else {
+                    throw PDFOperationError.redactionFailed
+                }
+                let imageOpts: [PDFPage.ImageInitializationOption: Any] = [
+                    .mediaBox: NSValue(rect: mediaRect),
+                ]
+                guard let imagePage = PDFPage(image: image, options: imageOpts) else {
                     throw PDFOperationError.redactionFailed
                 }
                 imagePage.rotation = 0

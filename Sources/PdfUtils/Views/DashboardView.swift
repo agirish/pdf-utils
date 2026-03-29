@@ -29,6 +29,11 @@ struct DashboardView: View {
         }
         .toolbar {
             ToolbarItemGroup(placement: .primaryAction) {
+                SettingsLink {
+                    Image(systemName: "gearshape")
+                }
+                .help("Open Settings")
+                .accessibilityLabel("Settings")
                 Button {
                     showHelp = true
                 } label: {

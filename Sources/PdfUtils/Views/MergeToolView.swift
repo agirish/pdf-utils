@@ -735,7 +735,12 @@ private struct MergePreviewBackground: View {
             case .systemWindow:
                 Color(nsColor: .windowBackgroundColor)
             case .matchMain:
-                MainWindowBackgroundLayer(style: mainStyle, glassIntensity: glassIntensity, glassHue: glassHue)
+                MainWindowBackgroundLayer(
+                    style: mainStyle,
+                    glassIntensity: glassIntensity,
+                    glassHue: glassHue,
+                    liquidGlassRespectsTopSafeArea: false
+                )
             }
         }
     }

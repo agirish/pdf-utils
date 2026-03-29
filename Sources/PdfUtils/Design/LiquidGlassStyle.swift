@@ -127,11 +127,12 @@ enum LiquidGlass {
 extension View {
     /// App-level liquid glass backdrop (SyncCloud-style): colored gradient + thin material.
     @ViewBuilder
-    func liquidGlassAppBackground(intensity: Double, hue: LiquidGlassHue = .purple) -> some View {
+    func liquidGlassAppBackground(intensity: Double, hue: LiquidGlassHue = .purple, respectTopSafeArea: Bool = true) -> some View {
         let t = max(0.0, min(1.0, intensity))
         let colors = hue.gradientColors
         let opacities: [Double] = [0.06 + 0.16 * t, 0.05 + 0.14 * t, 0.04 + 0.10 * t]
         let gradientStops = zip(colors, opacities).map { $0.0.opacity($0.1) }
+        let safeEdges: Edge.Set = respectTopSafeArea ? [.horizontal, .bottom] : .all
 
         background {
             ZStack {
@@ -140,11 +141,11 @@ extension View {
                     startPoint: .topLeading,
                     endPoint: .bottomTrailing
                 )
-                .ignoresSafeArea()
+                .ignoresSafeArea(edges: safeEdges)
 
                 Color.clear
                     .background(.thinMaterial.opacity(0.45 + 0.20 * t))
-                    .ignoresSafeArea()
+                    .ignoresSafeArea(edges: safeEdges)
             }
         }
     }

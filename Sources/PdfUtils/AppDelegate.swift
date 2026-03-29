@@ -3,6 +3,11 @@ import SwiftUI
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
     @MainActor
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        NSApp.setActivationPolicy(.regular)
+    }
+
+    @MainActor
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         let state = AppStateManager.shared
         if state.hasPendingOperations {

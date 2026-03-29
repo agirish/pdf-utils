@@ -38,6 +38,8 @@ struct MainWindowBackgroundLayer: View {
     let style: MainWindowBackgroundStyle
     var glassIntensity: Double = 0.65
     var glassHue: LiquidGlassHue = .purple
+    /// When `false`, liquid glass fills the view edge to edge (e.g. merge preview column). When `true`, the top safe area stays clear for window toolbars.
+    var liquidGlassRespectsTopSafeArea: Bool = true
 
     var body: some View {
         ZStack {
@@ -45,7 +47,11 @@ struct MainWindowBackgroundLayer: View {
             case .liquidGlass:
                 Color.clear
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .liquidGlassAppBackground(intensity: glassIntensity, hue: glassHue)
+                    .liquidGlassAppBackground(
+                        intensity: glassIntensity,
+                        hue: glassHue,
+                        respectTopSafeArea: liquidGlassRespectsTopSafeArea
+                    )
             case .systemWindow:
                 Color(nsColor: .windowBackgroundColor)
             case .paperWhite:
@@ -78,6 +84,7 @@ struct DashboardBackground: View {
 
     var body: some View {
         MainWindowBackgroundLayer(style: style, glassIntensity: glassIntensity, glassHue: glassHue)
-            .ignoresSafeArea()
+            // Keep the top safe area clear so the unified title bar, toolbar, and menu-driven controls stay visible.
+            .ignoresSafeArea(edges: [.horizontal, .bottom])
     }
 }

@@ -10,10 +10,18 @@ enum FullScreenSupport {
     }
 
     static func toggle() {
-        guard let window = hostingWindow ?? NSApp.keyWindow ?? NSApp.mainWindow ?? visibleDocumentWindow() else {
-            return
+        guard let window = bestWindow() else { return }
+        if !window.styleMask.contains(.fullScreenPrimary) {
+            window.collectionBehavior.insert(.fullScreenPrimary)
         }
         window.toggleFullScreen(nil)
+    }
+
+    private static func bestWindow() -> NSWindow? {
+        if let w = hostingWindow { return w }
+        if let w = NSApp.keyWindow, w.isVisible { return w }
+        if let w = NSApp.mainWindow, w.isVisible { return w }
+        return visibleDocumentWindow()
     }
 
     private static func visibleDocumentWindow() -> NSWindow? {

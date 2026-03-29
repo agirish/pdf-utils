@@ -204,7 +204,7 @@ enum PDFToolkit {
 
         guard output.pageCount > 0 else { throw PDFOperationError.redactionFailed }
         let writeOptions: [PDFDocumentWriteOption: Any]? = options.embedSearchableOCR
-            ? [PDFDocumentWriteOption.saveTextFromOCR: true]
+            ? [PDFDocumentWriteOption.saveTextFromOCROption: true]
             : nil
         guard output.write(to: outputURL, withOptions: writeOptions) else {
             throw PDFOperationError.couldNotWrite(outputURL)

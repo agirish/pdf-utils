@@ -11,7 +11,7 @@ enum FullScreenSupport {
 
     static func toggle() {
         guard let window = bestWindow() else { return }
-        if !window.styleMask.contains(.fullScreenPrimary) {
+        if !window.collectionBehavior.contains(.fullScreenPrimary) {
             window.collectionBehavior.insert(.fullScreenPrimary)
         }
         window.toggleFullScreen(nil)

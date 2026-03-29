@@ -37,7 +37,6 @@ struct MergeToolView: View {
     @State private var previewTask: Task<Void, Never>?
 
     @State private var mergeResult: MergeResult?
-    @State private var columnVisibility = NavigationSplitViewVisibility.all
 
     private var entriesSignature: String {
         entries.map { "\($0.id.uuidString)|\($0.url.path)" }.joined(separator: "\u{1e}")
@@ -48,12 +47,14 @@ struct MergeToolView: View {
             if let result = mergeResult {
                 successView(result)
             } else {
-                NavigationSplitView(columnVisibility: $columnVisibility) {
+                // HSplitView avoids NavigationSplitView nested inside NavigationStack (broken columns, hidden controls).
+                HSplitView {
                     sidebarColumn
-                        .navigationSplitViewColumnWidth(min: 260, ideal: 320, max: 440)
-                } detail: {
+                        .frame(minWidth: 280, idealWidth: 340, maxWidth: 520)
                     previewDetailColumn
+                        .frame(minWidth: 360)
                 }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
         .overlay {
@@ -157,7 +158,7 @@ struct MergeToolView: View {
             }
             .padding(18)
             .formCard()
-            .padding([.horizontal, .top], 12)
+            .padding(12)
 
             Spacer(minLength: 0)
 
@@ -169,46 +170,47 @@ struct MergeToolView: View {
             .padding(16)
             .background(Color(nsColor: .windowBackgroundColor))
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color(nsColor: .windowBackgroundColor))
     }
 
+    /// Title + actions on one row; subtitle full-width below so buttons never wrap mid-label (e.g. “Clear” / “all”).
     private var headerRow: some View {
-        HStack(alignment: .top, spacing: 12) {
-            Label {
-                VStack(alignment: .leading, spacing: 3) {
-                    Text("PDF files")
-                        .font(.subheadline.weight(.semibold))
-                    Text(sidebarSubtitle)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-            } icon: {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .center, spacing: 10) {
                 Image(systemName: "square.stack.3d.up.fill")
                     .symbolRenderingMode(.hierarchical)
                     .foregroundStyle(Tool.merge.accent)
                     .font(.title2)
-            }
-            .labelStyle(.titleAndIcon)
-
-            Spacer(minLength: 16)
-
-            HStack(spacing: 8) {
-                if !entries.isEmpty {
-                    Button("Clear all") {
-                        previewTask?.cancel()
-                        entries.removeAll()
-                        previewPages.removeAll()
-                        pagesByEntryID = [:]
-                        totalPages = 0
-                        selectedEntryID = nil
+                Text("PDF files")
+                    .font(.subheadline.weight(.semibold))
+                Spacer(minLength: 8)
+                HStack(spacing: 8) {
+                    if !entries.isEmpty {
+                        Button("Clear all") {
+                            previewTask?.cancel()
+                            entries.removeAll()
+                            previewPages.removeAll()
+                            pagesByEntryID = [:]
+                            totalPages = 0
+                            selectedEntryID = nil
+                        }
+                        .buttonStyle(.borderless)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .fixedSize(horizontal: true, vertical: false)
+                        .help("Remove every file from the list")
                     }
-                    .buttonStyle(.borderless)
-                    .foregroundStyle(.secondary)
-                    .help("Remove every file from the list")
+                    Button("Add PDFs…") { showImporter = true }
+                        .lineLimit(1)
+                        .fixedSize(horizontal: true, vertical: false)
                 }
-                Button("Add PDFs…") { showImporter = true }
             }
+            Text(sidebarSubtitle)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .fixedSize(horizontal: false, vertical: true)
         }
     }
 
@@ -364,22 +366,37 @@ struct MergeToolView: View {
         Group {
             if !previewPages.isEmpty || isGeneratingPreviews {
                 VStack(alignment: .leading, spacing: 0) {
-                    HStack {
-                        VStack(alignment: .leading, spacing: 4) {
+                    VStack(alignment: .leading, spacing: 10) {
+                        HStack(alignment: .center) {
                             Text("Preview")
                                 .font(.subheadline.weight(.semibold))
-                            Text("Visual order of the merged pages.")
+                            Spacer(minLength: 8)
+                            if isGeneratingPreviews {
+                                ProgressView()
+                                    .controlSize(.small)
+                            }
+                        }
+                        Text("Visual order of the merged pages.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+
+                        HStack(alignment: .center, spacing: 12) {
+                            Text("Thumbnail size")
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
-                        }
-                        Spacer()
-                        if isGeneratingPreviews {
-                            ProgressView()
-                                .controlSize(.small)
-                        } else {
                             Slider(value: $thumbnailSize, in: 60...240)
-                                .frame(width: 140)
+                                .frame(minWidth: 140)
+                                .layoutPriority(1)
+                                .disabled(isGeneratingPreviews)
+                                .opacity(isGeneratingPreviews ? 0.5 : 1)
+                            Text("\(Int(thumbnailSize))")
+                                .font(.caption.monospacedDigit())
+                                .foregroundStyle(.secondary)
+                                .frame(minWidth: 32, alignment: .trailing)
                         }
+                        .accessibilityElement(children: .combine)
+                        .accessibilityLabel("Thumbnail size")
                     }
                     .padding(16)
 
@@ -411,6 +428,7 @@ struct MergeToolView: View {
                         .padding(16)
                     }
                 }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .background(Color(nsColor: .underPageBackgroundColor))
             } else {
                 VStack(spacing: 16) {
@@ -425,6 +443,7 @@ struct MergeToolView: View {
                 .background(Color(nsColor: .underPageBackgroundColor))
             }
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     // MARK: - Actions

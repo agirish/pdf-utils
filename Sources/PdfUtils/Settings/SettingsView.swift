@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 /// macOS Settings (⌘,). Layout and liquid glass controls follow SyncCloud `Modules/Settings` + `Design`.
@@ -44,6 +45,7 @@ struct SettingsView: View {
         }
         .frame(minWidth: 520, maxWidth: .infinity, minHeight: 440, maxHeight: .infinity)
         .background(VisualEffectView(material: .hudWindow, blendingMode: .behindWindow))
+        .background(SettingsWindowResizableHook())
         .onAppear(perform: migrateLegacyDefaults)
     }
 
@@ -257,4 +259,31 @@ private struct HueOptionView: View {
         }
         .buttonStyle(.plain)
     }
+}
+
+// MARK: - Settings window chrome
+
+/// SwiftUI `Settings` often builds an `NSWindow` without `.resizable`, so the size grip does nothing until this runs.
+private struct SettingsWindowResizableHook: NSViewRepresentable {
+    final class AnchorView: NSView {
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            guard let window else { return }
+            applyResizeMask(window)
+            DispatchQueue.main.async { [weak self] in
+                guard let self, let window = self.window else { return }
+                self.applyResizeMask(window)
+            }
+        }
+
+        private func applyResizeMask(_ window: NSWindow) {
+            window.styleMask.insert([.resizable, .miniaturizable])
+        }
+    }
+
+    func makeNSView(context: Context) -> NSView {
+        AnchorView(frame: .zero)
+    }
+
+    func updateNSView(_ nsView: NSView, context: Context) {}
 }

@@ -20,5 +20,7 @@ struct PdfUtilsApp: App {
         Settings {
             SettingsView()
         }
+        .defaultSize(width: 560, height: 520)
+        .windowResizability(.contentMinSize)
     }
 }

@@ -7,12 +7,16 @@ struct PDFRedactionExportOptions: Sendable {
     /// When true, removes every annotation (highlights, comments, ink, etc.) from pages that are copied without rasterization.
     /// Redacted pages are always rebuilt as images, so their prior content under the marks is gone.
     var stripAnnotationsFromUnredactedPages: Bool
-    /// Longest edge cap when rasterizing a page that has redactions (higher = sharper, larger files).
+    /// Target length in **pixels** of the page’s longest edge when rasterizing a redacted page (higher = sharper, larger files and slower export).
+    /// Unlike compression, this **supersamples** past 1× PDF points so text stays crisp (e.g. 4000 ≈ ~5× on US Letter height).
     var maxPixelDimension: CGFloat
+    /// When true, `write` runs on-device OCR so image-based pages get an invisible, selectable text layer where content is still visible (not under solid black).
+    var embedSearchableOCR: Bool
 
     static let `default` = PDFRedactionExportOptions(
         stripAnnotationsFromUnredactedPages: false,
-        maxPixelDimension: 2400
+        maxPixelDimension: 4000,
+        embedSearchableOCR: true
     )
 }
 
@@ -199,7 +203,10 @@ enum PDFToolkit {
         }
 
         guard output.pageCount > 0 else { throw PDFOperationError.redactionFailed }
-        guard output.write(to: outputURL) else {
+        let writeOptions: [PDFDocumentWriteOption: Any]? = options.embedSearchableOCR
+            ? [PDFDocumentWriteOption.saveTextFromOCR: true]
+            : nil
+        guard output.write(to: outputURL, withOptions: writeOptions) else {
             throw PDFOperationError.couldNotWrite(outputURL)
         }
     }
@@ -216,9 +223,11 @@ enum PDFToolkit {
         guard !merged.isEmpty else { return nil }
 
         let longest = max(mediaRect.width, mediaRect.height)
-        let scale = min(1, maxPixelDimension / longest)
-        let pixelW = max(1, Int(mediaRect.width * scale))
-        let pixelH = max(1, Int(mediaRect.height * scale))
+        // Supersample past 1 PDF point ≈ 1 pixel (otherwise pages look ~72 dpi and text is fuzzy).
+        let rawScale = maxPixelDimension / max(longest, 1)
+        let scale = min(max(rawScale, 0.5), 12)
+        let pixelW = max(1, Int(ceil(mediaRect.width * scale)))
+        let pixelH = max(1, Int(ceil(mediaRect.height * scale)))
         let targetRect = CGRect(x: 0, y: 0, width: CGFloat(pixelW), height: CGFloat(pixelH))
 
         let image = NSImage(size: NSSize(width: pixelW, height: pixelH), flipped: false) { _ in

@@ -12,7 +12,15 @@ let package = Package(
     targets: [
         .executableTarget(
             name: "PdfUtils",
-            path: "Sources/PdfUtils"
+            path: "Sources/PdfUtils",
+            linkerSettings: [
+                .unsafeFlags([
+                    "-Xlinker", "-sectcreate",
+                    "-Xlinker", "__TEXT",
+                    "-Xlinker", "__info_plist",
+                    "-Xlinker", "Metadata/AppInfo.plist",
+                ], .when(platforms: [.macOS])),
+            ]
         ),
     ]
 )

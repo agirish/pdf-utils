@@ -23,7 +23,7 @@ struct DashboardView: View {
             .padding(32)
         }
         .background(DashboardBackground())
-        .navigationTitle("pdf-utils")
+        .navigationTitle(AppBrand.displayName)
         .navigationDestination(for: Tool.self) { tool in
             ToolDetailView(tool: tool)
         }
@@ -39,7 +39,7 @@ struct DashboardView: View {
                 } label: {
                     Image(systemName: "questionmark.circle")
                 }
-                .help("About pdf-utils and toolbar controls")
+                .help("About \(AppBrand.displayName) and toolbar controls")
                 .accessibilityLabel("Help")
             }
         }

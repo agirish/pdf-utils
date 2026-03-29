@@ -5,6 +5,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @MainActor
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.regular)
+        DispatchQueue.main.async {
+            NSApp.mainMenu?.items.first?.title = AppBrand.displayName
+        }
     }
 
     @MainActor

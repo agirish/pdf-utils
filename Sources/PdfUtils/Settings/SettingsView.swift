@@ -210,7 +210,7 @@ struct SettingsView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
                 if let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String {
-                    Text("pdf-utils \(version)")
+                    Text("\(AppBrand.displayName) \(version)")
                         .font(.caption2)
                         .foregroundStyle(.tertiary)
                 }

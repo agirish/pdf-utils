@@ -58,7 +58,7 @@ struct ExtractToolView: View {
             exportDoc = nil
             if case .failure(let err) = result { alertMessage = err.localizedDescription }
         }
-        .alert("pdf-utils", isPresented: Binding(
+        .alert(AppBrand.displayName, isPresented: Binding(
             get: { alertMessage != nil },
             set: { if !$0 { alertMessage = nil } }
         )) {

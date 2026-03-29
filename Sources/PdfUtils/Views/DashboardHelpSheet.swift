@@ -36,7 +36,7 @@ struct DashboardHelpSheet: View {
                         Text("Settings")
                             .font(.headline)
                         Label {
-                            Text("Open pdf-utils Settings (⌘,) for Liquid glass hue and strength, flat background modes, and tool preview panes.")
+                            Text("Open \(AppBrand.displayName) Settings (⌘,) for Liquid glass hue and strength, flat background modes, and tool preview panes.")
                         } icon: {
                             Image(systemName: "gearshape")
                         }
@@ -56,7 +56,7 @@ struct DashboardHelpSheet: View {
                 .frame(maxWidth: 520, alignment: .leading)
             }
             .frame(minWidth: 400, minHeight: 280)
-            .navigationTitle("About pdf-utils")
+            .navigationTitle("About \(AppBrand.displayName)")
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Done") { dismiss() }

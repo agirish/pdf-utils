@@ -2,9 +2,17 @@ import AppKit
 import SwiftUI
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
+    /// Apply activation policy and Dock icon as early as possible so the process is not stuck with the generic
+    /// Unix executable tile (green “exec”) in the Dock.
+    @MainActor
+    func applicationWillFinishLaunching(_ notification: Notification) {
+        NSApp.setActivationPolicy(.regular)
+        ApplicationDockIcon.apply()
+    }
+
     @MainActor
     func applicationDidFinishLaunching(_ notification: Notification) {
-        NSApp.setActivationPolicy(.regular)
+        ApplicationDockIcon.apply()
         DispatchQueue.main.async {
             NSApp.mainMenu?.items.first?.title = AppBrand.displayName
         }

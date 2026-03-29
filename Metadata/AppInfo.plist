@@ -6,5 +6,7 @@
 	<string>PDF Utils</string>
 	<key>CFBundleName</key>
 	<string>PDF Utils</string>
+	<key>CFBundleIconName</key>
+	<string>AppIcon</string>
 </dict>
 </plist>

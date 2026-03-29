@@ -13,6 +13,9 @@ let package = Package(
         .executableTarget(
             name: "PdfUtils",
             path: "Sources/PdfUtils",
+            resources: [
+                .process("Resources"),
+            ],
             linkerSettings: [
                 .unsafeFlags([
                     "-Xlinker", "-sectcreate",

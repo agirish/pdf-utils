@@ -193,39 +193,64 @@ enum PDFToolkit {
             } else {
                 let mediaRect = page.bounds(for: .mediaBox)
                 guard
-                    let image = renderPageWithRedactions(
+                    let cgImage = renderPageWithRedactions(
                         page,
                         redactionRects: rectsForPage,
                         maxPixelDimension: options.maxPixelDimension
-                    )
+                    ),
+                    let imagePage = Self.makePDFPageFromRaster(cgImage: cgImage, mediaBox: mediaRect)
                 else {
                     throw PDFOperationError.redactionFailed
                 }
-                let imageOpts: [PDFPage.ImageInitializationOption: Any] = [
-                    .mediaBox: NSValue(rect: mediaRect),
-                ]
-                guard let imagePage = PDFPage(image: image, options: imageOpts) else {
-                    throw PDFOperationError.redactionFailed
-                }
-                imagePage.rotation = 0
                 output.insert(imagePage, at: output.pageCount)
             }
         }
 
         guard output.pageCount > 0 else { throw PDFOperationError.redactionFailed }
+        // OCR can re-encode image pages; keep “screen optimize” off so pages stay full resolution in points.
         let writeOptions: [PDFDocumentWriteOption: Any]? = options.embedSearchableOCR
-            ? [PDFDocumentWriteOption.saveTextFromOCROption: true]
+            ? [
+                .saveTextFromOCR: true,
+                .optimizeImagesForScreen: false,
+                .saveImagesAsJPEG: false,
+            ]
             : nil
         guard output.write(to: outputURL, withOptions: writeOptions) else {
             throw PDFOperationError.couldNotWrite(outputURL)
         }
     }
 
+    /// Builds a `PDFPage` by writing a one-page PDF with CoreGraphics so the **MediaBox** and image frame
+    /// match the source. `PDFPage(image:)` / `NSImage` sizing is unreliable here; that path produced
+    /// thumbnail-sized redacted pages for some documents and OS versions.
+    private static func makePDFPageFromRaster(cgImage: CGImage, mediaBox: CGRect) -> PDFPage? {
+        guard mediaBox.width > 0, mediaBox.height > 0 else { return nil }
+
+        let data = NSMutableData()
+        guard let consumer = CGDataConsumer(data: data as CFMutableData) else { return nil }
+        var box = mediaBox
+        guard let pdfContext = CGContext(consumer: consumer, mediaBox: &box, nil) else { return nil }
+
+        pdfContext.beginPDFPage(nil)
+        pdfContext.interpolationQuality = .high
+        pdfContext.draw(cgImage, in: mediaBox)
+        pdfContext.endPDFPage()
+        pdfContext.closePDF()
+
+        guard let doc = PDFDocument(data: data as Data),
+              let src = doc.page(at: 0),
+              let copy = src.copy() as? PDFPage
+        else { return nil }
+
+        copy.rotation = 0
+        return copy
+    }
+
     private static func renderPageWithRedactions(
         _ page: PDFPage,
         redactionRects: [CGRect],
         maxPixelDimension: CGFloat
-    ) -> NSImage? {
+    ) -> CGImage? {
         let mediaRect = page.bounds(for: .mediaBox)
         guard mediaRect.width > 0, mediaRect.height > 0, let cgPage = page.pageRef else { return nil }
 
@@ -240,10 +265,6 @@ enum PDFToolkit {
         let pixelH = max(1, Int(ceil(mediaRect.height * scale)))
         let targetRect = CGRect(x: 0, y: 0, width: CGFloat(pixelW), height: CGFloat(pixelH))
 
-        // `NSImage(size: pixelW×pixelH)` sets the **logical size in points** to the pixel count, so
-        // `PDFPage(image:)` produced a wrong media box (tiny or inconsistent page). Use a bitmap then
-        // `NSImage(cgImage:size:)` so logical size stays the true page size in PDF points while pixels
-        // provide supersampled detail.
         guard let colorSpace = CGColorSpace(name: CGColorSpace.sRGB) else { return nil }
         guard let ctx = CGContext(
             data: nil,
@@ -271,9 +292,7 @@ enum PDFToolkit {
         }
         ctx.restoreGState()
 
-        guard let cgImage = ctx.makeImage() else { return nil }
-        let logicalSize = NSSize(width: mediaRect.width, height: mediaRect.height)
-        return NSImage(cgImage: cgImage, size: logicalSize)
+        return ctx.makeImage()
     }
 
     /// Keep redaction passes from leaving thin gaps between adjacent user rectangles.

@@ -230,26 +230,40 @@ enum PDFToolkit {
         let pixelH = max(1, Int(ceil(mediaRect.height * scale)))
         let targetRect = CGRect(x: 0, y: 0, width: CGFloat(pixelW), height: CGFloat(pixelH))
 
-        let image = NSImage(size: NSSize(width: pixelW, height: pixelH), flipped: false) { _ in
-            guard let ctx = NSGraphicsContext.current?.cgContext else { return false }
+        // `NSImage(size: pixelW×pixelH)` sets the **logical size in points** to the pixel count, so
+        // `PDFPage(image:)` produced a wrong media box (tiny or inconsistent page). Use a bitmap then
+        // `NSImage(cgImage:size:)` so logical size stays the true page size in PDF points while pixels
+        // provide supersampled detail.
+        guard let colorSpace = CGColorSpace(name: CGColorSpace.sRGB) else { return nil }
+        guard let ctx = CGContext(
+            data: nil,
+            width: pixelW,
+            height: pixelH,
+            bitsPerComponent: 8,
+            bytesPerRow: 0,
+            space: colorSpace,
+            bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue
+        )
+        else { return nil }
 
-            ctx.setFillColor(NSColor.white.cgColor)
-            ctx.fill(targetRect)
+        ctx.setFillColor(gray: 1, alpha: 1)
+        ctx.fill(targetRect)
 
-            ctx.saveGState()
-            let transform = cgPage.getDrawingTransform(.mediaBox, rect: targetRect, rotate: 0, preserveAspectRatio: true)
-            ctx.concatenate(transform)
-            ctx.drawPDFPage(cgPage)
+        ctx.saveGState()
+        let transform = cgPage.getDrawingTransform(.mediaBox, rect: targetRect, rotate: 0, preserveAspectRatio: true)
+        ctx.concatenate(transform)
+        ctx.drawPDFPage(cgPage)
 
-            ctx.setBlendMode(.normal)
-            ctx.setFillColor(NSColor.black.cgColor)
-            for r in merged {
-                ctx.fill(r)
-            }
-            ctx.restoreGState()
-            return true
+        ctx.setBlendMode(.normal)
+        ctx.setFillColor(gray: 0, alpha: 1)
+        for r in merged {
+            ctx.fill(r)
         }
-        return image
+        ctx.restoreGState()
+
+        guard let cgImage = ctx.makeImage() else { return nil }
+        let logicalSize = NSSize(width: mediaRect.width, height: mediaRect.height)
+        return NSImage(cgImage: cgImage, size: logicalSize)
     }
 
     /// Keep redaction passes from leaving thin gaps between adjacent user rectangles.
@@ -303,19 +317,29 @@ enum PDFToolkit {
         let pixelH = max(1, Int(mediaRect.height * scale))
         let targetRect = CGRect(x: 0, y: 0, width: CGFloat(pixelW), height: CGFloat(pixelH))
 
-        let image = NSImage(size: NSSize(width: pixelW, height: pixelH), flipped: false) { _ in
-            guard let ctx = NSGraphicsContext.current?.cgContext else { return false }
+        guard let colorSpace = CGColorSpace(name: CGColorSpace.sRGB) else { return nil }
+        guard let ctx = CGContext(
+            data: nil,
+            width: pixelW,
+            height: pixelH,
+            bitsPerComponent: 8,
+            bytesPerRow: 0,
+            space: colorSpace,
+            bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue
+        )
+        else { return nil }
 
-            ctx.setFillColor(NSColor.white.cgColor)
-            ctx.fill(targetRect)
+        ctx.setFillColor(gray: 1, alpha: 1)
+        ctx.fill(targetRect)
 
-            ctx.saveGState()
-            let transform = cgPage.getDrawingTransform(.mediaBox, rect: targetRect, rotate: 0, preserveAspectRatio: true)
-            ctx.concatenate(transform)
-            ctx.drawPDFPage(cgPage)
-            ctx.restoreGState()
-            return true
-        }
-        return image
+        ctx.saveGState()
+        let transform = cgPage.getDrawingTransform(.mediaBox, rect: targetRect, rotate: 0, preserveAspectRatio: true)
+        ctx.concatenate(transform)
+        ctx.drawPDFPage(cgPage)
+        ctx.restoreGState()
+
+        guard let cgImage = ctx.makeImage() else { return nil }
+        let logicalSize = NSSize(width: mediaRect.width, height: mediaRect.height)
+        return NSImage(cgImage: cgImage, size: logicalSize)
     }
 }

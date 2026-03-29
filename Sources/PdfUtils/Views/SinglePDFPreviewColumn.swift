@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// Right-hand preview column for single-file tools (Compress, Rotate), aligned with Merge PDF’s preview pane.
+/// Right-hand preview column for tools that show page thumbnails (Merge, Compress, Rotate, Extract, Delete).
 struct SinglePDFPreviewColumn: View {
     let thumbnails: [PDFPageThumbnail]
     let isGenerating: Bool

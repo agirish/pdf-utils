@@ -1,4 +1,12 @@
+import Foundation
 import SwiftUI
+
+extension String {
+    /// Basename for SwiftUI `fileExporter` `defaultFilename` (strips the last path extension).
+    var exportFilenameStem: String {
+        (self as NSString).deletingPathExtension
+    }
+}
 
 struct ToolFormContainer<Content: View>: View {
     @ViewBuilder var content: () -> Content

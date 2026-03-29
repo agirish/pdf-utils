@@ -57,8 +57,8 @@ struct DeletePagesToolView: View {
         .fileExporter(
             isPresented: $showExporter,
             document: exportDoc,
-            contentType: UTType.pdf,
-            defaultFilename: stem(suggestedName)
+            contentType: .pdf,
+            defaultFilename: suggestedName.exportFilenameStem
         ) { result in
             exportDoc = nil
             if case .failure(let err) = result { alertMessage = err.localizedDescription }
@@ -276,10 +276,6 @@ struct DeletePagesToolView: View {
         }
     }
 
-    private func stem(_ name: String) -> String {
-        (name as NSString).deletingPathExtension
-    }
-
     // MARK: - Export
 
     @MainActor
@@ -290,7 +286,11 @@ struct DeletePagesToolView: View {
         }
 
         busy = true
-        defer { busy = false }
+        AppStateManager.shared.beginOperation(Tool.deletePages.title)
+        defer {
+            busy = false
+            AppStateManager.shared.endOperation(Tool.deletePages.title)
+        }
 
         suggestedName = fileURL.deletingPathExtension().lastPathComponent + "-edited.pdf"
 

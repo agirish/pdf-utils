@@ -8,12 +8,6 @@ private struct MergeEntry: Identifiable, Equatable {
     let url: URL
 }
 
-private struct PreviewPage: Identifiable {
-    var id: Int { number }
-    let image: NSImage
-    let number: Int
-}
-
 private struct MergeResult {
     let outputURL: URL
     let totalPages: Int
@@ -31,7 +25,7 @@ struct MergeToolView: View {
     @State private var totalPages = 0
     @State private var pageSummaryLoading = false
 
-    @State private var previewPages: [PreviewPage] = []
+    @State private var previewPages: [PDFPageThumbnail] = []
     @State private var thumbnailSize: CGFloat = 120
     @State private var isGeneratingPreviews = false
     @State private var previewTask: Task<Void, Never>?
@@ -51,8 +45,17 @@ struct MergeToolView: View {
                 HSplitView {
                     sidebarColumn
                         .frame(minWidth: 280, idealWidth: 340, maxWidth: 520)
-                    previewDetailColumn
-                        .frame(minWidth: 360)
+                    SinglePDFPreviewColumn(
+                        thumbnails: previewPages,
+                        isGenerating: isGeneratingPreviews,
+                        thumbnailSize: $thumbnailSize,
+                        accent: Tool.merge.accent,
+                        previewSubtitle: "Visual order of the merged pages (matches the list on the left).",
+                        emptyTitle: "No PDFs selected for merge",
+                        emptySubtitle: "Add PDFs in the sidebar or drop PDFs onto the list.",
+                        emptySystemImage: "doc.on.doc"
+                    )
+                    .frame(minWidth: 360)
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
@@ -364,109 +367,6 @@ struct MergeToolView: View {
         return "Drag more PDFs here to append. Reorder rows or use arrows; Delete removes the selection."
     }
 
-    // MARK: - Preview (detail)
-
-    private var previewDetailColumn: some View {
-        Group {
-            if !previewPages.isEmpty || isGeneratingPreviews {
-                VStack(alignment: .leading, spacing: 0) {
-                    VStack(alignment: .leading, spacing: 14) {
-                        HStack(alignment: .center) {
-                            Text("Preview")
-                                .font(.title3.weight(.semibold))
-                            Spacer(minLength: 8)
-                            if isGeneratingPreviews {
-                                ProgressView()
-                                    .controlSize(.regular)
-                            }
-                        }
-                        Text("Visual order of the merged pages.")
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-
-                        // Compact slider: fixed max width so it does not stretch across the pane; S/L anchors read clearly.
-                        VStack(alignment: .leading, spacing: 8) {
-                            Text("Thumbnail size")
-                                .font(.subheadline.weight(.semibold))
-                            HStack(alignment: .center, spacing: 10) {
-                                Text("S")
-                                    .font(.subheadline.weight(.semibold))
-                                    .foregroundStyle(.secondary)
-                                    .frame(width: 22, alignment: .center)
-                                Slider(value: $thumbnailSize, in: 60...240)
-                                    .controlSize(.regular)
-                                    .disabled(isGeneratingPreviews)
-                                    .opacity(isGeneratingPreviews ? 0.45 : 1)
-                                Text("L")
-                                    .font(.subheadline.weight(.semibold))
-                                    .foregroundStyle(.secondary)
-                                    .frame(width: 22, alignment: .center)
-                            }
-                            Text("\(Int(thumbnailSize)) pt")
-                                .font(.subheadline.monospacedDigit())
-                                .foregroundStyle(.secondary)
-                                .frame(maxWidth: .infinity, alignment: .trailing)
-                                .padding(.trailing, 4)
-                        }
-                        .padding(14)
-                        .frame(maxWidth: 360, alignment: .leading)
-                        .background {
-                            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                .strokeBorder(Color.primary.opacity(0.12), lineWidth: 1)
-                        }
-                        .accessibilityElement(children: .combine)
-                        .accessibilityLabel("Thumbnail size, \(Int(thumbnailSize)) points")
-                    }
-                    .padding(18)
-
-                    Divider()
-                        .opacity(0.35)
-
-                    ScrollView {
-                        LazyVGrid(columns: [GridItem(.adaptive(minimum: thumbnailSize), spacing: 16)], spacing: 16) {
-                            ForEach(previewPages) { page in
-                                ZStack(alignment: .bottomTrailing) {
-                                    Image(nsImage: page.image)
-                                        .resizable()
-                                        .aspectRatio(contentMode: .fit)
-                                        .frame(width: thumbnailSize)
-                                        .background(Color.white)
-                                        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-                                        .shadow(color: .black.opacity(0.1), radius: 4, y: 2)
-
-                                    Text("\(page.number)")
-                                        .font(.caption.weight(.bold))
-                                        .foregroundStyle(.white)
-                                        .padding(.horizontal, 6)
-                                        .padding(.vertical, 2)
-                                        .background(Tool.merge.accent)
-                                        .clipShape(Capsule())
-                                        .padding(6)
-                                }
-                            }
-                        }
-                        .padding(16)
-                    }
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .background(ToolPreviewPaneBackground())
-            } else {
-                VStack(spacing: 16) {
-                    Image(systemName: "doc.on.doc")
-                        .font(.system(size: 56))
-                        .foregroundStyle(.tertiary)
-                    Text("No PDFs selected for merge.")
-                        .font(.title2)
-                        .foregroundStyle(.secondary)
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .background(ToolPreviewPaneBackground())
-            }
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-    }
-
     // MARK: - Actions
 
     private func appendUnique(_ urls: [URL]) {
@@ -565,8 +465,8 @@ struct MergeToolView: View {
 
         previewTask = Task {
             do {
-                let loadedPages: [PreviewPage] = try await PDFBackgroundWork.run {
-                    var bgPreviews: [PreviewPage] = []
+                let loadedPages: [PDFPageThumbnail] = try await PDFBackgroundWork.run {
+                    var bgPreviews: [PDFPageThumbnail] = []
                     var globalPageNum = 1
                     try URLCollectionSecurityScope.withAccess(urlsSnapshot) {
                         for url in urlsSnapshot {
@@ -585,7 +485,7 @@ struct MergeToolView: View {
                                 )
 
                                 let image = page.thumbnail(of: thumbSize, for: .mediaBox)
-                                bgPreviews.append(PreviewPage(image: image, number: globalPageNum))
+                                bgPreviews.append(PDFPageThumbnail(pageNumber: globalPageNum, image: image))
                                 globalPageNum += 1
                             }
                         }
@@ -628,10 +528,10 @@ struct MergeToolView: View {
         }
 
         busy = true
-        AppStateManager.shared.beginOperation("Merge PDF")
+        AppStateManager.shared.beginOperation(Tool.merge.title)
         defer {
             busy = false
-            AppStateManager.shared.endOperation("Merge PDF")
+            AppStateManager.shared.endOperation(Tool.merge.title)
         }
 
         let urlsSnapshot = entries.map(\.url)

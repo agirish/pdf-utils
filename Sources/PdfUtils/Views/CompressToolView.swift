@@ -56,7 +56,7 @@ struct CompressToolView: View {
             isPresented: $showExporter,
             document: exportDoc,
             contentType: .pdf,
-            defaultFilename: stem(suggestedName)
+            defaultFilename: suggestedName.exportFilenameStem
         ) { result in
             exportDoc = nil
             if case .failure(let err) = result {
@@ -279,10 +279,6 @@ struct CompressToolView: View {
 
     // MARK: - Export
 
-    private func stem(_ name: String) -> String {
-        (name as NSString).deletingPathExtension
-    }
-
     private var qualityLabel: String {
         switch quality {
         case ..<0.45: return "Smaller file"
@@ -299,7 +295,11 @@ struct CompressToolView: View {
         }
 
         busy = true
-        defer { busy = false }
+        AppStateManager.shared.beginOperation(Tool.compress.title)
+        defer {
+            busy = false
+            AppStateManager.shared.endOperation(Tool.compress.title)
+        }
 
         suggestedName = fileURL.deletingPathExtension().lastPathComponent + "-compressed.pdf"
         let qualityValue = quality

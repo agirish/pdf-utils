@@ -67,7 +67,7 @@ struct RotateToolView: View {
             isPresented: $showExporter,
             document: exportDoc,
             contentType: .pdf,
-            defaultFilename: (suggestedName as NSString).deletingPathExtension
+            defaultFilename: suggestedName.exportFilenameStem
         ) { result in
             exportDoc = nil
             if case .failure(let err) = result { alertMessage = err.localizedDescription }
@@ -316,7 +316,11 @@ struct RotateToolView: View {
         }
 
         busy = true
-        defer { busy = false }
+        AppStateManager.shared.beginOperation(Tool.rotate.title)
+        defer {
+            busy = false
+            AppStateManager.shared.endOperation(Tool.rotate.title)
+        }
 
         suggestedName = fileURL.deletingPathExtension().lastPathComponent + "-rotated.pdf"
         let scopeSnapshot = scope

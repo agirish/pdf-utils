@@ -41,6 +41,7 @@ struct ToolDetailView: View {
                 .accessibilityLabel("Help")
             }
         }
+        .toolbarBackground(.ultraThinMaterial, for: .automatic)
         .sheet(isPresented: $showHelp) {
             ToolHelpSheet(tool: tool)
         }

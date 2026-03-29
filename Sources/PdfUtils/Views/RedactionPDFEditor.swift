@@ -8,7 +8,7 @@ struct RedactionPDFEditor: NSViewRepresentable {
     @Binding var marks: [RedactionMark]
 
     func makeCoordinator() -> Coordinator {
-        Coordinator(self)
+        Coordinator(parent: self, marks: $marks)
     }
 
     func makeNSView(context: Context) -> NSView {
@@ -56,6 +56,7 @@ struct RedactionPDFEditor: NSViewRepresentable {
 
     func updateNSView(_ nsView: NSView, context: Context) {
         context.coordinator.parent = self
+        context.coordinator.marksBinding = $marks
         if context.coordinator.pdfView?.document !== document {
             context.coordinator.pdfView?.document = document
         }
@@ -63,16 +64,19 @@ struct RedactionPDFEditor: NSViewRepresentable {
         context.coordinator.overlay?.needsDisplay = true
     }
 
+    @MainActor
     final class Coordinator: NSObject, NSGestureRecognizerDelegate {
         var parent: RedactionPDFEditor
+        var marksBinding: Binding<[RedactionMark]>
         weak var pdfView: PDFView?
-        weak var overlay: RedactionOverlayView?
+        fileprivate weak var overlay: RedactionOverlayView?
 
         private var dragStartPage: PDFPage?
         private var dragStartOnPage: CGPoint?
 
-        init(_ parent: RedactionPDFEditor) {
+        init(parent: RedactionPDFEditor, marks: Binding<[RedactionMark]>) {
             self.parent = parent
+            self.marksBinding = marks
         }
 
         func gestureRecognizerShouldBegin(_ gestureRecognizer: NSGestureRecognizer) -> Bool {
@@ -95,7 +99,7 @@ struct RedactionPDFEditor: NSViewRepresentable {
                 overlay?.needsDisplay = true
 
             case .changed:
-                guard let startPage = dragStartPage, dragStartOnPage != nil else { return }
+                guard let startPage = dragStartPage, let startPt = dragStartOnPage else { return }
                 guard let endPage = pdfView.page(for: loc, nearest: true), endPage === startPage else { return }
                 let endPt = pdfView.convert(loc, to: startPage)
                 overlay?.draftRect = RedactionMarkGeometry.normalizedDragRect(start: startPt, end: endPt)
@@ -118,7 +122,7 @@ struct RedactionPDFEditor: NSViewRepresentable {
                 guard let clipped = RedactionMarkGeometry.clipToMediaBox(rect, mediaBox: media) else { return }
                 guard let doc = pdfView.document else { return }
                 guard let idx = (0..<doc.pageCount).first(where: { doc.page(at: $0) === startPage }) else { return }
-                parent.marks.wrappedValue.append(RedactionMark(pageIndex: idx, rect: clipped))
+                marksBinding.wrappedValue.append(RedactionMark(pageIndex: idx, rect: clipped))
 
             default:
                 break
@@ -127,7 +131,7 @@ struct RedactionPDFEditor: NSViewRepresentable {
     }
 }
 
-private final class RedactionOverlayView: NSView {
+fileprivate final class RedactionOverlayView: NSView {
     weak var pdfView: PDFView?
     var marks: [RedactionMark] = []
     weak var draftPage: PDFPage?

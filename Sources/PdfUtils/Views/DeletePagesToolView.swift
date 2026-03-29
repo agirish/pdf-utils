@@ -38,7 +38,7 @@ struct DeletePagesToolView: View {
                 previewSubtitle: "Full document preview; only the page numbers you list are removed from the saved copy.",
                 emptyTitle: "No PDF selected",
                 emptySubtitle: "Drop a PDF here, choose one, or use Add PDF… to see thumbnails.",
-                emptySystemImage: "doc.badge.minus"
+                emptySystemImage: Tool.deletePages.symbolName
             )
             .frame(minWidth: 360)
         }
@@ -118,7 +118,7 @@ struct DeletePagesToolView: View {
     private var headerRow: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(alignment: .center, spacing: 12) {
-                Image(systemName: "doc.badge.minus")
+                Image(systemName: Tool.deletePages.symbolName)
                     .symbolRenderingMode(.hierarchical)
                     .foregroundStyle(Tool.deletePages.accent)
                     .font(.title)
@@ -160,7 +160,7 @@ struct DeletePagesToolView: View {
 
     private var emptyDropZone: some View {
         VStack(spacing: 14) {
-            Image(systemName: "doc.badge.minus")
+            Image(systemName: Tool.deletePages.symbolName)
                 .font(.system(size: 36, weight: .light))
                 .symbolRenderingMode(.hierarchical)
                 .foregroundStyle(Tool.deletePages.accent.opacity(0.85))

@@ -56,7 +56,8 @@ enum Tool: String, CaseIterable, Identifiable, Hashable {
         case .rotate: return "rotate.right"
         case .merge: return "square.stack.3d.up"
         case .extract: return "doc.on.clipboard"
-        case .deletePages: return "doc.badge.minus"
+        // Badge-style "doc" symbols can look blank with hierarchical tinting on dashboard tiles; use a solid portrait-page + minus.
+        case .deletePages: return "minus.rectangle.portrait.fill"
         }
     }
 

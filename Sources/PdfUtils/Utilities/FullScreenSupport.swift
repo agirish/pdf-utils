@@ -1,6 +1,7 @@
 import AppKit
 
 /// Remembers the `WindowGroup` host window so full-screen toggles work when `keyWindow` / `mainWindow` are unset.
+@MainActor
 enum FullScreenSupport {
     private static weak var hostingWindow: NSWindow?
 

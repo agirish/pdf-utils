@@ -6,7 +6,6 @@ struct RootView: View {
             DashboardView()
         }
         .frame(minWidth: 960, minHeight: 640)
-        .mainWindowChromeConfigured()
         .onAppear {
             if UserDefaults.standard.string(forKey: SettingsKeys.mainWindowBackground) == "accentGradient" {
                 UserDefaults.standard.set(

@@ -6,7 +6,8 @@ struct PdfUtilsApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
 
     init() {
-        // Without this, macOS can show a title-bar “+” for window tabbing instead of the usual zoom / full-screen traffic light.
+        // Prefer the green zoom / full-screen traffic light over tabbing “+” (system may still override).
+        // Do not mutate each NSWindow’s styleMask or collectionBehavior — that breaks native full screen on some macOS versions (see e0656fc).
         NSWindow.allowsAutomaticWindowTabbing = false
     }
 
@@ -15,14 +16,6 @@ struct PdfUtilsApp: App {
             RootView()
         }
         .defaultSize(width: 1040, height: 720)
-        .commands {
-            CommandGroup(after: .windowArrangement) {
-                Button("Toggle Full Screen") {
-                    FullScreenSupport.toggle()
-                }
-                .keyboardShortcut("f", modifiers: [.command, .control])
-            }
-        }
 
         Settings {
             SettingsView()

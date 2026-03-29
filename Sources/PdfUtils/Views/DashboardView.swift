@@ -36,7 +36,13 @@ struct DashboardView: View {
                 }
                 .help("About pdf-utils and toolbar controls")
                 .accessibilityLabel("Help")
-
+                Button {
+                    FullScreenSupport.toggle()
+                } label: {
+                    Image(systemName: "arrow.up.left.and.arrow.down.right")
+                }
+                .help("Enter or exit full screen")
+                .accessibilityLabel("Toggle full screen")
             }
         }
         .toolbarBackground(.ultraThinMaterial, for: .automatic)
@@ -54,24 +60,6 @@ struct DashboardView: View {
                 .foregroundStyle(.secondary)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-    }
-}
-
-struct DashboardBackground: View {
-    var body: some View {
-        ZStack {
-            Color(nsColor: .windowBackgroundColor)
-            LinearGradient(
-                colors: [
-                    Color.accentColor.opacity(0.08),
-                    Color.clear,
-                    Color.purple.opacity(0.06),
-                ],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            )
-        }
-        .ignoresSafeArea()
     }
 }
 

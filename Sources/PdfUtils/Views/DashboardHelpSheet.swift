@@ -33,6 +33,17 @@ struct DashboardHelpSheet: View {
                     }
 
                     VStack(alignment: .leading, spacing: 10) {
+                        Text("Settings")
+                            .font(.headline)
+                        Label {
+                            Text("Open pdf-utils Settings (⌘,) for Liquid glass hue and strength, flat background modes, and the Merge PDF preview pane.")
+                        } icon: {
+                            Image(systemName: "gearshape")
+                        }
+                        .font(.subheadline)
+                    }
+
+                    VStack(alignment: .leading, spacing: 10) {
                         Text("Tips")
                             .font(.headline)
                         Text("If a tool says it can’t access a file, pick it again with Choose… or Add PDFs… so macOS can grant access.")

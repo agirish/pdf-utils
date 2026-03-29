@@ -3,13 +3,7 @@ import SwiftUI
 
 @main
 struct PdfUtilsApp: App {
-    @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
-
     init() {
-        // Enforce standard GUI activation policy. When running directly via `swift run` or as an unbundled executable,
-        // this guarantees the app has a menu bar and natively supports full-screen spaces.
-        NSApplication.shared.setActivationPolicy(.regular)
-        NSApplication.shared.activate(ignoringOtherApps: true)
         // Without this, macOS can show a title-bar “+” for window tabbing instead of the usual zoom / full-screen traffic light.
         NSWindow.allowsAutomaticWindowTabbing = false
     }
@@ -19,5 +13,17 @@ struct PdfUtilsApp: App {
             RootView()
         }
         .defaultSize(width: 1040, height: 720)
+        .commands {
+            CommandGroup(after: .windowArrangement) {
+                Button("Toggle Full Screen") {
+                    FullScreenSupport.toggle()
+                }
+                .keyboardShortcut("f", modifiers: [.command, .control])
+            }
+        }
+
+        Settings {
+            SettingsView()
+        }
     }
 }

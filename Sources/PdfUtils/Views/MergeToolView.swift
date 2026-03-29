@@ -450,7 +450,7 @@ struct MergeToolView: View {
                     }
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .background(Color.white)
+                .background(MergePreviewBackground())
             } else {
                 VStack(spacing: 16) {
                     Image(systemName: "doc.on.doc")
@@ -461,7 +461,7 @@ struct MergeToolView: View {
                         .foregroundStyle(.secondary)
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .background(Color.white)
+                .background(MergePreviewBackground())
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)

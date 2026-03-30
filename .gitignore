@@ -1,4 +1,6 @@
 .build/
 .swiftpm/xcode/
-*.xcodeproj/xcuserdata/
 DerivedData/
+
+# XcodeGen Generated IDE Elements
+PdfUtils.xcodeproj/

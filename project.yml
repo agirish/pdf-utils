@@ -1,0 +1,27 @@
+name: PdfUtils
+options:
+  bundleIdPrefix: com.pdfutils
+targets:
+  PdfUtils:
+    type: application
+    platform: macOS
+    deploymentTarget: "15.0"
+    sources:
+      - path: MacApp
+    settings:
+      base:
+        ASSETCATALOG_COMPILER_APPICON_NAME: "AppIcon"
+        INFOPLIST_FILE: MacApp/Info.plist
+        MARKETING_VERSION: "1.0"
+        CURRENT_PROJECT_VERSION: "1"
+    dependencies:
+      - package: PdfToolkit
+    info:
+      path: MacApp/Info.plist
+      properties:
+        CFBundleDisplayName: "PDF Utils"
+        CFBundleName: "PDF Utils"
+
+packages:
+  PdfToolkit:
+    path: Packages/PdfToolkit

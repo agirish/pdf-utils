@@ -9,9 +9,15 @@ let package = Package(
     products: [
         .executable(name: "PdfUtils", targets: ["PdfUtils"]),
     ],
+    dependencies: [
+        .package(path: "Packages/PdfToolkit"),
+    ],
     targets: [
         .executableTarget(
             name: "PdfUtils",
+            dependencies: [
+                .product(name: "PdfToolkit", package: "PdfToolkit"),
+            ],
             path: "MacApp",
             exclude: ["Info.plist"],
             resources: [

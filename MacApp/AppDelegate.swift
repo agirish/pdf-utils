@@ -1,5 +1,6 @@
 import AppKit
 import SwiftUI
+import PdfToolkit
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
     /// Apply activation policy and Dock icon as early as possible so the process is not stuck with the generic

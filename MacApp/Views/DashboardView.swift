@@ -1,4 +1,5 @@
 import SwiftUI
+import PdfToolkit
 
 struct DashboardView: View {
     @State private var showHelp = false

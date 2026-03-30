@@ -1,5 +1,6 @@
 import AppKit
 import SwiftUI
+import PdfToolkit
 
 @main
 struct PdfUtilsApp: App {

@@ -12,8 +12,10 @@ let package = Package(
     targets: [
         .executableTarget(
             name: "PdfUtils",
-            path: "Sources/PdfUtils",
+            path: "MacApp",
+            exclude: ["Info.plist"],
             resources: [
+                .process("Assets.xcassets"),
                 .process("Resources"),
             ],
             linkerSettings: [
@@ -21,7 +23,7 @@ let package = Package(
                     "-Xlinker", "-sectcreate",
                     "-Xlinker", "__TEXT",
                     "-Xlinker", "__info_plist",
-                    "-Xlinker", "Metadata/AppInfo.plist",
+                    "-Xlinker", "MacApp/Info.plist",
                 ], .when(platforms: [.macOS])),
             ]
         ),

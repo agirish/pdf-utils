@@ -6,6 +6,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @MainActor
     func applicationWillFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.regular)
+        // SPM places processed assets (including AppIcon.icns) in PdfUtils_PdfUtils.bundle; the
+        // embedded Info.plist is not enough for Launch Services to attach that icon to the Dock.
+        if let url = Bundle.module.url(forResource: "AppIcon", withExtension: "icns"),
+           let icon = NSImage(contentsOf: url) {
+            NSApp.applicationIconImage = icon
+        }
     }
 
     @MainActor

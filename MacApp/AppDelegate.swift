@@ -4,19 +4,40 @@ import PdfToolkit
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
     @MainActor
+    private func applyDockIconIfAvailable() {
+        let candidates: [(name: String, ext: String?, subdirectory: String?)] = [
+            ("icon_512x512@2x", "png", "Assets.xcassets/AppIcon.appiconset"),
+            ("icon_512x512", "png", "Assets.xcassets/AppIcon.appiconset"),
+            ("AppIcon", "icns", nil),
+        ]
+
+        for candidate in candidates {
+            guard let url = Bundle.module.url(
+                forResource: candidate.name,
+                withExtension: candidate.ext,
+                subdirectory: candidate.subdirectory
+            ) else {
+                continue
+            }
+
+            if let icon = NSImage(contentsOf: url) {
+                NSApp.applicationIconImage = icon
+                return
+            }
+        }
+    }
+
+    @MainActor
     func applicationWillFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.regular)
-        // SPM places processed assets (including AppIcon.icns) in PdfUtils_PdfUtils.bundle; the
-        // embedded Info.plist is not enough for Launch Services to attach that icon to the Dock.
-        if let url = Bundle.module.url(forResource: "AppIcon", withExtension: "icns"),
-           let icon = NSImage(contentsOf: url) {
-            NSApp.applicationIconImage = icon
-        }
+        applyDockIconIfAvailable()
     }
 
     @MainActor
     func applicationDidFinishLaunching(_ notification: Notification) {
         DispatchQueue.main.async {
+            // Re-apply after launch in case the Dock initialized before resources were loaded.
+            self.applyDockIconIfAvailable()
             NSApp.mainMenu?.items.first?.title = AppBrand.displayName
         }
     }

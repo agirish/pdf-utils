@@ -11,6 +11,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             ("AppIcon", "icns", nil),
         ]
 
+        func applyIcon(at url: URL) -> Bool {
+            guard let icon = NSImage(contentsOf: url) else {
+                return false
+            }
+            NSApp.applicationIconImage = icon
+            NSLog("Dock icon applied from: \(url.path)")
+            return true
+        }
+
         for candidate in candidates {
             guard let url = Bundle.module.url(
                 forResource: candidate.name,
@@ -20,11 +29,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 continue
             }
 
-            if let icon = NSImage(contentsOf: url) {
-                NSApp.applicationIconImage = icon
+            if applyIcon(at: url) {
                 return
             }
         }
+
+#if DEBUG
+        // Last-resort fallback when running from package schemes that don't materialize resources as expected.
+        let sourceIcon = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .appendingPathComponent("Assets.xcassets/AppIcon.appiconset/icon_512x512@2x.png")
+        if applyIcon(at: sourceIcon) {
+            return
+        }
+#endif
+
+        NSLog("Dock icon could not be applied from bundle or source fallback.")
     }
 
     @MainActor

@@ -5,46 +5,16 @@ import PdfToolkit
 final class AppDelegate: NSObject, NSApplicationDelegate {
     @MainActor
     private func applyDockIconIfAvailable() {
-        let candidates: [(name: String, ext: String?, subdirectory: String?)] = [
-            ("icon_512x512@2x", "png", "Assets.xcassets/AppIcon.appiconset"),
-            ("icon_512x512", "png", "Assets.xcassets/AppIcon.appiconset"),
-            ("AppIcon", "icns", nil),
-        ]
-
-        func applyIcon(at url: URL) -> Bool {
-            guard let icon = NSImage(contentsOf: url) else {
-                return false
-            }
-            NSApp.applicationIconImage = icon
-            NSLog("Dock icon applied from: \(url.path)")
-            return true
-        }
-
-        for candidate in candidates {
-            guard let url = Bundle.module.url(
-                forResource: candidate.name,
-                withExtension: candidate.ext,
-                subdirectory: candidate.subdirectory
-            ) else {
-                continue
-            }
-
-            if applyIcon(at: url) {
-                return
-            }
-        }
-
-#if DEBUG
-        // Last-resort fallback when running from package schemes that don't materialize resources as expected.
-        let sourceIcon = URL(fileURLWithPath: #filePath)
-            .deletingLastPathComponent()
-            .appendingPathComponent("Assets.xcassets/AppIcon.appiconset/icon_512x512@2x.png")
-        if applyIcon(at: sourceIcon) {
+        // SwiftPM places app assets in the module bundle when running package schemes.
+        guard let iconURL = Bundle.module.url(
+            forResource: "icon_512x512@2x",
+            withExtension: "png",
+            subdirectory: "Assets.xcassets/AppIcon.appiconset"
+        ),
+        let icon = NSImage(contentsOf: iconURL) else {
             return
         }
-#endif
-
-        NSLog("Dock icon could not be applied from bundle or source fallback.")
+        NSApp.applicationIconImage = icon
     }
 
     @MainActor
@@ -56,8 +26,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @MainActor
     func applicationDidFinishLaunching(_ notification: Notification) {
         DispatchQueue.main.async {
-            // Re-apply after launch in case the Dock initialized before resources were loaded.
-            self.applyDockIconIfAvailable()
             NSApp.mainMenu?.items.first?.title = AppBrand.displayName
         }
     }

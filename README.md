@@ -43,12 +43,13 @@ swift run PdfUtils
 ## Repository layout
 
 ```
-Sources/PdfUtils/
-  PdfUtilsApp.swift       # App entry, window
-  Models/Tool.swift       # Dashboard tiles & metadata
-  Services/               # PDFKit operations + errors
-  Utilities/PageRangeParser.swift
-  Views/                  # Dashboard, tool screens, shared chrome
+Package.swift              # Swift package; open this in Xcode
+MacApp/                    # App target (entry point, shell views, assets)
+  PdfUtilsApp.swift
+  Views/
+Packages/PdfToolkit/       # Shared library: tools UI, PDF operations, settings
+  Sources/PdfToolkit/
+project.yml                # Optional: XcodeGen → PdfUtils.xcodeproj (gitignored)
 ```
 
 ## Capabilities & privacy

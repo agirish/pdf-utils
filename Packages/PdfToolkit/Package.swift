@@ -12,10 +12,7 @@ let package = Package(
     targets: [
         .target(
             name: "PdfToolkit",
-            path: "Sources/PdfToolkit",
-            resources: [
-                .process("Resources"),
-            ]
+            path: "Sources/PdfToolkit"
         ),
     ]
 )

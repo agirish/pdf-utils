@@ -2,5 +2,8 @@
 .swiftpm/xcode/
 DerivedData/
 
+# Local scratch (e.g. icon exports)
+tmp_icon/
+
 # XcodeGen Generated IDE Elements
 PdfUtils.xcodeproj/

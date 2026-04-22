@@ -22,7 +22,6 @@ let package = Package(
             exclude: ["Info.plist"],
             resources: [
                 .process("Assets.xcassets"),
-                .process("Resources"),
             ],
             linkerSettings: [
                 .unsafeFlags([

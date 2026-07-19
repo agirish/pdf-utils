@@ -14,6 +14,8 @@ enum PDFOperationError: LocalizedError {
     case emptyPDF
     case noRedactions
     case redactionFailed
+    case watermarkTextRequired
+    case watermarkFailed
 
     var errorDescription: String? {
         switch self {
@@ -43,6 +45,10 @@ enum PDFOperationError: LocalizedError {
             return "Draw at least one redaction rectangle on a page before saving."
         case .redactionFailed:
             return "Redaction failed while rebuilding the PDF."
+        case .watermarkTextRequired:
+            return "Enter the watermark text to stamp on each page."
+        case .watermarkFailed:
+            return "Could not build the watermarked PDF."
         }
     }
 }

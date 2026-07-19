@@ -146,6 +146,28 @@ extension Tool {
                     "If nothing seems to happen, confirm macOS allowed access to the file (try choosing it again).",
                 ]
             )
+        case .watermark:
+            return ToolHelpContent(
+                overview:
+                    "Watermark stamps text across every page and bakes it into a new PDF. The underlying page is copied as vector content, so its text stays selectable; the watermark itself becomes part of the page, not a removable annotation.",
+                steps: [
+                    "Choose or drop a PDF.",
+                    "Type the watermark text (DRAFT, CONFIDENTIAL, a name, …).",
+                    "Pick a color and choose Centered or Tiled, then tune Size, Opacity, and Angle — the small preview updates as you go.",
+                    "Click Watermark & save… and pick a name for the new file.",
+                ],
+                controls: [
+                    ("Watermark text", "The string stamped on every page. Required."),
+                    ("Color", "One of four ink colors for the stamp."),
+                    ("Centered / Tiled", "Centered draws the text once in the middle; Tiled repeats it across the whole page."),
+                    ("Size / Opacity / Angle", "Point size, fill strength (5–100%), and rotation (−90° to 90°) of the text."),
+                    ("Watermark & save…", "Builds a new PDF with the stamp baked in; the original file is unchanged."),
+                ],
+                tips: [
+                    "A subtle watermark usually reads best at 15–30% opacity and 45°.",
+                    "Interactive form fields and link annotations are not carried into the watermarked copy, since each page is redrawn from its content.",
+                ]
+            )
         case .redact:
             return ToolHelpContent(
                 overview:

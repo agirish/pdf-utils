@@ -8,6 +8,7 @@ public enum Tool: String, CaseIterable, Identifiable, Hashable {
     case extract
     case reorder
     case deletePages
+    case watermark
     case redact
 
     public var id: String { rawValue }
@@ -21,6 +22,7 @@ public enum Tool: String, CaseIterable, Identifiable, Hashable {
         case .extract: return "Extract PDF Pages"
         case .reorder: return "Reorder Pages"
         case .deletePages: return "Delete PDF Pages"
+        case .watermark: return "Watermark PDF"
         case .redact: return "Redact PDF"
         }
     }
@@ -41,6 +43,8 @@ public enum Tool: String, CaseIterable, Identifiable, Hashable {
             return "Rearrange pages into a new order"
         case .deletePages:
             return "Remove unwanted pages"
+        case .watermark:
+            return "Stamp text across every page"
         case .redact:
             return "Permanently black out sensitive areas"
         }
@@ -63,6 +67,8 @@ public enum Tool: String, CaseIterable, Identifiable, Hashable {
             return "Drag pages into the order you want, then save a new PDF. The preview follows the arrangement so you can see the result before saving; the original file is untouched."
         case .deletePages:
             return "Produce a new PDF without the pages you specify. You must list which pages to drop—an empty field will not delete everything. At least one page must remain."
+        case .watermark:
+            return "Overlay text—DRAFT, CONFIDENTIAL, a name—across every page. Tune size, angle, opacity, and color, and choose a single centered stamp or a tiled pattern. The underlying page stays vector (text stays selectable); your original file is untouched."
         case .redact:
             return "Draw rectangles over names, account numbers, or images you want gone for good. Marked regions are rebuilt as solid black—text there can’t be copied or searched. Everything runs on your Mac; review marks before exporting."
         }
@@ -78,6 +84,7 @@ public enum Tool: String, CaseIterable, Identifiable, Hashable {
         case .reorder: return "arrow.up.arrow.down.square"
         // Badge-style "doc" symbols can look blank with hierarchical tinting on dashboard tiles; use a solid portrait-page + minus.
         case .deletePages: return "minus.rectangle.portrait.fill"
+        case .watermark: return "signature"
         case .redact: return "eraser.line.dashed"
         }
     }
@@ -91,6 +98,7 @@ public enum Tool: String, CaseIterable, Identifiable, Hashable {
         case .extract: return .teal
         case .reorder: return .mint
         case .deletePages: return .pink
+        case .watermark: return .brown
         case .redact: return Color(red: 0.78, green: 0.16, blue: 0.22)
         }
     }

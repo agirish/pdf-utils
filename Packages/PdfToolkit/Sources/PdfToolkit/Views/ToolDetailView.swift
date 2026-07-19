@@ -27,6 +27,8 @@ public struct ToolDetailView: View {
                     ReorderToolView()
                 case .deletePages:
                     DeletePagesToolView()
+                case .watermark:
+                    WatermarkToolView()
                 case .redact:
                     RedactToolView()
                 }

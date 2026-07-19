@@ -17,6 +17,21 @@ struct PDFRedactionExportOptions: Sendable {
     )
 }
 
+/// How the watermark text is stamped onto every page. RGB components (not `NSColor`) keep this
+/// `Sendable` for the background PDF queue.
+struct WatermarkOptions: Sendable {
+    var text: String
+    var fontSize: CGFloat
+    /// 0…1 fill opacity of the stamped text.
+    var opacity: CGFloat
+    var rotationDegrees: CGFloat
+    var red: CGFloat
+    var green: CGFloat
+    var blue: CGFloat
+    /// When true, the text is repeated across the whole page; otherwise it is drawn once, centered.
+    var tiled: Bool
+}
+
 enum PDFToolkit {
     /// Quick page count for UI summaries; the URL must already be readable (e.g. under active security scope).
     static func pageCount(at url: URL) -> Int? {
@@ -199,6 +214,99 @@ enum PDFToolkit {
         guard output.write(to: outputURL) else {
             throw PDFOperationError.couldNotWrite(outputURL)
         }
+    }
+
+    /// Stamps `options.text` onto every page and writes a new PDF.
+    ///
+    /// Each page is copied into a fresh CoreGraphics PDF context with `drawPDFPage`, which keeps the
+    /// original page **as vector content** (text stays selectable, graphics stay sharp) rather than
+    /// rasterizing it the way compression does. The watermark is then drawn on top with CoreText via
+    /// an `NSGraphicsContext` bridge, so it is baked into the page content stream — not a strippable
+    /// annotation. Intrinsic page rotation is honored: the output page's media box uses the page's
+    /// *displayed* size and `getDrawingTransform` maps the source upright before the stamp is added.
+    static func watermark(inputURL: URL, outputURL: URL, options: WatermarkOptions) throws {
+        let trimmed = options.text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { throw PDFOperationError.watermarkTextRequired }
+        guard let source = PDFDocument(url: inputURL) else {
+            throw PDFOperationError.couldNotOpen(inputURL)
+        }
+        guard source.pageCount > 0 else { throw PDFOperationError.emptyPDF }
+
+        let pdfData = NSMutableData()
+        guard let consumer = CGDataConsumer(data: pdfData as CFMutableData),
+              let ctx = CGContext(consumer: consumer, mediaBox: nil, nil)
+        else {
+            throw PDFOperationError.watermarkFailed
+        }
+
+        for i in 0..<source.pageCount {
+            guard let page = source.page(at: i), let cgPage = page.pageRef else { continue }
+            let media = page.bounds(for: .mediaBox)
+            let rotation = ((page.rotation % 360) + 360) % 360
+            let displaySize = (rotation == 90 || rotation == 270)
+                ? CGSize(width: media.height, height: media.width)
+                : media.size
+            let box = CGRect(origin: .zero, size: displaySize)
+
+            ctx.beginPDFPage([kCGPDFContextMediaBox as String: box] as CFDictionary)
+
+            ctx.saveGState()
+            let transform = cgPage.getDrawingTransform(.mediaBox, rect: box, rotate: 0, preserveAspectRatio: false)
+            ctx.concatenate(transform)
+            ctx.drawPDFPage(cgPage)
+            ctx.restoreGState()
+
+            drawWatermark(in: ctx, box: box, text: trimmed, options: options)
+
+            ctx.endPDFPage()
+        }
+        ctx.closePDF()
+
+        guard pdfData.length > 0 else { throw PDFOperationError.watermarkFailed }
+        try (pdfData as Data).write(to: outputURL)
+    }
+
+    private static func drawWatermark(in ctx: CGContext, box: CGRect, text: String, options: WatermarkOptions) {
+        let graphics = NSGraphicsContext(cgContext: ctx, flipped: false)
+        NSGraphicsContext.saveGraphicsState()
+        NSGraphicsContext.current = graphics
+
+        let color = NSColor(
+            srgbRed: options.red,
+            green: options.green,
+            blue: options.blue,
+            alpha: max(0, min(1, options.opacity))
+        )
+        let font = NSFont.boldSystemFont(ofSize: max(4, options.fontSize))
+        let attributes: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: color]
+        let string = NSAttributedString(string: text, attributes: attributes)
+        let textSize = string.size()
+        let radians = options.rotationDegrees * .pi / 180
+
+        ctx.saveGState()
+        ctx.translateBy(x: box.midX, y: box.midY)
+        ctx.rotate(by: radians)
+
+        if options.tiled {
+            // Cover the page after rotation: step over a square whose side is the page diagonal.
+            let diagonal = (box.width * box.width + box.height * box.height).squareRoot()
+            let stepX = textSize.width + 100
+            let stepY = textSize.height + 100
+            var y = -diagonal / 2
+            while y <= diagonal / 2 {
+                var x = -diagonal / 2
+                while x <= diagonal / 2 {
+                    string.draw(at: CGPoint(x: x, y: y))
+                    x += stepX
+                }
+                y += stepY
+            }
+        } else {
+            string.draw(at: CGPoint(x: -textSize.width / 2, y: -textSize.height / 2))
+        }
+
+        ctx.restoreGState()
+        NSGraphicsContext.restoreGraphicsState()
     }
 
     /// Permanently removes visual content inside the given rectangles by rasterizing affected pages and painting solid black over those regions—

@@ -37,6 +37,36 @@ struct ActivityLogTests {
         #expect(contents.contains("out.pdf"))
     }
 
+    @Test func recordSavedAttachesStructuredPath() async throws {
+        let url = tempURL()
+        defer { try? FileManager.default.removeItem(at: url) }
+        let log = ActivityLog(fileURL: url)
+        log.recordSaved("Split", to: URL(fileURLWithPath: "/tmp/out"), bytes: nil, detail: "3 files")
+
+        // The mirror drains on the main queue; yield until the entry lands.
+        for _ in 0..<50 where log.entries.isEmpty {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        #expect(log.entries.last?.path == "/tmp/out")
+        // A plain log line never records a path, so only real saves surface row actions.
+        log.info("no path here")
+        for _ in 0..<50 where log.entries.last?.message != "no path here" {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        #expect(log.entries.last?.path == nil)
+    }
+
+    @Test func historyLineParsesWithoutPath() {
+        // A save's structured path is deliberately absent from the on-disk line, so an entry
+        // reconstructed from history carries no path (and thus offers no Reveal/Open actions).
+        let saved = LogEntry(level: .info, message: "Split: 3 files → ~/out", path: "/tmp/out")
+        let reparsed = LogEntry.parse(saved.formattedString)
+        #expect(reparsed != nil)
+        #expect(reparsed?.path == nil)
+        // The path never leaks into the canonical rendering either.
+        #expect(!saved.formattedString.contains("/tmp/out"))
+    }
+
     @Test func clearEmptiesMemoryAndFile() {
         let url = tempURL()
         defer { try? FileManager.default.removeItem(at: url) }

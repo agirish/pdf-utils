@@ -59,10 +59,18 @@ public struct LogEntry: Identifiable, Sendable {
     public let level: LogLevel
     public let message: String
 
-    public init(id: UUID = UUID(), timestamp: Date = Date(), level: LogLevel, message: String) {
+    /// Absolute filesystem path of the file or folder this entry recorded a write to, populated by
+    /// `recordSaved`; nil for every other entry. Kept as a structured field rather than re-parsed out
+    /// of `message` so the viewer's Reveal/Open row actions get an exact, unambiguous target. It is
+    /// intentionally NOT part of `formattedString`/`parse`, so it stays nil on history lines reloaded
+    /// from disk — those simply show no actions.
+    public let path: String?
+
+    public init(id: UUID = UUID(), timestamp: Date = Date(), level: LogLevel, message: String, path: String? = nil) {
         self.id = id
         self.timestamp = timestamp
         self.level = level
+        self.path = path
         // Collapse line breaks and control characters to spaces so one entry is always one line. A
         // message often interpolates a file/folder name straight off disk, which macOS permits to
         // contain "\n" — an embedded newline would otherwise split the record and let a crafted name
@@ -250,15 +258,17 @@ public final class ActivityLog: ObservableObject {
         if let detail, !detail.isEmpty { line += " \(detail) →" } else { line += " saved →" }
         line += " \((url.path as NSString).abbreviatingWithTildeInPath)"
         if let bytes { line += " (\(ByteCountFormatter.string(fromByteCount: Int64(bytes), countStyle: .file)))" }
-        info(line)
+        // The full path also rides along as a structured field so the viewer can Reveal/Open the
+        // destination without re-deriving it from the tilde-abbreviated text in `line`.
+        log(.info, line, path: url.path)
     }
 
     /// The gate + the two destinations. Returns whether the entry passed the level gate (`false` when
     /// dropped) — handy for tests; production ignores it.
     @discardableResult
-    private nonisolated func log(_ level: LogLevel, _ message: String) -> Bool {
+    private nonisolated func log(_ level: LogLevel, _ message: String, path: String? = nil) -> Bool {
         guard level.severity >= minimumLevel.severity else { return false }
-        let entry = LogEntry(level: level, message: message)
+        let entry = LogEntry(level: level, message: message, path: path)
         // The handoff-buffer append rides the writer queue with the disk append: both mutations
         // happen in one ordered domain, so `clearLogs`' queued purge either drops an entry from
         // both destinations or keeps it in both. Mutating `pending` here on the caller's thread

@@ -427,11 +427,24 @@ private struct ActivityLogDayHeader: View {
 
 /// One row rendering a single `LogEntry`: a color-coded severity glyph, a level badge + time, the
 /// message, and (for warnings/errors) a dimmed location caption. Compact collapses to one baseline.
+/// When the entry recorded a save whose destination still exists on disk, the row reveals a
+/// Reveal-in-Finder / Open pair on hover and offers the same via right-click.
 struct ActivityLogRow: View {
     let entry: LogEntry
     var density: ListDensity = .comfortable
 
+    @State private var isHovering = false
+
+    /// The saved destination's URL, but only when the entry carries a structured path AND that path
+    /// still exists — the gate for showing the Reveal/Open actions. Recomputed per body pass; a stat
+    /// call on a lazily-rendered row is cheap, and it means a since-deleted file drops its actions.
+    private var existingFileURL: URL? {
+        guard let path = entry.path else { return nil }
+        return FileManager.default.fileExists(atPath: path) ? URL(fileURLWithPath: path) : nil
+    }
+
     var body: some View {
+        let fileURL = existingFileURL
         HStack(alignment: .top, spacing: 10) {
             Image(systemName: entry.level.icon)
                 .font(.caption)
@@ -461,8 +474,58 @@ struct ActivityLogRow: View {
                 }
             }
             Spacer(minLength: 0)
+
+            if let fileURL {
+                fileActions(url: fileURL)
+                    .opacity(isHovering ? 1 : 0)
+                    .allowsHitTesting(isHovering)
+                    .accessibilityHidden(!isHovering)
+            }
         }
         .padding(.vertical, density.rowVerticalPadding)
+        .contentShape(Rectangle())
+        .onHover { isHovering = $0 }
+        .contextMenu {
+            if let fileURL {
+                Button {
+                    NSWorkspace.shared.activateFileViewerSelecting([fileURL])
+                } label: {
+                    Label("Reveal in Finder", systemImage: "folder")
+                }
+                Button {
+                    NSWorkspace.shared.open(fileURL)
+                } label: {
+                    Label("Open", systemImage: "arrow.up.forward.app")
+                }
+            }
+        }
+    }
+
+    /// The hover-revealed Reveal/Open pair, styled as unobtrusive borderless glyphs so it sits
+    /// quietly at the row's trailing edge until pointed at.
+    @ViewBuilder
+    private func fileActions(url: URL) -> some View {
+        HStack(spacing: 2) {
+            Button {
+                NSWorkspace.shared.activateFileViewerSelecting([url])
+            } label: {
+                Image(systemName: "folder")
+            }
+            .help("Reveal in Finder")
+            .accessibilityLabel("Reveal in Finder")
+
+            Button {
+                NSWorkspace.shared.open(url)
+            } label: {
+                Image(systemName: "arrow.up.forward.app")
+            }
+            .help("Open")
+            .accessibilityLabel("Open")
+        }
+        .buttonStyle(.borderless)
+        .font(.callout)
+        .foregroundStyle(.secondary)
+        .padding(.top, 1)
     }
 
     private var levelBadge: some View {

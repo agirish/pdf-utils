@@ -31,6 +31,8 @@ public struct ToolDetailView: View {
                     WatermarkToolView()
                 case .redact:
                     RedactToolView()
+                case .protect:
+                    ProtectToolView()
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)

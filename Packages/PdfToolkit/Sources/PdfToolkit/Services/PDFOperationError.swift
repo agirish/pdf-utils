@@ -16,6 +16,10 @@ enum PDFOperationError: LocalizedError {
     case redactionFailed
     case watermarkTextRequired
     case watermarkFailed
+    case passwordRequired
+    case incorrectPassword
+    case notEncrypted
+    case protectionFailed
 
     var errorDescription: String? {
         switch self {
@@ -49,6 +53,14 @@ enum PDFOperationError: LocalizedError {
             return "Enter the watermark text to stamp on each page."
         case .watermarkFailed:
             return "Could not build the watermarked PDF."
+        case .passwordRequired:
+            return "Enter a password."
+        case .incorrectPassword:
+            return "That password did not unlock this PDF. Check it and try again."
+        case .notEncrypted:
+            return "This PDF is not password-protected, so there is nothing to remove."
+        case .protectionFailed:
+            return "Could not write the PDF. If the file is open elsewhere, close it and try again."
         }
     }
 }

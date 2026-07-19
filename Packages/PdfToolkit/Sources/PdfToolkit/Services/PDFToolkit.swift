@@ -180,6 +180,47 @@ enum PDFToolkit {
         }
     }
 
+    /// Writes an encrypted copy that requires `password` to open. The same string is set as both the
+    /// user password (needed to open) and the owner password (needed to change permissions), so the
+    /// document is fully locked behind one password. The input must be an openable, unencrypted PDF.
+    static func encrypt(inputURL: URL, outputURL: URL, password: String) throws {
+        guard !password.isEmpty else { throw PDFOperationError.passwordRequired }
+        guard let doc = PDFDocument(url: inputURL) else {
+            throw PDFOperationError.couldNotOpen(inputURL)
+        }
+        guard !doc.isLocked else { throw PDFOperationError.incorrectPassword }
+        guard doc.pageCount > 0 else { throw PDFOperationError.emptyPDF }
+
+        let options: [PDFDocumentWriteOption: Any] = [
+            .userPasswordOption: password,
+            .ownerPasswordOption: password,
+        ]
+        guard doc.write(to: outputURL, withOptions: options) else {
+            throw PDFOperationError.protectionFailed
+        }
+    }
+
+    /// Writes a decrypted copy with no password. If the source is locked it is unlocked with
+    /// `password` first (wrong password → `incorrectPassword`); a source that isn't encrypted at all
+    /// throws `notEncrypted` so the tool can say there's nothing to remove.
+    static func removePassword(inputURL: URL, outputURL: URL, password: String) throws {
+        guard let doc = PDFDocument(url: inputURL) else {
+            throw PDFOperationError.couldNotOpen(inputURL)
+        }
+        if doc.isLocked {
+            guard doc.unlock(withPassword: password) else {
+                throw PDFOperationError.incorrectPassword
+            }
+        } else if !doc.isEncrypted {
+            throw PDFOperationError.notEncrypted
+        }
+        guard doc.pageCount > 0 else { throw PDFOperationError.emptyPDF }
+
+        guard doc.write(to: outputURL) else {
+            throw PDFOperationError.protectionFailed
+        }
+    }
+
     /// Rebuilds the PDF from rendered page images to reduce size. `quality` is 0...1 (JPEG-style tradeoff).
     static func compress(inputURL: URL, outputURL: URL, quality: Double) throws {
         guard let source = PDFDocument(url: inputURL) else {

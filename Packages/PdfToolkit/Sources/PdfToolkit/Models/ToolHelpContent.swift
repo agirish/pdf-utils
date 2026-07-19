@@ -193,6 +193,27 @@ extension Tool {
                     "Redacted pages are saved as full-page images. PDFKit’s OCR-on-save option is not used here because it re-encoded those pages as tiny thumbnails in testing.",
                 ]
             )
+        case .protect:
+            return ToolHelpContent(
+                overview:
+                    "Password Protect encrypts a PDF so it can only be opened with a password you set, or removes a password from a PDF you can already open. Everything runs on your Mac and the password is never sent anywhere.",
+                steps: [
+                    "Choose or drop a PDF.",
+                    "Pick Add password or Remove password.",
+                    "For Add password, type the password twice so they match; for Remove, type the current password.",
+                    "Click the action button and save the new file.",
+                ],
+                controls: [
+                    ("Add password / Remove password", "Switches between encrypting a PDF and stripping the password from one."),
+                    ("New / Confirm password", "The password required to open the file, entered twice to catch typos."),
+                    ("Current password", "The password that currently opens the PDF you're unlocking."),
+                    ("Protect & save… / Remove password & save…", "Writes the encrypted or decrypted copy; the original file is unchanged."),
+                ],
+                tips: [
+                    "There is no password recovery — if you forget an Add-password password, the file cannot be opened.",
+                    "Removing a password only works on files you can already open with their current password.",
+                ]
+            )
         }
     }
 }

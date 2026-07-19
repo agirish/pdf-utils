@@ -23,6 +23,8 @@ public struct ToolDetailView: View {
                     SplitToolView()
                 case .extract:
                     ExtractToolView()
+                case .reorder:
+                    ReorderToolView()
                 case .deletePages:
                     DeletePagesToolView()
                 case .redact:

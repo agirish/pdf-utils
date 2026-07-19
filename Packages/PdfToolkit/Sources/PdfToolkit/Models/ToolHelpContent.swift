@@ -109,6 +109,26 @@ extension Tool {
                     "You can list the same page more than once if you need duplicates in the output.",
                 ]
             )
+        case .reorder:
+            return ToolHelpContent(
+                overview:
+                    "Reorder Pages lists every page of a PDF so you can rearrange them and save the result as a new file. The preview on the right always reflects the current arrangement, labeled with each page's original number.",
+                steps: [
+                    "Choose or drop a PDF; its pages load as a draggable list.",
+                    "Drag rows into the order you want, or nudge a row with its ↑ / ↓ buttons.",
+                    "Watch the preview reflow into the new order; use Reset to restore the original.",
+                    "Click Save reordered PDF… and pick a name for the new file.",
+                ],
+                controls: [
+                    ("Page list", "One row per page. The leading number is the new position; “Page N” is where it came from."),
+                    ("↑ / ↓", "Moves a row up or down by one without dragging."),
+                    ("Reset", "Restores the original page order. Appears once you've moved something."),
+                    ("Save reordered PDF…", "Writes a new PDF whose pages follow the list order; the original file is unchanged."),
+                ],
+                tips: [
+                    "Saving without changing anything just copies the document in its original order.",
+                ]
+            )
         case .deletePages:
             return ToolHelpContent(
                 overview:

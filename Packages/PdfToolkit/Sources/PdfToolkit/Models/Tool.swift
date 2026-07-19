@@ -6,6 +6,7 @@ public enum Tool: String, CaseIterable, Identifiable, Hashable {
     case merge
     case split
     case extract
+    case reorder
     case deletePages
     case redact
 
@@ -18,6 +19,7 @@ public enum Tool: String, CaseIterable, Identifiable, Hashable {
         case .merge: return "Merge PDF"
         case .split: return "Split PDF"
         case .extract: return "Extract PDF Pages"
+        case .reorder: return "Reorder Pages"
         case .deletePages: return "Delete PDF Pages"
         case .redact: return "Redact PDF"
         }
@@ -35,6 +37,8 @@ public enum Tool: String, CaseIterable, Identifiable, Hashable {
             return "Break one PDF into several files"
         case .extract:
             return "Save selected pages as a new PDF"
+        case .reorder:
+            return "Rearrange pages into a new order"
         case .deletePages:
             return "Remove unwanted pages"
         case .redact:
@@ -55,6 +59,8 @@ public enum Tool: String, CaseIterable, Identifiable, Hashable {
             return "Cut one PDF into several. Split into fixed chunks of N pages, or list custom page ranges where each group becomes its own file. Parts are written into a folder you choose; the original file stays untouched."
         case .extract:
             return "Copy chosen pages into a new PDF in the order you type (for example 5,1,2). Handy for pulling chapters or attachments out of a larger document."
+        case .reorder:
+            return "Drag pages into the order you want, then save a new PDF. The preview follows the arrangement so you can see the result before saving; the original file is untouched."
         case .deletePages:
             return "Produce a new PDF without the pages you specify. You must list which pages to drop—an empty field will not delete everything. At least one page must remain."
         case .redact:
@@ -69,6 +75,7 @@ public enum Tool: String, CaseIterable, Identifiable, Hashable {
         case .merge: return "square.stack.3d.up"
         case .split: return "scissors"
         case .extract: return "doc.on.clipboard"
+        case .reorder: return "arrow.up.arrow.down.square"
         // Badge-style "doc" symbols can look blank with hierarchical tinting on dashboard tiles; use a solid portrait-page + minus.
         case .deletePages: return "minus.rectangle.portrait.fill"
         case .redact: return "eraser.line.dashed"
@@ -82,6 +89,7 @@ public enum Tool: String, CaseIterable, Identifiable, Hashable {
         case .merge: return .purple
         case .split: return .indigo
         case .extract: return .teal
+        case .reorder: return .mint
         case .deletePages: return .pink
         case .redact: return Color(red: 0.78, green: 0.16, blue: 0.22)
         }

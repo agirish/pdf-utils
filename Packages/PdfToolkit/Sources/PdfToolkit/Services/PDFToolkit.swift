@@ -108,6 +108,13 @@ enum PDFToolkit {
         }
     }
 
+    /// Writes a new PDF whose pages follow `order` (a permutation of the source's zero-based
+    /// indices). This is `extract` with the full page set reshuffled — a page appears exactly
+    /// where the new order places it.
+    static func reorder(inputURL: URL, outputURL: URL, order: [Int]) throws {
+        try extract(inputURL: inputURL, outputURL: outputURL, pageIndices: order)
+    }
+
     /// Removes pages (zero-based). Duplicates are ignored. Removed from highest index first.
     static func deletePages(inputURL: URL, outputURL: URL, pageIndices: [Int]) throws {
         guard !pageIndices.isEmpty else { throw PDFOperationError.noPagesSelected }

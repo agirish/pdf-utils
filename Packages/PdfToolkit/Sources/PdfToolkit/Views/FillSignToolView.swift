@@ -108,10 +108,9 @@ struct FillSignToolView: View {
         } message: {
             Text(alertMessage ?? "")
         }
-        .onChange(of: selectionPathKey) { _, _ in
-            reloadDocumentForSelection()
+        .task(id: selectionPathKey) {
+            await reloadDocumentForSelection()
         }
-        .onAppear(perform: reloadDocumentForSelection)
     }
 
     // MARK: - Sidebar
@@ -670,22 +669,29 @@ struct FillSignToolView: View {
 
     // MARK: - Data
 
-    private func reloadDocumentForSelection() {
+    private func reloadDocumentForSelection() async {
         items = []
         selectedID = nil
         currentPageIndex = 0
-        guard let url = inputURL else {
-            pdfDocument = nil
-            return
-        }
+        pdfDocument = nil
+        guard let url = inputURL else { return }
         do {
-            try url.withSecurityScopedAccess {
-                pdfDocument = PDFDocument(url: url)
+            // Load off the main thread AND on the shared PDFKit serial queue: constructing
+            // PDFDocument(url:) here directly beachballed the UI on slow volumes (the
+            // "Opening PDF…" state could never render) and ran PDFKit concurrently with
+            // queue-side work — the exact access pattern the serialization invariant forbids.
+            let box = try await PDFBackgroundWork.run {
+                try url.withSecurityScopedAccess { PDFDocumentBox(document: PDFDocument(url: url)) }
             }
-            if pdfDocument == nil {
+            guard !Task.isCancelled else { return }
+            pdfDocument = box.document
+            if box.document == nil {
                 alertMessage = PDFOperationError.couldNotOpen(url).localizedDescription
             }
+        } catch is CancellationError {
+            // Superseded by another document switch; the newer load owns the state.
         } catch {
+            guard !Task.isCancelled else { return }
             pdfDocument = nil
             alertMessage = error.localizedDescription
         }

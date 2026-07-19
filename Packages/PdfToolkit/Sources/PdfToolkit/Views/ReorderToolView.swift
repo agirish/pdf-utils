@@ -346,15 +346,19 @@ struct ReorderToolView: View {
         // silently truncating it to A's page count.
         items = []
         isGeneratingPreviews = true
-        defer { isGeneratingPreviews = false }
         do {
             let thumbs = try await PDFPageThumbnailLoader.loadAllPages(from: url)
-            // `.task(id:)` cancelled this load if the user switched files again; don't let a stale
-            // result overwrite the newer document's rows.
+            // `.task(id:)` cancelled this load if the user switched files again; a superseded load
+            // must neither install its stale rows nor clear the spinner the newer load now owns.
             guard !Task.isCancelled else { return }
             items = thumbs.map { ReorderItem(id: $0.pageNumber - 1, image: $0.image) }
+            isGeneratingPreviews = false
+        } catch is CancellationError {
+            // Superseded mid-render; the newer load owns the state.
         } catch {
+            guard !Task.isCancelled else { return }
             items = []
+            isGeneratingPreviews = false
         }
     }
 

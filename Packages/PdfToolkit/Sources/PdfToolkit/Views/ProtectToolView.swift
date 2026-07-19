@@ -379,7 +379,9 @@ struct ProtectToolView: View {
                 suffixWord: suffixWord
             ) {
             case .savedBeside:
-                break
+                // Same hygiene as the export-sheet path: a finished save must not leave the
+                // password sitting in the fields (and in @State).
+                clearPasswords()
             case .present(let document, let name):
                 exportDoc = document
                 suggestedName = name

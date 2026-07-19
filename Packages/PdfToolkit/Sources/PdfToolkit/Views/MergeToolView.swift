@@ -467,15 +467,18 @@ struct MergeToolView: View {
 
         previewTask = Task {
             do {
-                let loadedPages: [PDFPageThumbnail] = try await PDFBackgroundWork.run {
+                let loadedPages: [PDFPageThumbnail] = try await PDFBackgroundWork.run { isCancelled in
                     var bgPreviews: [PDFPageThumbnail] = []
                     var globalPageNum = 1
                     try URLCollectionSecurityScope.withAccess(urlsSnapshot) {
                         for url in urlsSnapshot {
-                            try Task.checkCancellation()
+                            // Task.checkCancellation() is inert on the GCD queue — only this probe
+                            // sees `previewTask?.cancel()`, and without it every superseded preview
+                            // rendered all pages of every file before the queue freed up.
+                            if isCancelled() { throw CancellationError() }
                             guard let doc = PDFDocument(url: url) else { continue }
                             for i in 0..<doc.pageCount {
-                                try Task.checkCancellation()
+                                if isCancelled() { throw CancellationError() }
                                 guard let page = doc.page(at: i) else { continue }
 
                                 let size = page.bounds(for: .mediaBox).size

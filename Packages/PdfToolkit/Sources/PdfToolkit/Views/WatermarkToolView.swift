@@ -440,15 +440,19 @@ struct WatermarkToolView: View {
         // against thumbnails of a file that is no longer loaded.
         thumbnails = []
         isGeneratingPreviews = true
-        defer { isGeneratingPreviews = false }
         do {
             let loaded = try await PDFPageThumbnailLoader.loadAllPages(from: url)
-            // `.task(id:)` cancelled this load if the file changed again; don't let a stale
-            // result overwrite the newer document's thumbnails.
+            // `.task(id:)` cancelled this load if the file changed again; a superseded load must
+            // neither install its stale result nor clear the spinner the newer load now owns.
             guard !Task.isCancelled else { return }
             thumbnails = loaded
+            isGeneratingPreviews = false
+        } catch is CancellationError {
+            // Superseded mid-render; the newer load owns the state.
         } catch {
+            guard !Task.isCancelled else { return }
             thumbnails = []
+            isGeneratingPreviews = false
         }
     }
 

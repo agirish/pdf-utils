@@ -226,8 +226,7 @@ struct FillSignPDFEditor: NSViewRepresentable {
 /// Draws placed items on top of the PDF: a WYSIWYG preview of each item's ink plus a dashed selection
 /// frame and a corner resize handle for the selected one. Transparent to hit-testing so the PDFView and
 /// the gesture recognizers receive every event.
-fileprivate final class FillSignOverlayView: NSView {
-    weak var pdfView: PDFView?
+fileprivate final class FillSignOverlayView: PDFViewSyncedOverlay {
     var items: [FillSignItem] = []
     var selectedID: UUID?
     var accent: NSColor = .systemPink

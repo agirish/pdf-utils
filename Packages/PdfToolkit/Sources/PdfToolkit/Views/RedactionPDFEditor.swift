@@ -131,8 +131,7 @@ struct RedactionPDFEditor: NSViewRepresentable {
     }
 }
 
-fileprivate final class RedactionOverlayView: NSView {
-    weak var pdfView: PDFView?
+fileprivate final class RedactionOverlayView: PDFViewSyncedOverlay {
     var marks: [RedactionMark] = []
     weak var draftPage: PDFPage?
     var draftRect: CGRect?

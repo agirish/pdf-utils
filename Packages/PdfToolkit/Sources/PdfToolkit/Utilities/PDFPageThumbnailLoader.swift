@@ -11,14 +11,16 @@ struct PDFPageThumbnail: Identifiable, @unchecked Sendable {
 
 enum PDFPageThumbnailLoader {
     static func loadAllPages(from url: URL) async throws -> [PDFPageThumbnail] {
-        try await PDFBackgroundWork.run {
+        try await PDFBackgroundWork.run { isCancelled in
             try url.withSecurityScopedAccess {
                 guard let doc = PDFDocument(url: url) else {
                     throw PDFOperationError.couldNotOpen(url)
                 }
                 var items: [PDFPageThumbnail] = []
                 for i in 0..<doc.pageCount {
-                    try Task.checkCancellation()
+                    // Task.checkCancellation() is inert on the GCD queue; only this probe can see
+                    // the caller's cancellation and stop a superseded sweep early.
+                    if isCancelled() { throw CancellationError() }
                     guard let page = doc.page(at: i) else { continue }
                     let size = page.bounds(for: .mediaBox).size
                     let longest = max(size.width, size.height)

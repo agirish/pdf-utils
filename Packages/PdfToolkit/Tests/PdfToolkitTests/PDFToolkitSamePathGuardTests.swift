@@ -39,17 +39,17 @@ import CoreGraphics
         try expectGuarded(b) { out in try PDFToolkit.merge(inputURLs: [a, b], outputURL: out) }
     }
 
-    @Test func splitRefusesToOverwriteTheSource() throws {
+    @Test func splitNumbersAroundItsOwnSourceInsteadOfOverwriting() throws {
         // A source named exactly like a part the split would emit (`part-01.pdf`, zero-padded to the
-        // two-digit width used for a two-part split) must not be clobbered.
+        // two-digit width used for a two-part split) must not be clobbered. Split resolves every
+        // part name through the never-overwrite numbering, so the collision succeeds harmlessly
+        // instead of erroring: the part lands as `part-01 2.pdf` and the source is untouched.
         let dir = FixtureDir()
         let src = dir.url("part-01.pdf")
         try PDFFixtures.writePDF(pageCount: 2, to: src)
         let before = try snapshot(src)
-        let error = #expect(throws: PDFOperationError.self) {
-            _ = try PDFToolkit.split(inputURL: src, into: dir.url, baseName: "part", segments: [[0], [1]])
-        }
-        #expect(error?.kind == "outputMatchesInput")
+        let outputs = try PDFToolkit.split(inputURL: src, into: dir.url, baseName: "part", segments: [[0], [1]])
+        #expect(outputs.map(\.lastPathComponent) == ["part-01 2.pdf", "part-02.pdf"])
         #expect(try snapshot(src) == before)
         #expect(PDFDocument(url: src) != nil)
     }

@@ -88,7 +88,9 @@ enum PDFToolkit {
     /// Splits a PDF into several files, one per segment. Each `segment` is a list of zero-based
     /// page indices copied (in order) into its own document. Files are written into `directory`
     /// as `baseName-01.pdf`, `baseName-02.pdf`, … (index width grows with the part count) and the
-    /// produced URLs are returned in order. Existing files with the same names are overwritten.
+    /// produced URLs are returned in order. A name clash with an existing file is numbered via
+    /// ``PDFExportCoordinator/uniqueURL(inDirectory:filename:fileManager:)`` — never overwritten,
+    /// upholding the same promise the Files settings make for every single-file tool.
     static func split(inputURL: URL, into directory: URL, baseName: String, segments: [[Int]]) throws -> [URL] {
         guard !segments.isEmpty else { throw PDFOperationError.noPagesSelected }
         guard let source = PDFDocument(url: inputURL) else {
@@ -98,27 +100,40 @@ enum PDFToolkit {
 
         let width = max(2, String(segments.count).count)
         var outputs: [URL] = []
-        for (partIndex, segment) in segments.enumerated() {
-            guard !segment.isEmpty else { continue }
-            let out = PDFDocument()
-            var insertAt = 0
-            for i in segment {
-                guard let src = source.page(at: i) else {
-                    throw PDFOperationError.pageOutOfBounds(i + 1)
+        do {
+            for (partIndex, segment) in segments.enumerated() {
+                guard !segment.isEmpty else { continue }
+                let out = PDFDocument()
+                var insertAt = 0
+                for i in segment {
+                    guard let src = source.page(at: i) else {
+                        throw PDFOperationError.pageOutOfBounds(i + 1)
+                    }
+                    guard let copy = src.copy() as? PDFPage else {
+                        throw PDFOperationError.couldNotOpen(inputURL)
+                    }
+                    out.insert(copy, at: insertAt)
+                    insertAt += 1
                 }
-                guard let copy = src.copy() as? PDFPage else {
-                    throw PDFOperationError.couldNotOpen(inputURL)
+                let suffix = String(format: "%0\(width)d", partIndex + 1)
+                let url = PDFExportCoordinator.uniqueURL(
+                    inDirectory: directory,
+                    filename: "\(baseName)-\(suffix).pdf"
+                )
+                try requireDistinctOutput(url, from: [inputURL])
+                guard out.write(to: url) else {
+                    try? FileManager.default.removeItem(at: url)
+                    throw PDFOperationError.couldNotWrite(url)
                 }
-                out.insert(copy, at: insertAt)
-                insertAt += 1
+                outputs.append(url)
             }
-            let suffix = String(format: "%0\(width)d", partIndex + 1)
-            let url = directory.appendingPathComponent("\(baseName)-\(suffix).pdf")
-            try requireDistinctOutput(url, from: [inputURL])
-            guard out.write(to: url) else {
-                throw PDFOperationError.couldNotWrite(url)
+        } catch {
+            // Unwind parts already written so a failed split never leaves a half set behind.
+            // Safe to delete: uniqueURL guarantees every path here was created by this call.
+            for url in outputs {
+                try? FileManager.default.removeItem(at: url)
             }
-            outputs.append(url)
+            throw error
         }
 
         guard !outputs.isEmpty else { throw PDFOperationError.noPagesSelected }

@@ -89,7 +89,7 @@ extension Tool {
                 ],
                 tips: [
                     "The live count under the options shows how many files the current settings will produce.",
-                    "Files with the same names in the chosen folder are overwritten, so pick an empty folder if unsure.",
+                    "A part whose name is already taken in the chosen folder is numbered (\u{201C}name 2.pdf\u{201D}) — existing files are never overwritten.",
                 ]
             )
         case .extract:

@@ -545,10 +545,17 @@ struct MergeToolView: View {
         let urlsSnapshot = entries.map(\.url)
 
         do {
+            // Materialize the merged bytes in a temp file first, then land them atomically: writing
+            // the PDFDocument straight onto the destination would truncate an existing file before
+            // the merge finished serializing, so a mid-write failure (full disk, crash) destroys
+            // whatever the user chose to replace. Every single-file tool already works this way.
             try await PDFBackgroundWork.run {
-                try URLCollectionSecurityScope.withAccess(urlsSnapshot) {
-                    try PDFToolkit.merge(inputURLs: urlsSnapshot, outputURL: outputURL)
+                let merged = try URLCollectionSecurityScope.withAccess(urlsSnapshot) {
+                    try PDFExportSupport.data { tempURL in
+                        try PDFToolkit.merge(inputURLs: urlsSnapshot, outputURL: tempURL)
+                    }
                 }
+                try merged.write(to: outputURL, options: .atomic)
             }
 
             let attrs = try FileManager.default.attributesOfItem(atPath: outputURL.path)

@@ -131,4 +131,22 @@ import PDFKit
             try PDFToolkit.split(inputURL: src, into: dir.url, baseName: "part", segments: [[0]])
         }?.kind == "couldNotOpen")
     }
+
+    @Test func splitNumbersAroundAnExistingFileInsteadOfOverwriting() throws {
+        // The Files settings promise "a name clash is numbered, never overwritten" — Split was the
+        // one tool that violated it, silently destroying any sibling named like one of its parts.
+        let dir = FixtureDir()
+        let src = dir.url("src.pdf")
+        try PDFFixtures.writePDF(pageCount: 2, to: src)
+        let precious = dir.url("src-01.pdf")
+        try PDFFixtures.writePDF(markers: ["PRECIOUS"], to: precious)
+        let preciousBytes = try Data(contentsOf: precious)
+
+        let outputs = try PDFToolkit.split(inputURL: src, into: dir.url, baseName: "src", segments: [[0], [1]])
+
+        #expect(try Data(contentsOf: precious) == preciousBytes)
+        #expect(outputs.map(\.lastPathComponent) == ["src-01 2.pdf", "src-02.pdf"])
+        #expect(try PDFFixtures.pageTexts(at: outputs[0]) == [PDFFixtures.marker(1)])
+        #expect(try PDFFixtures.pageTexts(at: outputs[1]) == [PDFFixtures.marker(2)])
+    }
 }

@@ -44,6 +44,45 @@ enum PDFToolkit {
         }
     }
 
+    /// Splits a PDF into several files, one per segment. Each `segment` is a list of zero-based
+    /// page indices copied (in order) into its own document. Files are written into `directory`
+    /// as `baseName-01.pdf`, `baseName-02.pdf`, … (index width grows with the part count) and the
+    /// produced URLs are returned in order. Existing files with the same names are overwritten.
+    static func split(inputURL: URL, into directory: URL, baseName: String, segments: [[Int]]) throws -> [URL] {
+        guard !segments.isEmpty else { throw PDFOperationError.noPagesSelected }
+        guard let source = PDFDocument(url: inputURL) else {
+            throw PDFOperationError.couldNotOpen(inputURL)
+        }
+        guard source.pageCount > 0 else { throw PDFOperationError.emptyPDF }
+
+        let width = max(2, String(segments.count).count)
+        var outputs: [URL] = []
+        for (partIndex, segment) in segments.enumerated() {
+            guard !segment.isEmpty else { continue }
+            let out = PDFDocument()
+            var insertAt = 0
+            for i in segment {
+                guard let src = source.page(at: i) else {
+                    throw PDFOperationError.pageOutOfBounds(i + 1)
+                }
+                guard let copy = src.copy() as? PDFPage else {
+                    throw PDFOperationError.couldNotOpen(inputURL)
+                }
+                out.insert(copy, at: insertAt)
+                insertAt += 1
+            }
+            let suffix = String(format: "%0\(width)d", partIndex + 1)
+            let url = directory.appendingPathComponent("\(baseName)-\(suffix).pdf")
+            guard out.write(to: url) else {
+                throw PDFOperationError.couldNotWrite(url)
+            }
+            outputs.append(url)
+        }
+
+        guard !outputs.isEmpty else { throw PDFOperationError.noPagesSelected }
+        return outputs
+    }
+
     /// Copies listed pages (zero-based) into a new PDF.
     static func extract(inputURL: URL, outputURL: URL, pageIndices: [Int]) throws {
         guard !pageIndices.isEmpty else { throw PDFOperationError.noPagesSelected }

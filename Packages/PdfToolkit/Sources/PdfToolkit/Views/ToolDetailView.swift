@@ -19,6 +19,8 @@ public struct ToolDetailView: View {
                     RotateToolView()
                 case .merge:
                     MergeToolView()
+                case .split:
+                    SplitToolView()
                 case .extract:
                     ExtractToolView()
                 case .deletePages:

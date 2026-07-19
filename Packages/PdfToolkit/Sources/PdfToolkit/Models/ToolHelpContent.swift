@@ -72,6 +72,26 @@ extension Tool {
                     "Large merges can take a moment; the window should stay responsive while working.",
                 ]
             )
+        case .split:
+            return ToolHelpContent(
+                overview:
+                    "Split cuts one PDF into several separate files. Use fixed chunks of N pages for even slices, or list custom page ranges when each section is a different length. Every part is a full PDF; the original is left as-is.",
+                steps: [
+                    "Choose or drop a PDF.",
+                    "Pick “Every N pages” and set the chunk size, or pick “Custom ranges” and list groups like 1-3, 4-6, 7-10.",
+                    "Click Split & save… and choose a destination folder.",
+                    "Use Show in Finder on the success screen to reveal the new files.",
+                ],
+                controls: [
+                    ("Every N pages", "Cuts the document into consecutive chunks of that many pages; the last file takes the remainder."),
+                    ("Custom ranges", "Each comma-separated group becomes one file (1-3 → a 3-page file). 1-based, inclusive ranges."),
+                    ("Split & save…", "Writes each part into the folder you choose as name-01.pdf, name-02.pdf, …"),
+                ],
+                tips: [
+                    "The live count under the options shows how many files the current settings will produce.",
+                    "Files with the same names in the chosen folder are overwritten, so pick an empty folder if unsure.",
+                ]
+            )
         case .extract:
             return ToolHelpContent(
                 overview:

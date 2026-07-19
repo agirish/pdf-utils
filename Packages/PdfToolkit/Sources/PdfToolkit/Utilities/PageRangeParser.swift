@@ -25,6 +25,52 @@ enum PageRangeParser {
         return try parseUniqueSorted(trimmed, pageCount: pageCount)
     }
 
+    // MARK: - Segments (Split — each comma group becomes its own output file)
+
+    /// Parses "1-3, 4-6, 7" into one zero-based index array **per comma group**: [[0,1,2],[3,4,5],[6]].
+    /// A group is a single page ("7") or an inclusive range ("1-3"); ranges expand ascending.
+    /// Empty input throws `pageRangeRequired`. Each group must land inside the document.
+    static func parseSegments(_ text: String, pageCount: Int) throws -> [[Int]] {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { throw PDFOperationError.pageRangeRequired }
+
+        var segments: [[Int]] = []
+        for part in trimmed.split(separator: ",") {
+            let p = part.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !p.isEmpty else { continue }
+
+            if p.contains("-") {
+                let bounds = p.split(separator: "-", maxSplits: 1).map {
+                    $0.trimmingCharacters(in: .whitespacesAndNewlines)
+                }
+                guard bounds.count == 2, let a = Int(bounds[0]), let b = Int(bounds[1]) else {
+                    throw PDFOperationError.invalidPageRange(String(p))
+                }
+                let lo = min(a, b), hi = max(a, b)
+                var segment: [Int] = []
+                for oneBased in lo...hi {
+                    let zero = oneBased - 1
+                    guard (0..<pageCount).contains(zero) else {
+                        throw PDFOperationError.pageOutOfBounds(oneBased)
+                    }
+                    segment.append(zero)
+                }
+                segments.append(segment)
+            } else if let oneBased = Int(p) {
+                let zero = oneBased - 1
+                guard (0..<pageCount).contains(zero) else {
+                    throw PDFOperationError.pageOutOfBounds(oneBased)
+                }
+                segments.append([zero])
+            } else {
+                throw PDFOperationError.invalidPageRange(String(p))
+            }
+        }
+
+        guard !segments.isEmpty else { throw PDFOperationError.invalidPageRange(trimmed) }
+        return segments
+    }
+
     // MARK: - Unique, sorted (Rotate range, Delete)
 
     private static func parseUniqueSorted(_ trimmed: String, pageCount: Int) throws -> [Int] {

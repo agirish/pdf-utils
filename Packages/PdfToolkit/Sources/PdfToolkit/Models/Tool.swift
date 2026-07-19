@@ -4,6 +4,7 @@ public enum Tool: String, CaseIterable, Identifiable, Hashable {
     case compress
     case rotate
     case merge
+    case split
     case extract
     case deletePages
     case redact
@@ -15,6 +16,7 @@ public enum Tool: String, CaseIterable, Identifiable, Hashable {
         case .compress: return "Compress PDF"
         case .rotate: return "Rotate PDF"
         case .merge: return "Merge PDF"
+        case .split: return "Split PDF"
         case .extract: return "Extract PDF Pages"
         case .deletePages: return "Delete PDF Pages"
         case .redact: return "Redact PDF"
@@ -29,6 +31,8 @@ public enum Tool: String, CaseIterable, Identifiable, Hashable {
             return "Turn pages 90° at a time"
         case .merge:
             return "Combine PDFs in order"
+        case .split:
+            return "Break one PDF into several files"
         case .extract:
             return "Save selected pages as a new PDF"
         case .deletePages:
@@ -47,6 +51,8 @@ public enum Tool: String, CaseIterable, Identifiable, Hashable {
             return "Turn every page or only the pages you list. Rotation is written into a new PDF; your original file stays untouched until you save over it from the save panel."
         case .merge:
             return "Stack several PDFs into one file in the order shown. Use the arrows beside each row to change order, or remove a file from the list without deleting it from disk."
+        case .split:
+            return "Cut one PDF into several. Split into fixed chunks of N pages, or list custom page ranges where each group becomes its own file. Parts are written into a folder you choose; the original file stays untouched."
         case .extract:
             return "Copy chosen pages into a new PDF in the order you type (for example 5,1,2). Handy for pulling chapters or attachments out of a larger document."
         case .deletePages:
@@ -61,6 +67,7 @@ public enum Tool: String, CaseIterable, Identifiable, Hashable {
         case .compress: return "arrow.down.doc"
         case .rotate: return "rotate.right"
         case .merge: return "square.stack.3d.up"
+        case .split: return "scissors"
         case .extract: return "doc.on.clipboard"
         // Badge-style "doc" symbols can look blank with hierarchical tinting on dashboard tiles; use a solid portrait-page + minus.
         case .deletePages: return "minus.rectangle.portrait.fill"
@@ -73,6 +80,7 @@ public enum Tool: String, CaseIterable, Identifiable, Hashable {
         case .compress: return .orange
         case .rotate: return .blue
         case .merge: return .purple
+        case .split: return .indigo
         case .extract: return .teal
         case .deletePages: return .pink
         case .redact: return Color(red: 0.78, green: 0.16, blue: 0.22)

@@ -1,12 +1,14 @@
 import CoreGraphics
 import Foundation
 
-/// One rectangular redaction region in a document page’s media-box coordinate space.
+/// One rectangular redaction region in a document page’s PDF user space (the space `PDFView`'s
+/// view→page conversion produces). The editor clips captured marks to the page's crop box — the
+/// visible region — and the export clips against the same box before filling.
 struct RedactionMark: Identifiable, Hashable, Sendable {
     let id: UUID
     /// Zero-based page index.
     var pageIndex: Int
-    /// Rectangle in `PDFPage` media box space (PDF user space).
+    /// Rectangle in PDF user space, clipped to the page's crop box at capture.
     var rect: CGRect
 
     init(id: UUID = UUID(), pageIndex: Int, rect: CGRect) {

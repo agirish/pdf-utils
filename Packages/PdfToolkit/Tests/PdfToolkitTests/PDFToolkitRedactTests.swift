@@ -232,4 +232,46 @@ import CoreGraphics
         let buriedBrightness = try PDFFixtures.brightnessSampler(at: buried)
         #expect(buriedBrightness(340, 330) < 0.2)
     }
+
+    @Test func redactingACroppedPageTracksContentAndEmitsTheVisibleSize() throws {
+        // Crop box (50,50)+(500x600): the emitted page is the visible size and the black fill lands
+        // on the marked content after the crop-origin shift — mapped once, not twice.
+        let dir = FixtureDir()
+        let src = dir.url("src.pdf"), out = dir.url("out.pdf")
+        try PDFFixtures.writePDF(
+            markers: [PDFFixtures.marker(1)],
+            cropFirstPageTo: CGRect(x: 50, y: 50, width: 500, height: 600), to: src
+        )
+
+        // Cover the marker text (drawn at page-space x 72…, baseline y 396).
+        let mark = RedactionMark(pageIndex: 0, rect: CGRect(x: 60, y: 380, width: 220, height: 44))
+        try PDFToolkit.redact(inputURL: src, outputURL: out, marks: [mark], options: fastOptions)
+
+        #expect(try PDFFixtures.pageSize(at: out) == CGSize(width: 500, height: 600))
+        #expect(!(try PDFFixtures.pageTexts(at: out)[0].contains(PDFFixtures.marker(1))))
+        let brightness = try PDFFixtures.brightnessSampler(at: out)
+        #expect(brightness(100, 350) < 0.2)   // fill at display (10,330)+(220x44)
+    }
+
+    @Test func aMarkEntirelyOutsideTheCropStillRasterizesInsteadOfFailing() throws {
+        // A drag in a cropped-out margin produces a mark whose fills clip to nothing. That used to
+        // abort the WHOLE export with a generic redactionFailed; now the page still rasterizes
+        // (destroying the out-of-crop content the mark covered — the safe direction) and the
+        // export succeeds.
+        let dir = FixtureDir()
+        let src = dir.url("src.pdf"), out = dir.url("out.pdf")
+        try PDFFixtures.writePDF(
+            markers: [PDFFixtures.marker(1)],
+            cropFirstPageTo: CGRect(x: 50, y: 50, width: 500, height: 600), to: src
+        )
+
+        let outside = RedactionMark(pageIndex: 0, rect: CGRect(x: 0, y: 700, width: 40, height: 40))
+        try PDFToolkit.redact(inputURL: src, outputURL: out, marks: [outside], options: fastOptions)
+
+        #expect(try PDFFixtures.pageCount(at: out) == 1)
+        #expect(try PDFFixtures.pageSize(at: out) == CGSize(width: 500, height: 600))
+        // Rasterized: the marker text is no longer extractable, proving the page did not fall back
+        // to a vector copy that would keep recoverable content.
+        #expect(!(try PDFFixtures.pageTexts(at: out)[0].contains(PDFFixtures.marker(1))))
+    }
 }

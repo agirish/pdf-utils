@@ -118,8 +118,11 @@ struct RedactionPDFEditor: NSViewRepresentable {
                 let endPt = pdfView.convert(loc, to: startPage)
                 let rect = RedactionMarkGeometry.normalizedDragRect(start: startPt, end: endPt)
                 guard RedactionMarkGeometry.isMeaningful(rect) else { return }
-                let media = startPage.bounds(for: .mediaBox)
-                guard let clipped = RedactionMarkGeometry.clipToMediaBox(rect, mediaBox: media) else { return }
+                // Clip to the CROP box — the region the user can actually see and the same box the
+                // export clips against. Clipping to the media box here let a drag in a cropped
+                // document's hidden margin capture a mark the export would clip to nothing.
+                let visible = startPage.bounds(for: .cropBox)
+                guard let clipped = RedactionMarkGeometry.clipToMediaBox(rect, mediaBox: visible) else { return }
                 guard let doc = pdfView.document else { return }
                 guard let idx = (0..<doc.pageCount).first(where: { doc.page(at: $0) === startPage }) else { return }
                 marksBinding.wrappedValue.append(RedactionMark(pageIndex: idx, rect: clipped))

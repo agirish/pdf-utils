@@ -683,9 +683,13 @@ enum PDFToolkit {
                 else {
                     throw PDFOperationError.redactionFailed
                 }
+                // A marked page is rasterized even when every fill clips away against the crop box
+                // (a mark dragged wholly into a cropped-out margin): rasterization destroys the
+                // out-of-crop content the mark covered, which is the safe direction — the old
+                // "empty fills → fail the whole export" behavior aborted with no hint which mark
+                // was the problem, and copying the page as vector would keep recoverable content.
                 let fills = mergeOverlappingRedactions(rectsForPage, pageBox: geometry.pageBox)
                 guard
-                    !fills.isEmpty,
                     let cgImage = renderBitmap(page, cgPage: cgPage, geometry: geometry, redactionFills: fills),
                     let pdfData = Self.singlePagePDFData(cgImage: cgImage, pageSize: geometry.displaySize),
                     let tempDoc = PDFDocument(data: pdfData),

@@ -46,7 +46,7 @@ struct RotateToolView: View {
                 runner: batchRunner,
                 tool: .rotate,
                 mode: $fileMode,
-                makeOperation: { .rotate(quarterTurns: quarterTurns) },
+                makeOperation: { .rotateConfig(quarterTurns: quarterTurns) },
                 fallbackSuffix: "rotated"
             ) {
                 batchRotationSection

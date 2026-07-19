@@ -40,13 +40,7 @@ struct CompressToolView: View {
     /// The current quality/target config as a batch operation, mirroring `runCompress`'s single-file
     /// choice. Nil only when the target-size field is emptied.
     private var currentBatchOperation: BatchOperation? {
-        switch mode {
-        case .quality:
-            return .compressQuality(quality: quality)
-        case .targetSize:
-            guard targetMB > 0 else { return nil }
-            return .compressTarget(targetBytes: max(1, Int((targetMB * 1_048_576).rounded())))
-        }
+        .compressConfig(usesTargetSize: mode == .targetSize, quality: quality, targetMegabytes: targetMB)
     }
 
     var body: some View {

@@ -53,11 +53,9 @@ struct WatermarkToolView: View {
     /// The current watermark options as a batch operation, mirroring `runWatermark`. Nil when the
     /// text field is empty (there is nothing to stamp).
     private var currentBatchOperation: BatchOperation? {
-        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return nil }
         let rgb = chosenRGB
-        return .watermark(WatermarkOptions(
-            text: trimmed,
+        return .watermarkConfig(
+            text: text,
             fontSize: fontSize,
             opacity: opacity,
             rotationDegrees: rotation,
@@ -65,7 +63,7 @@ struct WatermarkToolView: View {
             green: rgb.green,
             blue: rgb.blue,
             tiled: tiled
-        ))
+        )
     }
 
     /// sRGB components of the chosen color, threaded into `WatermarkOptions` and mirrored by the live

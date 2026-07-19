@@ -53,11 +53,9 @@ struct ProtectToolView: View {
     private var currentBatchOperation: BatchOperation? {
         switch mode {
         case .protect:
-            guard passwordsMatch else { return nil }
-            return .encrypt(password: newPassword)
+            return .encryptConfig(newPassword: newPassword, confirmPassword: confirmPassword)
         case .remove:
-            guard !currentPassword.isEmpty else { return nil }
-            return .removePassword(password: currentPassword)
+            return .removePasswordConfig(currentPassword: currentPassword)
         }
     }
 

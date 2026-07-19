@@ -39,7 +39,13 @@ enum PDFToolkit {
         return doc.pageCount
     }
 
-    /// Merges PDFs in the order given. Pages are moved out of each temporary document into the result.
+    /// Merges PDFs in the order given, copying each source page into the result.
+    ///
+    /// Uses `page.copy()` rather than moving the original page out of its document — the same
+    /// approach as `extract`/`split`. Inserting a page that still belongs to another live
+    /// `PDFDocument` hangs on macOS 26 (PDFKit spins building an `NSOrderedSet` inside
+    /// `insertPage:atIndex:`), which would freeze every merge; copying detaches the page first and
+    /// sidesteps it.
     static func merge(inputURLs: [URL], outputURL: URL) throws {
         guard !inputURLs.isEmpty else { throw PDFOperationError.noInputFiles }
 
@@ -48,9 +54,11 @@ enum PDFToolkit {
             guard let doc = PDFDocument(url: url) else {
                 throw PDFOperationError.couldNotOpen(url)
             }
-            while doc.pageCount > 0 {
-                guard let page = doc.page(at: 0) else { break }
-                merged.insert(page, at: merged.pageCount)
+            for i in 0..<doc.pageCount {
+                guard let copy = doc.page(at: i)?.copy() as? PDFPage else {
+                    throw PDFOperationError.couldNotOpen(url)
+                }
+                merged.insert(copy, at: merged.pageCount)
             }
         }
 

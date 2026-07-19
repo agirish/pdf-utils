@@ -47,8 +47,7 @@ struct SplitToolView: View {
         guard pageCount > 0 else { return nil }
         switch mode {
         case .everyN:
-            let n = max(1, chunkSize)
-            return Int((Double(pageCount) / Double(n)).rounded(.up))
+            return PageRangeParser.everyNPagesSegments(pageCount: pageCount, chunkSize: chunkSize).count
         case .customRanges:
             let groups = rangeText.split(separator: ",").filter {
                 !$0.trimmingCharacters(in: .whitespaces).isEmpty
@@ -413,9 +412,7 @@ struct SplitToolView: View {
                     let segments: [[Int]]
                     switch modeSnapshot {
                     case .everyN:
-                        segments = stride(from: 0, to: count, by: chunkSnapshot).map { start in
-                            Array(start..<min(start + chunkSnapshot, count))
-                        }
+                        segments = PageRangeParser.everyNPagesSegments(pageCount: count, chunkSize: chunkSnapshot)
                     case .customRanges:
                         segments = try PageRangeParser.parseSegments(rangeSnapshot, pageCount: count)
                     }

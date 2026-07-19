@@ -25,6 +25,21 @@ enum PageRangeParser {
         return try parseUniqueSorted(trimmed, pageCount: pageCount)
     }
 
+    // MARK: - Fixed chunks (Split — "Every N pages")
+
+    /// Splits `pageCount` pages into consecutive chunks of `chunkSize`, the last chunk taking
+    /// whatever remains. `chunkSize` is floored at 1 so a zero/negative stepper value can't produce
+    /// an empty stride; a zero-page document yields no segments. Each inner array is zero-based page
+    /// indices — the same shape `parseSegments` returns, so both split modes feed `PDFToolkit.split`
+    /// identically, and the live "N files" hint counts exactly what the export will write.
+    static func everyNPagesSegments(pageCount: Int, chunkSize: Int) -> [[Int]] {
+        let n = max(1, chunkSize)
+        guard pageCount > 0 else { return [] }
+        return stride(from: 0, to: pageCount, by: n).map { start in
+            Array(start..<min(start + n, pageCount))
+        }
+    }
+
     // MARK: - Segments (Split — each comma group becomes its own output file)
 
     /// Parses "1-3, 4-6, 7" into one zero-based index array **per comma group**: [[0,1,2],[3,4,5],[6]].

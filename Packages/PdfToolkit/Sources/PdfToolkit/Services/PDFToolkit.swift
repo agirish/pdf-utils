@@ -315,29 +315,57 @@ enum PDFToolkit {
     /// wins?" decision lives in `selectBestAttempt` so it can be unit tested without file IO.
     static func compressToTarget(inputURL: URL, outputURL: URL, targetBytes: Int) throws {
         try requireDistinctOutput(outputURL, from: [inputURL])
-        guard let source = PDFDocument(url: inputURL) else {
+        let sourceData: Data
+        do {
+            sourceData = try Data(contentsOf: inputURL)
+        } catch {
+            throw PDFOperationError.couldNotOpen(inputURL)
+        }
+        guard let source = PDFDocument(data: sourceData) else {
             throw PDFOperationError.couldNotOpen(inputURL)
         }
 
+        // Already at or under the target: rasterizing can only lose quality, so pass the source
+        // through unchanged instead of walking the ladder for a worse, possibly larger file.
+        if sourceData.count <= targetBytes {
+            do {
+                try sourceData.write(to: outputURL)
+            } catch {
+                throw PDFOperationError.couldNotWrite(outputURL)
+            }
+            return
+        }
+
         // Highest first so the loop can stop the moment an attempt fits — a generous target then
-        // costs a single rebuild instead of walking the whole ladder.
+        // costs a single rebuild instead of walking the whole ladder. Only the running best is
+        // retained: holding every rung's whole document ballooned peak memory to the sum of all
+        // attempts on scan-heavy files. The kept payload always matches `selectBestAttempt`'s
+        // decision — every attempt before the first fitting one overshot the target, so the first
+        // fit is also the smallest so far, and when nothing fits the smallest is what remains.
         let ladder: [Double] = [0.9, 0.75, 0.6, 0.45, 0.3, 0.2]
-        var produced: [(attempt: CompressionAttempt, data: Data)] = []
+        var attempts: [CompressionAttempt] = []
+        var best: Data?
         for q in ladder {
             let data = try compressedData(from: source, quality: q)
-            produced.append((CompressionAttempt(quality: q, byteCount: data.count), data))
+            attempts.append(CompressionAttempt(quality: q, byteCount: data.count))
+            if data.count < (best?.count ?? .max) {
+                best = data
+            }
             if data.count <= targetBytes { break }
         }
 
-        guard
-            let best = selectBestAttempt(from: produced.map(\.attempt), targetBytes: targetBytes),
-            let data = produced.first(where: { $0.attempt == best })?.data
-        else {
+        guard var chosen = best else {
             throw PDFOperationError.compressionFailed
+        }
+        // Rasterizing a lean vector/text PDF can *inflate* it past every rung. Never hand back a
+        // "compressed" file bigger than the original — fall back to the source bytes, so the
+        // output is bounded by the input even when the target is unreachable.
+        if chosen.count >= sourceData.count {
+            chosen = sourceData
         }
 
         do {
-            try data.write(to: outputURL)
+            try chosen.write(to: outputURL)
         } catch {
             throw PDFOperationError.couldNotWrite(outputURL)
         }
@@ -551,14 +579,23 @@ enum PDFToolkit {
             // (see drawAnnotations).
             drawAnnotations(of: page, in: ctx)
 
-            // The user's placed items go back under the page transform — their rects are captured
-            // in PDF user space, like redaction fills — and draw on top of the annotations.
-            ctx.saveGState()
-            ctx.concatenate(transform)
+            // Placed items draw on top of the annotations, each in the space that renders it the
+            // way the editor previewed it. Signatures are polylines: every point maps through the
+            // page transform, so rotation is handled exactly. Typed text is laid out by
+            // NSStringDrawing along the current CTM's axes — under the rotated page transform it
+            // baked sideways (and wrapped to the unswapped width) on /Rotate pages while the editor
+            // showed it upright, so text draws in display space with the display-mapped rect.
             for item in byPage[i] ?? [] {
-                drawFillSignItem(item, in: ctx)
+                switch item.content {
+                case .text(let text):
+                    drawFillText(text, in: displayRect(item.rect, cropBox: cropBox, rotation: rotation), ctx: ctx)
+                case .signature(let signature):
+                    ctx.saveGState()
+                    ctx.concatenate(transform)
+                    drawFillSignature(signature, in: item.rect, ctx: ctx)
+                    ctx.restoreGState()
+                }
             }
-            ctx.restoreGState()
 
             ctx.endPDFPage()
         }
@@ -568,12 +605,36 @@ enum PDFToolkit {
         try (pdfData as Data).write(to: outputURL)
     }
 
-    private static func drawFillSignItem(_ item: FillSignItem, in ctx: CGContext) {
-        switch item.content {
-        case .text(let text):
-            drawFillText(text, in: item.rect, ctx: ctx)
-        case .signature(let signature):
-            drawFillSignature(signature, in: item.rect, ctx: ctx)
+    /// Maps a PDF-user-space rect into displayed-page coordinates (origin at the displayed crop
+    /// box's corner, /Rotate applied, width/height swapped for 90°/270°) — the space the on-screen
+    /// editor and `PDFAnnotation.draw` work in. Internal so geometry tests can pin the mapping.
+    static func displayRect(_ rect: CGRect, cropBox: CGRect, rotation: Int) -> CGRect {
+        let r = ((rotation % 360) + 360) % 360
+        switch r {
+        case 90:
+            return CGRect(
+                x: rect.minY - cropBox.minY,
+                y: cropBox.maxX - rect.maxX,
+                width: rect.height, height: rect.width
+            )
+        case 180:
+            return CGRect(
+                x: cropBox.maxX - rect.maxX,
+                y: cropBox.maxY - rect.maxY,
+                width: rect.width, height: rect.height
+            )
+        case 270:
+            return CGRect(
+                x: cropBox.maxY - rect.maxY,
+                y: rect.minX - cropBox.minX,
+                width: rect.height, height: rect.width
+            )
+        default:
+            return CGRect(
+                x: rect.minX - cropBox.minX,
+                y: rect.minY - cropBox.minY,
+                width: rect.width, height: rect.height
+            )
         }
     }
 

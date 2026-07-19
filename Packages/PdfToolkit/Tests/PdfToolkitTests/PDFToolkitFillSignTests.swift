@@ -197,4 +197,32 @@ import PDFKit
         #expect(brightness(310, 290) < 0.8)   // annotation at (250,250)+(80x60), origin subtracted once
         #expect(brightness(215, 215) > 0.9)   // double-subtraction home — blank now
     }
+
+    @Test func typedTextBakesUprightOnARotatedPage() throws {
+        // NSStringDrawing lays glyphs along the CTM's axes, so drawing under the rotated page
+        // transform baked text sideways on /Rotate pages while the editor previewed it upright.
+        // Fixture: /Rotate 90 letter page, item rect page-space (300,200)+(40x200), which displays
+        // as a wide box at display x 200-400, y 272-312. A short "XX" at 24pt lands as one line at
+        // the display box's top-left (x ~200-235); the sideways bug put its ink only at x 376-400.
+        let dir = FixtureDir()
+        let src = dir.url("src.pdf"), out = dir.url("out.pdf")
+        try PDFFixtures.writePDF(markers: ["ONLY"], rotations: [0: 90], to: src)
+
+        try PDFToolkit.fillAndSign(
+            inputURL: src,
+            outputURL: out,
+            items: [textItem("XX", page: 0, rect: CGRect(x: 300, y: 200, width: 40, height: 200), fontSize: 24)]
+        )
+
+        #expect(try PDFFixtures.pageSize(at: out) == CGSize(width: 792, height: 612))
+        let brightness = try PDFFixtures.brightnessSampler(at: out)
+        let upright = PDFFixtures.darkestSample(
+            brightness, xRange: stride(from: 202, through: 240, by: 2), yValues: [295, 300, 305]
+        )
+        #expect(upright < 0.6)
+        let sideways = PDFFixtures.darkestSample(
+            brightness, xRange: stride(from: 370, through: 405, by: 2), yValues: [280, 295, 305]
+        )
+        #expect(sideways > 0.9)
+    }
 }

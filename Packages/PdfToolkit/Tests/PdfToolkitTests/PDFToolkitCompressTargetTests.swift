@@ -80,4 +80,33 @@ import PDFKit
             try PDFToolkit.compressToTarget(inputURL: src, outputURL: src, targetBytes: 1000)
         }?.kind == "outputMatchesInput")
     }
+
+    @Test func aSourceAlreadyUnderTheTargetPassesThroughUnchanged() throws {
+        // Rasterizing a file that already fits can only lose quality (and often grows it) — the
+        // source bytes must pass through untouched, keeping vector text extractable.
+        let dir = FixtureDir()
+        let src = dir.url("src.pdf"), out = dir.url("out.pdf")
+        try PDFFixtures.writePDF(markers: ["KEEPME"], to: src)
+        let sourceBytes = try Data(contentsOf: src)
+
+        try PDFToolkit.compressToTarget(inputURL: src, outputURL: out, targetBytes: sourceBytes.count + 10_000)
+
+        #expect(try Data(contentsOf: out) == sourceBytes)
+        #expect(try PDFFixtures.pageTexts(at: out)[0].contains("KEEPME"))
+    }
+
+    @Test func neverEmitsAFileLargerThanTheSource() throws {
+        // A lean text PDF inflates at every raster rung. With an unreachable target the old code
+        // shipped the smallest attempt anyway — several times the original's size, reported as
+        // success. The output must never exceed the input.
+        let dir = FixtureDir()
+        let src = dir.url("src.pdf"), out = dir.url("out.pdf")
+        try PDFFixtures.writePDF(markers: ["TINY"], to: src)
+        let sourceCount = try Data(contentsOf: src).count
+
+        try PDFToolkit.compressToTarget(inputURL: src, outputURL: out, targetBytes: 1)
+
+        let outCount = try Data(contentsOf: out).count
+        #expect(outCount <= sourceCount)
+    }
 }

@@ -16,6 +16,18 @@ enum BatchOperation: Sendable {
     case encrypt(password: String)
     case removePassword(password: String)
 
+    /// The single tool this operation belongs to, used to attribute Activity Log entries to the real
+    /// tool (Compress, Rotate, …) now that multi-file runs live inside each tool rather than a
+    /// separate "Batch" screen.
+    var toolTitle: String {
+        switch self {
+        case .compressQuality, .compressTarget: return Tool.compress.title
+        case .rotate: return Tool.rotate.title
+        case .watermark: return Tool.watermark.title
+        case .encrypt, .removePassword: return Tool.protect.title
+        }
+    }
+
     /// Filename suffix appended to each output, reusing the single tools' convention (`-compressed`,
     /// `-rotated`, …) so a batch result is named exactly like the one-off tool would name it.
     var suffixWord: String {
@@ -194,11 +206,11 @@ final class BatchRunner: ObservableObject {
                     }
                 }
                 items[index].status = .done(outputURL: result.url, outputBytes: result.bytes)
-                ActivityLog.shared.recordSaved(Tool.batch.title, to: result.url, bytes: Int(result.bytes))
+                ActivityLog.shared.recordSaved(operation.toolTitle, to: result.url, bytes: Int(result.bytes))
                 AfterExportAction.current().perform(on: [result.url])
             } catch {
                 items[index].status = .failed(error.localizedDescription)
-                ActivityLog.shared.error("\(Tool.batch.title) failed for \(inputURL.lastPathComponent): \(error.localizedDescription)")
+                ActivityLog.shared.error("\(operation.toolTitle) failed for \(inputURL.lastPathComponent): \(error.localizedDescription)")
             }
         }
     }

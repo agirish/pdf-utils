@@ -21,6 +21,18 @@ import PDFKit
         #expect(BatchOperation.watermark(options).suffixWord == "watermarked")
     }
 
+    // MARK: - Tool attribution
+
+    @Test func toolTitleAttributesEachOperationToItsSingleTool() {
+        #expect(BatchOperation.compressQuality(quality: 0.7).toolTitle == Tool.compress.title)
+        #expect(BatchOperation.compressTarget(targetBytes: 1000).toolTitle == Tool.compress.title)
+        #expect(BatchOperation.rotate(quarterTurns: 1).toolTitle == Tool.rotate.title)
+        #expect(BatchOperation.encrypt(password: "x").toolTitle == Tool.protect.title)
+        #expect(BatchOperation.removePassword(password: "x").toolTitle == Tool.protect.title)
+        let options = WatermarkOptions(text: "DRAFT", fontSize: 48, opacity: 0.25, rotationDegrees: 45, red: 0.5, green: 0.5, blue: 0.5, tiled: false)
+        #expect(BatchOperation.watermark(options).toolTitle == Tool.watermark.title)
+    }
+
     // MARK: - Output-name derivation
 
     @Test func outputFilenameStemsInputAndAppendsSuffix() {

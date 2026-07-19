@@ -35,6 +35,14 @@ extension View {
                     .strokeBorder(.quaternary.opacity(0.6), lineWidth: 1)
             }
     }
+
+    /// Translucent bar behind a tool's primary action row. Mirrors `ToolScreenHeader`'s material top
+    /// bar so the action reads as glass chrome — letting the window's liquid-glass background (its
+    /// accent hue and tint) read through — instead of the opaque panel that used to hide it. Callers
+    /// keep their own `Divider` above the bar.
+    func toolActionBar() -> some View {
+        self.background(.ultraThinMaterial)
+    }
 }
 
 struct RunActionButton: View {

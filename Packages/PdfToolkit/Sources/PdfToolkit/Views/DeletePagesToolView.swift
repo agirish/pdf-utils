@@ -117,10 +117,9 @@ struct DeletePagesToolView: View {
                 Task { await runDelete() }
             }
             .padding(16)
-            .background(Color(nsColor: .windowBackgroundColor))
+            .toolActionBar()
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Color(nsColor: .windowBackgroundColor))
     }
 
     private var headerRow: some View {

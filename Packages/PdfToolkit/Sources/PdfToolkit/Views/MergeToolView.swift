@@ -174,10 +174,9 @@ struct MergeToolView: View {
                 Task { await runMerge() }
             }
             .padding(16)
-            .background(Color(nsColor: .windowBackgroundColor))
+            .toolActionBar()
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Color(nsColor: .windowBackgroundColor))
     }
 
     /// Title + actions on one row; subtitle full-width below so buttons never wrap mid-label (e.g. “Clear” / “all”).

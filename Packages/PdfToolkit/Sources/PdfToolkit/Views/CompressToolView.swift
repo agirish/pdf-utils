@@ -115,10 +115,9 @@ struct CompressToolView: View {
                 Task { await runCompress() }
             }
             .padding(16)
-            .background(Color(nsColor: .windowBackgroundColor))
+            .toolActionBar()
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Color(nsColor: .windowBackgroundColor))
     }
 
     private var headerRow: some View {

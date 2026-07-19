@@ -65,10 +65,9 @@ struct ProtectToolView: View {
             .padding(16)
             .frame(maxWidth: 560)
             .frame(maxWidth: .infinity)
-            .background(Color(nsColor: .windowBackgroundColor))
+            .toolActionBar()
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Color(nsColor: .windowBackgroundColor))
         .overlay {
             if busy { Color.black.opacity(0.08).ignoresSafeArea() }
         }

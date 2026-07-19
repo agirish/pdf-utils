@@ -33,6 +33,8 @@ public struct ToolDetailView: View {
                     WatermarkToolView()
                 case .redact:
                     RedactToolView()
+                case .fillSign:
+                    FillSignToolView()
                 case .protect:
                     ProtectToolView()
                 }

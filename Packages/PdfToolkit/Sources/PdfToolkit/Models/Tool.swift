@@ -10,6 +10,7 @@ public enum Tool: String, CaseIterable, Identifiable, Hashable {
     case deletePages
     case watermark
     case redact
+    case fillSign
     case protect
 
     public var id: String { rawValue }
@@ -25,6 +26,7 @@ public enum Tool: String, CaseIterable, Identifiable, Hashable {
         case .deletePages: return "Delete PDF Pages"
         case .watermark: return "Watermark PDF"
         case .redact: return "Redact PDF"
+        case .fillSign: return "Fill & Sign"
         case .protect: return "Password Protect"
         }
     }
@@ -49,6 +51,8 @@ public enum Tool: String, CaseIterable, Identifiable, Hashable {
             return "Stamp text across every page"
         case .redact:
             return "Permanently black out sensitive areas"
+        case .fillSign:
+            return "Add text and a signature to a PDF"
         case .protect:
             return "Encrypt a PDF, or remove its password"
         }
@@ -75,6 +79,8 @@ public enum Tool: String, CaseIterable, Identifiable, Hashable {
             return "Overlay text—DRAFT, CONFIDENTIAL, a name—across every page. Tune size, angle, opacity, and color, and choose a single centered stamp or a tiled pattern. The underlying page stays vector (text stays selectable); your original file is untouched."
         case .redact:
             return "Draw rectangles over names, account numbers, or images you want gone for good. Marked regions are rebuilt as solid black—text there can’t be copied or searched. Everything runs on your Mac; review marks before exporting."
+        case .fillSign:
+            return "Drop typed text onto a non-interactive form, then draw or type a signature and place it on the page. Text stays selectable; the signature is baked in as vector ink. Your original file is untouched until you save the new PDF."
         case .protect:
             return "Add a password that’s required to open a PDF, or strip the password from one you can already open. Encryption is the standard PDF scheme, applied on your Mac—the password never leaves your machine."
         }
@@ -92,6 +98,7 @@ public enum Tool: String, CaseIterable, Identifiable, Hashable {
         case .deletePages: return "minus.rectangle.portrait.fill"
         case .watermark: return "signature"
         case .redact: return "eraser.line.dashed"
+        case .fillSign: return "hand.draw"
         case .protect: return "lock.doc"
         }
     }
@@ -107,6 +114,7 @@ public enum Tool: String, CaseIterable, Identifiable, Hashable {
         case .deletePages: return .pink
         case .watermark: return .brown
         case .redact: return Color(red: 0.78, green: 0.16, blue: 0.22)
+        case .fillSign: return Color(red: 1.0, green: 0.45, blue: 0.4)
         case .protect: return .green
         }
     }

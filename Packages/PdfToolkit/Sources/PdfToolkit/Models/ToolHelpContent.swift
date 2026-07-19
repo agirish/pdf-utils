@@ -193,6 +193,32 @@ extension Tool {
                     "Redacted pages are saved as full-page images. PDFKit’s OCR-on-save option is not used here because it re-encoded those pages as tiny thumbnails in testing.",
                 ]
             )
+        case .fillSign:
+            return ToolHelpContent(
+                overview:
+                    "Fill & Sign lets you type into a flat (non-interactive) PDF form and add a signature. Typed text is baked in as selectable vector text; a signature you draw with the trackpad—or type in a script font—is baked in as vector ink. The original file is not changed until you save the new PDF.",
+                steps: [
+                    "Choose or drop a PDF, then scroll to the page you want to work on.",
+                    "Click Add text to drop a text box on that page, then type into the Selected item field; drag the box to position it and drag its bottom-right handle to resize.",
+                    "Use Add date for a one-tap dated stamp.",
+                    "To sign: under Signature draw on the pad with the trackpad (or switch to Type and enter a name in a script font), then click Place signature to drop it on the page.",
+                    "Reposition and resize items on the page, then click Fill & Sign & save… to write the new PDF.",
+                ],
+                controls: [
+                    ("Ink color", "The color used for new text and signatures you place."),
+                    ("Add text / Add date", "Drops a new text box on the current page—empty, or prefilled with today's date."),
+                    ("Selected item", "Edit the highlighted item: its text, font size, or delete it. Signatures show a size note only."),
+                    ("Signature · Draw / Type", "Draw a freehand signature on the pad, or type a name rendered in a handwriting font."),
+                    ("Place signature", "Drops the drawn or typed signature onto the current page so you can position it."),
+                    ("Drag / corner handle", "Drag an item to move it; drag its bottom-right handle to resize. Signatures scale with the box."),
+                    ("Fill & Sign & save…", "Bakes every placed item into a new PDF; the original file is unchanged."),
+                ],
+                tips: [
+                    "Text stays selectable and searchable in the export—only the signature is drawn ink.",
+                    "Items live on the page they were added to; scroll and add to any page before saving.",
+                    "Existing interactive AcroForm fields aren't detected here—this tool is for typing onto flat forms and layering a signature on top.",
+                ]
+            )
         case .protect:
             return ToolHelpContent(
                 overview:

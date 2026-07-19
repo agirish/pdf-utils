@@ -37,6 +37,8 @@ public struct ToolDetailView: View {
                     FillSignToolView()
                 case .protect:
                     ProtectToolView()
+                case .batch:
+                    BatchToolView()
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)

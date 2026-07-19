@@ -11,9 +11,9 @@ import AppKit
         // A fixed roster so adding/removing a tool is a deliberate, reviewed change.
         #expect(Set(Tool.allCases) == Set<Tool>([
             .compress, .rotate, .merge, .split, .extract,
-            .reorder, .deletePages, .watermark, .redact, .fillSign, .protect,
+            .reorder, .deletePages, .watermark, .redact, .fillSign, .protect, .batch,
         ]))
-        #expect(Tool.allCases.count == 11)
+        #expect(Tool.allCases.count == 12)
     }
 
     @Test func idEqualsRawValueAndIsUnique() {

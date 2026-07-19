@@ -105,4 +105,28 @@ import PDFKit
             try PDFToolkit.removePassword(inputURL: plain, outputURL: dir.url("out.pdf"), password: "")
         }?.kind == "notEncrypted")
     }
+
+    @Test func removePasswordCarriesTheInfoDictionaryIntoTheDecryptedCopy() throws {
+        // The rebuild that sheds encryption must not shed the document info with it.
+        let dir = FixtureDir()
+        let plain = dir.url("plain.pdf")
+        try PDFFixtures.writePDF(pageCount: 1, to: plain)
+        let doc = try #require(PDFDocument(url: plain))
+        doc.documentAttributes = [
+            PDFDocumentAttribute.titleAttribute: "Quarterly Report",
+            PDFDocumentAttribute.authorAttribute: "A. Author",
+        ]
+        let titled = dir.url("titled.pdf")
+        #expect(doc.write(to: titled))
+
+        let locked = dir.url("locked.pdf")
+        try PDFToolkit.encrypt(inputURL: titled, outputURL: locked, password: "pw")
+        let unlocked = dir.url("unlocked.pdf")
+        try PDFToolkit.removePassword(inputURL: locked, outputURL: unlocked, password: "pw")
+
+        let out = try #require(PDFDocument(url: unlocked))
+        #expect(out.isEncrypted == false)
+        #expect(out.documentAttributes?[PDFDocumentAttribute.titleAttribute] as? String == "Quarterly Report")
+        #expect(out.documentAttributes?[PDFDocumentAttribute.authorAttribute] as? String == "A. Author")
+    }
 }

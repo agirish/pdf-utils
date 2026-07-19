@@ -423,11 +423,12 @@ final class LogFileWriter: @unchecked Sendable {
         try? tail.write(to: url, options: .atomic)
     }
 
-    /// `completion` runs on the writer queue immediately after the bytes land, so callers can
-    /// sequence their own bookkeeping against the disk state (see `ActivityLog.log`).
+    /// `completion` runs on the writer queue only after the bytes actually land, so callers can
+    /// sequence their own bookkeeping against the disk state (see `ActivityLog.log`). On a failed
+    /// write the completion is skipped — the entry then exists in neither destination, which keeps
+    /// the viewer from showing a line the file does not hold.
     func append(_ text: String, then completion: (@Sendable () -> Void)? = nil) {
         queue.async { [weak self] in
-            defer { completion?() }
             guard let self, let data = text.data(using: .utf8) else { return }
             // Reopen if the path's current inode no longer matches the handle's — never opened,
             // removed, or replaced externally — so a stale handle can't write into an orphaned inode.
@@ -436,19 +437,24 @@ final class LogFileWriter: @unchecked Sendable {
                 self.handle = nil
                 self.openHandle()
             }
+            var landed = false
             if let handle = self.handle {
-                _ = try? handle.seekToEnd()
-                try? handle.write(contentsOf: data)
+                if (try? handle.seekToEnd()) != nil, (try? handle.write(contentsOf: data)) != nil {
+                    landed = true
+                }
             } else {
                 // Last-resort fallback when the handle could not be opened. Append manually — a bare
                 // `.atomic` write would replace the whole log with this one line. Self-heals next append.
                 let existing = (try? Data(contentsOf: self.url)) ?? Data()
-                try? (existing + data).write(to: self.url, options: .atomic)
+                landed = (try? (existing + data).write(to: self.url, options: .atomic)) != nil
             }
             self.bytesSinceTrimCheck += data.count
             if self.bytesSinceTrimCheck >= self.trimCheckInterval {
                 self.bytesSinceTrimCheck = 0
                 self.trimMidSessionIfOversized()
+            }
+            if landed {
+                completion?()
             }
         }
     }

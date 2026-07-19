@@ -80,9 +80,11 @@ struct ActivityLogTests {
     }
 
     @Test func entryLoggedAfterClearSurvivesBothDestinations() async throws {
-        // Clearing now purges the handoff buffer on the writer queue, ordered after the truncate —
-        // this pins that the purge drops only pre-clear entries: one logged after the clear must
-        // reach both the file and the in-memory mirror, and the pre-clear one may never resurrect.
+        // Pins the sequential contract around clearing: an entry logged after the clear reaches
+        // both destinations and the pre-clear entry resurrects in neither. (The preemption race the
+        // queue-ordered purge fixes — a background log() suspended between its disk append and its
+        // buffer handoff — cannot be induced deterministically from a test; this guards the
+        // surrounding behavior the fix must not break.)
         let url = tempURL()
         defer { try? FileManager.default.removeItem(at: url) }
         let log = ActivityLog(fileURL: url)

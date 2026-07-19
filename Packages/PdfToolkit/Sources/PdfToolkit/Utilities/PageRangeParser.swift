@@ -2,7 +2,7 @@ import Foundation
 
 enum PageRangeParser {
     /// Parses "1, 3-5, 8" into zero-based indices.
-    /// When `emptyMeansAllPages` is true, blank input selects every page (used by Extract / Rotate “all” semantics).
+    /// When `emptyMeansAllPages` is true, blank input selects every page (Extract's blank-means-all semantics).
     /// When false, blank input throws `pageRangeRequired` (used by Delete so an empty field cannot mean “delete everything”).
     /// When `preserveOrder` is true (Extract), comma-separated groups stay in order, ranges expand in direction (3-5 vs 5-3), and duplicate pages are allowed.
     static func parse(

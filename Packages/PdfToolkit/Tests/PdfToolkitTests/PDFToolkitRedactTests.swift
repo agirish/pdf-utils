@@ -98,26 +98,6 @@ import CoreGraphics
         }?.kind == "couldNotOpen")
     }
 
-    /// Renders `url`'s first page to a bitmap and returns a sampler from PDF-space points (origin
-    /// bottom-left) to average brightness in 0…1 (0 = black, 1 = white), so a test can assert *where*
-    /// redaction's black fill landed.
-    private func brightnessSampler(_ url: URL) throws -> (CGFloat, CGFloat) -> CGFloat {
-        let doc = try #require(PDFDocument(url: url))
-        let page = try #require(doc.page(at: 0))
-        let media = page.bounds(for: .mediaBox)
-        let image = page.thumbnail(of: media.size, for: .mediaBox)
-        let tiff = try #require(image.tiffRepresentation)
-        let rep = try #require(NSBitmapImageRep(data: tiff))
-        let sx = CGFloat(rep.pixelsWide) / media.width
-        let sy = CGFloat(rep.pixelsHigh) / media.height
-        return { pdfX, pdfY in
-            let col = min(rep.pixelsWide - 1, max(0, Int(pdfX * sx)))
-            let row = min(rep.pixelsHigh - 1, max(0, Int((media.height - pdfY) * sy)))   // flip: PDF y-up → image y-down
-            guard let c = rep.colorAt(x: col, y: row)?.usingColorSpace(.deviceRGB) else { return 1 }
-            return (c.redComponent + c.greenComponent + c.blueComponent) / 3
-        }
-    }
-
     @Test func partialMarkBlacksOutOnlyTheCoveredRegionAndSparesTheRest() throws {
         // The strongest anti-corruption / anti-data-loss check for the most destructive tool: a mark
         // over only the top half must black out that half (covered content unrecoverable) while
@@ -134,7 +114,7 @@ import CoreGraphics
         )
 
         #expect(try PDFFixtures.pageCount(at: out) == 1)
-        let brightness = try brightnessSampler(out)
+        let brightness = try PDFFixtures.brightnessSampler(at: out)
 
         // Well inside the mask → solid black (the top token is under here and is gone).
         #expect(brightness(300, 600) < 0.2)

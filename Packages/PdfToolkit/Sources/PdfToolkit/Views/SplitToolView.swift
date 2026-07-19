@@ -353,8 +353,11 @@ struct SplitToolView: View {
             return
         }
         // Drop the previous document's pages before the await so nobody picks page numbers
-        // against thumbnails of a file that is no longer loaded.
+        // against thumbnails of a file that is no longer loaded — and the typed range with them:
+        // stale text (or a leftover out-of-range typo) made the next thumbnail click silently
+        // replace the whole field with just the clicked page.
         thumbnails = []
+        rangeText = ""
         isGeneratingPreviews = true
         do {
             let loaded = try await PDFPageThumbnailLoader.loadAllPages(from: url)

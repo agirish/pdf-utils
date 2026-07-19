@@ -68,25 +68,6 @@ enum PDFFixtures {
         return try Data(contentsOf: url)
     }
 
-    /// Writes a marker PDF, then stamps intrinsic page rotation onto the pages named in `rotations`
-    /// (zero-based index → degrees) via PDFKit, so operation tests can exercise pre-rotated inputs.
-    ///
-    /// The rotated document is built from a throwaway sibling and written to `url` — a *different*
-    /// path. Writing a `PDFDocument` back to the very file it was opened from is unreliable: PDFKit
-    /// intermittently corrupts the file or returns false, and a half-written document can wedge
-    /// PDFKit's shared state so that other tests' PDF work stalls behind it.
-    static func writePDF(markers: [String], rotations: [Int: Int], to url: URL) throws {
-        let base = url.deletingLastPathComponent()
-            .appendingPathComponent("rot-base-\(UUID().uuidString).pdf")
-        defer { try? FileManager.default.removeItem(at: base) }
-        try writePDF(markers: markers, to: base)
-        let doc = try #require(PDFDocument(url: base))
-        for (index, degrees) in rotations {
-            try #require(doc.page(at: index)).rotation = degrees
-        }
-        #expect(doc.write(to: url))
-    }
-
     /// A single US-Letter page carrying two well-separated text tokens: `top` drawn near the top edge
     /// and `bottom` near the bottom edge (PDF coordinates, origin bottom-left). A redaction rectangle
     /// over one half then covers exactly one token, so a pixel-level test can prove the black fill lands
@@ -105,22 +86,6 @@ enum PDFFixtures {
         context.endPDFPage()
         context.closePDF()
         try (data as Data).write(to: url, options: .atomic)
-    }
-
-    /// A marker PDF whose first page carries a green square annotation (border + interior), for
-    /// tests that pin annotation appearances surviving a page rebuild. Built via a throwaway
-    /// sibling for the same write-back-reliability reason as the rotation fixture above.
-    static func writePDF(markers: [String], greenSquareOnFirstPage rect: CGRect, to url: URL) throws {
-        let base = url.deletingLastPathComponent()
-            .appendingPathComponent("ann-base-\(UUID().uuidString).pdf")
-        defer { try? FileManager.default.removeItem(at: base) }
-        try writePDF(markers: markers, to: base)
-        let doc = try #require(PDFDocument(url: base))
-        let annotation = PDFAnnotation(bounds: rect, forType: .square, withProperties: nil)
-        annotation.color = .green
-        annotation.interiorColor = .green
-        try #require(doc.page(at: 0)).addAnnotation(annotation)
-        #expect(doc.write(to: url))
     }
 
     /// A one-page marker PDF composed from any mix of: custom media size, intrinsic rotation, a

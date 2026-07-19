@@ -444,7 +444,9 @@ enum PDFToolkit {
         for i in 0..<source.pageCount {
             guard let page = source.page(at: i), let cgPage = page.pageRef else { continue }
             // Crop box, not media box: it is what viewers display, so the stamped page keeps the
-            // visible size and never resurfaces content the source's crop deliberately hid.
+            // visible size. (Vector content outside the crop still rides along in the stream —
+            // clipped off-page by the emitted media box, not removed; only rasterizing paths
+            // truly destroy it.)
             let cropBox = page.bounds(for: .cropBox)
             let rotation = ((page.rotation % 360) + 360) % 360
             let displaySize = (rotation == 90 || rotation == 270)

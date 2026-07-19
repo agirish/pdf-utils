@@ -149,4 +149,19 @@ import PDFKit
         #expect(try PDFFixtures.pageTexts(at: outputs[0]) == [PDFFixtures.marker(1)])
         #expect(try PDFFixtures.pageTexts(at: outputs[1]) == [PDFFixtures.marker(2)])
     }
+
+    @Test func aFailingLaterSegmentUnwindsThePartsAlreadyWritten() throws {
+        // Part 1 succeeds, part 2 references a page far out of bounds. The split must throw AND
+        // remove the part it already wrote — a failed split leaving a half set behind reads as a
+        // successful (but wrong) result in the destination folder.
+        let dir = FixtureDir()
+        let src = dir.url("src.pdf")
+        try PDFFixtures.writePDF(pageCount: 2, to: src)
+
+        let error = #expect(throws: PDFOperationError.self) {
+            _ = try PDFToolkit.split(inputURL: src, into: dir.url, baseName: "src", segments: [[0], [99]])
+        }
+        #expect(error?.kind == "pageOutOfBounds")
+        #expect(!FileManager.default.fileExists(atPath: dir.path("src-01.pdf")))
+    }
 }

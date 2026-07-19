@@ -14,5 +14,10 @@ let package = Package(
             name: "PdfToolkit",
             path: "Sources/PdfToolkit"
         ),
+        .testTarget(
+            name: "PdfToolkitTests",
+            dependencies: ["PdfToolkit"],
+            path: "Tests/PdfToolkitTests"
+        ),
     ]
 )

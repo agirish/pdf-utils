@@ -432,8 +432,10 @@ struct SplitToolView: View {
             withAnimation {
                 result = SplitResult(directory: directory, files: files)
             }
+            ActivityLog.shared.recordSaved(Tool.split.title, to: directory, bytes: nil, detail: "\(files.count) \(files.count == 1 ? "file" : "files")")
         } catch {
             alertMessage = error.localizedDescription
+            ActivityLog.shared.error("\(Tool.split.title) failed: \(error.localizedDescription)")
         }
     }
 }

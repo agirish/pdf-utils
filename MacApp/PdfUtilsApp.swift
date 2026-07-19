@@ -29,6 +29,28 @@ struct PdfUtilsApp: App {
                 Button("Settings…") { settingsPresenter.open() }
                     .keyboardShortcut(",", modifiers: .command)
             }
+            // A Help-menu entry that raises the Activity Log window — the app's first menu command,
+            // mirroring SyncCloud's "Open Activity Log".
+            CommandGroup(after: .help) {
+                OpenActivityLogMenuItem()
+            }
         }
+
+        // The Activity Log lives in its own window (SyncCloud parity) so it never collides with the
+        // tool navigation and can stay open beside the main window.
+        Window("Activity Log", id: "activity-log") {
+            ActivityLogView()
+        }
+        .defaultSize(width: 480, height: 640)
+    }
+}
+
+/// The Help ▸ Activity Log menu item. A standalone `View` (not inline in the `.commands` builder) so
+/// it can hold `@Environment(\.openWindow)` — that action isn't available directly in the builder.
+private struct OpenActivityLogMenuItem: View {
+    @Environment(\.openWindow) private var openWindow
+    var body: some View {
+        Button("Activity Log") { openWindow(id: "activity-log") }
+            .keyboardShortcut("l", modifiers: [.command, .shift])
     }
 }

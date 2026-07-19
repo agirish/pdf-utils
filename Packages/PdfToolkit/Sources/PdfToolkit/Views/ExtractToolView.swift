@@ -55,8 +55,16 @@ struct ExtractToolView: View {
             contentType: .pdf,
             defaultFilename: suggestedName.exportFilenameStem
         ) { result in
+            let savedBytes = exportDoc?.data.count
             exportDoc = nil
-            if case .failure(let err) = result { alertMessage = err.localizedDescription }
+            switch result {
+            case .success(let url):
+                ActivityLog.shared.recordSaved(Tool.extract.title, to: url, bytes: savedBytes)
+            case .failure(let err):
+                guard !err.isUserCancelled else { break }
+                alertMessage = err.localizedDescription
+                ActivityLog.shared.error("\(Tool.extract.title) failed: \(err.localizedDescription)")
+            }
         }
         .alert(AppBrand.displayName, isPresented: Binding(
             get: { alertMessage != nil },
@@ -312,6 +320,7 @@ struct ExtractToolView: View {
             showExporter = true
         } catch {
             alertMessage = error.localizedDescription
+            ActivityLog.shared.error("\(Tool.extract.title) failed: \(error.localizedDescription)")
         }
     }
 }

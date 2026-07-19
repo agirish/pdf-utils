@@ -58,9 +58,15 @@ struct CompressToolView: View {
             contentType: .pdf,
             defaultFilename: suggestedName.exportFilenameStem
         ) { result in
+            let savedBytes = exportDoc?.data.count
             exportDoc = nil
-            if case .failure(let err) = result {
+            switch result {
+            case .success(let url):
+                ActivityLog.shared.recordSaved(Tool.compress.title, to: url, bytes: savedBytes)
+            case .failure(let err):
+                guard !err.isUserCancelled else { break }
                 alertMessage = err.localizedDescription
+                ActivityLog.shared.error("\(Tool.compress.title) failed: \(err.localizedDescription)")
             }
         }
         .alert(AppBrand.displayName, isPresented: Binding(
@@ -316,6 +322,7 @@ struct CompressToolView: View {
             showExporter = true
         } catch {
             alertMessage = error.localizedDescription
+            ActivityLog.shared.error("\(Tool.compress.title) failed: \(error.localizedDescription)")
         }
     }
 }

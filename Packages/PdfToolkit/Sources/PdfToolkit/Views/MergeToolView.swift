@@ -556,8 +556,10 @@ struct MergeToolView: View {
             withAnimation {
                 mergeResult = MergeResult(outputURL: outputURL, totalPages: finalPages, fileBytes: bytes)
             }
+            ActivityLog.shared.recordSaved(Tool.merge.title, to: outputURL, bytes: Int(bytes), detail: "\(urlsSnapshot.count) files")
         } catch {
             alertMessage = error.localizedDescription
+            ActivityLog.shared.error("\(Tool.merge.title) failed: \(error.localizedDescription)")
         }
     }
 

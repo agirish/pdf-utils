@@ -32,6 +32,14 @@ Open **Settings** (⌘,) to tune how the app looks:
 - Mix: `1, 4-6, 10`  
 Numbers are **1-based**, matching page labels in Preview.
 
+## Activity log
+
+Every operation that writes a file is recorded, so you can see what the app did — and hand a clean trace to a bug report. Open it from the toolbar **clock** button or **Help ▸ Activity Log** (⇧⌘L); it opens in its own window.
+
+- Each **merge, split, extract, reorder, delete-pages, rotate, compress, watermark, protect,** and **redact** logs an entry when you save — with the destination path and file size — and failures are logged too. Cancelling a Save dialog records nothing.
+- Entries are grouped by day, filterable by level (**All / Info / Warnings / Errors**) with live counts and a message search, and can be **copied** to the clipboard or **cleared**.
+- History is written to **`~/pdf-utils.log`** and survives quitting the app: **Show older history** loads entries from earlier sessions, and the toolbar's document button reveals the file in Finder.
+
 ## Requirements
 
 - **macOS 15** or later (SwiftUI / PDFKit APIs used here).
@@ -67,7 +75,7 @@ project.yml                # Optional: XcodeGen → PdfUtils.xcodeproj (gitignor
 
 ## Capabilities & privacy
 
-- No network calls; no analytics in this codebase.
+- No network calls; no analytics in this codebase. The **activity log** is written only to a local file (`~/pdf-utils.log`) — nothing leaves your Mac.
 - Uses **security-scoped** access from the file importer for chosen files. If macOS denies that access, the app shows a clear error instead of a generic PDF open failure.
 - Heavy work runs **off the main thread** so the UI stays responsive on large files.
 

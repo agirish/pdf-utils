@@ -3,6 +3,7 @@ import PdfToolkit
 
 struct DashboardView: View {
     @EnvironmentObject private var settings: SettingsPresenter
+    @Environment(\.openWindow) private var openWindow
     @State private var showHelp = false
 
     @AppStorage(LiquidGlass.surfaceStyleKey)
@@ -40,6 +41,13 @@ struct DashboardView: View {
         }
         .toolbar {
             ToolbarItemGroup(placement: .primaryAction) {
+                Button {
+                    openWindow(id: "activity-log")
+                } label: {
+                    Image(systemName: "clock.arrow.circlepath")
+                }
+                .help("Open Activity Log")
+                .accessibilityLabel("Activity Log")
                 Button {
                     settings.open()
                 } label: {

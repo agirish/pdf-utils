@@ -26,6 +26,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // panels open in the chosen theme rather than flashing the system appearance first.
         LiquidGlass.migrateLegacyAppearance()
         AppAppearance.applyPersisted()
+        // Seed the log's minimum level from the persisted setting before any operation records.
+        ActivityLog.shared.minimumLevel = ActivityLog.persistedMinimumLevel()
     }
 
     @MainActor
@@ -33,10 +35,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         DispatchQueue.main.async {
             NSApp.mainMenu?.items.first?.title = AppBrand.displayName
         }
+        // A launch breadcrumb gives the Activity Log's "Show older history" a session boundary and
+        // ensures the log is never empty.
+        let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "?"
+        ActivityLog.shared.info("\(AppBrand.displayName) \(version) launched")
     }
 
     @MainActor
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        // Commit any buffered Activity Log lines before we might quit, so an in-flight operation's
+        // breadcrumb survives the exit. Harmless if the user then cancels the quit.
+        ActivityLog.shared.flushToDisk()
         let state = AppStateManager.shared
         if state.hasPendingOperations {
             let alert = NSAlert()

@@ -3,6 +3,7 @@ import SwiftUI
 public struct ToolDetailView: View {
     public let tool: Tool
     @EnvironmentObject private var settings: SettingsPresenter
+    @Environment(\.openWindow) private var openWindow
     @State private var showHelp = false
 
     public init(tool: Tool) {
@@ -42,6 +43,13 @@ public struct ToolDetailView: View {
         .navigationTitle(tool.title)
         .toolbar {
             ToolbarItemGroup(placement: .primaryAction) {
+                Button {
+                    openWindow(id: "activity-log")
+                } label: {
+                    Image(systemName: "clock.arrow.circlepath")
+                }
+                .help("Open Activity Log")
+                .accessibilityLabel("Activity Log")
                 Button {
                     settings.open()
                 } label: {

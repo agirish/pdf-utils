@@ -349,10 +349,17 @@ struct SplitToolView: View {
             isGeneratingPreviews = false
             return
         }
+        // Drop the previous document's pages before the await so nobody picks page numbers
+        // against thumbnails of a file that is no longer loaded.
+        thumbnails = []
         isGeneratingPreviews = true
         defer { isGeneratingPreviews = false }
         do {
-            thumbnails = try await PDFPageThumbnailLoader.loadAllPages(from: url)
+            let loaded = try await PDFPageThumbnailLoader.loadAllPages(from: url)
+            // `.task(id:)` cancelled this load if the file changed again; don't let a stale
+            // result overwrite the newer document's thumbnails.
+            guard !Task.isCancelled else { return }
+            thumbnails = loaded
             if chunkSize > max(1, thumbnails.count) { chunkSize = 1 }
         } catch {
             thumbnails = []

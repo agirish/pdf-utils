@@ -293,10 +293,17 @@ struct RotateToolView: View {
             isGeneratingPreviews = false
             return
         }
+        // Drop the previous document's pages before the await so nobody picks page numbers
+        // against thumbnails of a file that is no longer loaded.
+        thumbnails = []
         isGeneratingPreviews = true
         defer { isGeneratingPreviews = false }
         do {
-            thumbnails = try await PDFPageThumbnailLoader.loadAllPages(from: url)
+            let loaded = try await PDFPageThumbnailLoader.loadAllPages(from: url)
+            // `.task(id:)` cancelled this load if the file changed again; don't let a stale
+            // result overwrite the newer document's thumbnails.
+            guard !Task.isCancelled else { return }
+            thumbnails = loaded
         } catch {
             thumbnails = []
         }
@@ -349,7 +356,13 @@ struct RotateToolView: View {
                     case .all:
                         indices = Array(0..<count)
                     case .range:
-                        indices = try PageRangeParser.parse(rangeSnapshot, pageCount: count)
+                        // The user explicitly chose "Page range": an empty field must error, not
+                        // quietly mean "all pages" — that surprise rotated whole documents.
+                        indices = try PageRangeParser.parse(
+                            rangeSnapshot,
+                            pageCount: count,
+                            emptyMeansAllPages: false
+                        )
                     }
                     return try PDFExportSupport.data { out in
                         try PDFToolkit.rotate(

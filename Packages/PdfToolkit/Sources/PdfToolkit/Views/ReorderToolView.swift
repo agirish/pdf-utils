@@ -340,10 +340,18 @@ struct ReorderToolView: View {
             isGeneratingPreviews = false
             return
         }
+        // Clear the old document's rows BEFORE the await: `items` is what "Save reordered PDF…"
+        // applies to the current `inputURL`, so leaving them populated while the new file's
+        // thumbnails render lets a click apply document A's page order (and count) to document B —
+        // silently truncating it to A's page count.
+        items = []
         isGeneratingPreviews = true
         defer { isGeneratingPreviews = false }
         do {
             let thumbs = try await PDFPageThumbnailLoader.loadAllPages(from: url)
+            // `.task(id:)` cancelled this load if the user switched files again; don't let a stale
+            // result overwrite the newer document's rows.
+            guard !Task.isCancelled else { return }
             items = thumbs.map { ReorderItem(id: $0.pageNumber - 1, image: $0.image) }
         } catch {
             items = []

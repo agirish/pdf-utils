@@ -12,7 +12,6 @@ public enum Tool: String, CaseIterable, Identifiable, Hashable {
     case redact
     case fillSign
     case protect
-    case batch
 
     public var id: String { rawValue }
 
@@ -29,7 +28,6 @@ public enum Tool: String, CaseIterable, Identifiable, Hashable {
         case .redact: return "Redact PDF"
         case .fillSign: return "Fill & Sign"
         case .protect: return "Password Protect"
-        case .batch: return "Batch"
         }
     }
 
@@ -57,8 +55,6 @@ public enum Tool: String, CaseIterable, Identifiable, Hashable {
             return "Add text and a signature to a PDF"
         case .protect:
             return "Encrypt a PDF, or remove its password"
-        case .batch:
-            return "Apply one tool to many PDFs"
         }
     }
 
@@ -87,8 +83,6 @@ public enum Tool: String, CaseIterable, Identifiable, Hashable {
             return "Drop typed text onto a non-interactive form, then draw or type a signature and place it on the page. Text stays selectable; the signature is baked in as vector ink. Your original file is untouched until you save the new PDF."
         case .protect:
             return "Add a password that’s required to open a PDF, or strip the password from one you can already open. Encryption is the standard PDF scheme, applied on your Mac—the password never leaves your machine."
-        case .batch:
-            return "Drop in several PDFs, choose one operation—compress, rotate, watermark, protect, or unlock—and run it across the whole set. Each result is written into a folder you pick, with per-file progress you can cancel; your originals stay untouched."
         }
     }
 
@@ -106,8 +100,6 @@ public enum Tool: String, CaseIterable, Identifiable, Hashable {
         case .redact: return "eraser.line.dashed"
         case .fillSign: return "hand.draw"
         case .protect: return "lock.doc"
-        // A stack of pages with a play badge: many files, run once. Verified to resolve on macOS 15.
-        case .batch: return "rectangle.stack.badge.play"
         }
     }
 
@@ -124,7 +116,6 @@ public enum Tool: String, CaseIterable, Identifiable, Hashable {
         case .redact: return Color(red: 0.78, green: 0.16, blue: 0.22)
         case .fillSign: return Color(red: 1.0, green: 0.45, blue: 0.4)
         case .protect: return .green
-        case .batch: return .cyan
         }
     }
 }

@@ -241,28 +241,6 @@ extension Tool {
                     "Removing a password rebuilds the file: pages and document info carry over, but bookmarks, attachments, and interactive form structure do not.",
                 ]
             )
-        case .batch:
-            return ToolHelpContent(
-                overview:
-                    "Batch applies a single operation to a whole list of PDFs in one run. Pick the files, choose one tool—Compress, Rotate, Watermark, Password Protect, or Remove Password—configure it once, choose an output folder, and every file is processed with that same setting. The queue shows each file's progress and you can cancel partway through; the originals are never modified.",
-                steps: [
-                    "Add PDFs with Add PDFs… (⌘-click for several) or drop them onto the list.",
-                    "Pick the operation and set its options—these apply to every file identically.",
-                    "Choose the output folder that will hold the results.",
-                    "Click Run batch and watch the queue; use Cancel to stop before the next file starts.",
-                ],
-                controls: [
-                    ("Add PDFs… / Trash", "Add files to the queue or remove a row. Removing a row leaves the file on disk."),
-                    ("Operation", "The one tool applied to every file. Its configuration below is shared across the whole batch."),
-                    ("Output folder", "Where every result is written, named like the single tools (name-compressed.pdf, …). Existing files are numbered, never overwritten."),
-                    ("Run batch / Cancel", "Processes files one after another. Cancel stops before the next file—already-finished results are kept."),
-                ],
-                tips: [
-                    "Each result is logged to the Activity Log with its own reveal/open row action.",
-                    "Password Protect uses one password for every file; Remove Password assumes they all share the same current password.",
-                    "A file that fails (wrong password, unreadable) is marked failed and the batch keeps going with the rest.",
-                ]
-            )
         }
     }
 }

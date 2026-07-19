@@ -93,7 +93,10 @@ struct ToolTileView: View {
     @State private var hovered = false
 
     @AppStorage(LiquidGlass.levelKey) private var glassLevelRaw: String = GlassLevel.frosted.rawValue
+    @AppStorage(LiquidGlass.hueKey) private var glassHueRaw: String = LiquidGlass.defaultHue.rawValue
+    @AppStorage(LiquidGlass.tintKey) private var glassTint: Double = 0
     private var glassLevel: GlassLevel { GlassLevel(rawValue: glassLevelRaw) ?? .frosted }
+    private var glassHue: LiquidGlassHue { LiquidGlassHue(rawValue: glassHueRaw) ?? LiquidGlass.defaultHue }
 
     private var shadowOpacity: Double { floating ? (hovered ? 0.14 : 0.06) : (hovered ? 0.08 : 0.0) }
     private var shadowRadius: CGFloat { floating ? (hovered ? 18 : 10) : (hovered ? 10 : 0) }
@@ -150,6 +153,10 @@ struct ToolTileView: View {
         // of the enclosing NavigationLink's hit region on its own, so clicks in the empty areas would
         // otherwise miss.
         .contentShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+        // The accent tint wash, so the Tint slider washes the dashboard tiles the same way it washes
+        // the Settings card and tool control cards (contentSurface). Sits behind the tile content and
+        // under the glass — apply before clip/glassSurface, exactly like FormCardStyle.
+        .contentSurface(hue: glassHue, tint: glassTint)
         // Same glass surface as the window background, so Clear shows the desktop through each tile
         // too (glassEffect(.clear) on macOS 26), Frosted blurs it, Solid stays opaque.
         .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))

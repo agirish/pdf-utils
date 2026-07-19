@@ -72,7 +72,10 @@ struct SplitToolView: View {
                         previewSubtitle: "Every page in the file; the settings on the left decide where the cuts fall.",
                         emptyTitle: "No PDF selected",
                         emptySubtitle: "Drop a PDF here or choose one to see its pages.",
-                        emptySystemImage: "scissors"
+                        emptySystemImage: "scissors",
+                        selectedPages: visualSelection,
+                        onTogglePage: visualTogglePage,
+                        selectionPrompt: visualSelectionPrompt
                     )
                     .frame(minWidth: 360)
                 }
@@ -375,6 +378,38 @@ struct SplitToolView: View {
                 }
             }
         }
+    }
+
+    // MARK: - Visual selection
+
+    /// Visual page selection is offered only in custom-ranges mode; "Every N pages" has no page-level
+    /// choice to make, so it renders the plain, non-interactive preview (selection nil).
+    private var visualSelection: Set<Int>? {
+        guard mode == .customRanges else { return nil }
+        return VisualPageSelection.pages(from: rangeText, pageCount: thumbnails.count)
+    }
+
+    private var visualTogglePage: ((Int) -> Void)? {
+        mode == .customRanges ? { togglePage($0) } : nil
+    }
+
+    private var visualSelectionPrompt: String? {
+        mode == .customRanges ? "Click pages to include — each unbroken run becomes its own file." : nil
+    }
+
+    /// Toggles one 1-based page in the custom-ranges field. The range text stays authoritative, so
+    /// clicks and typing share one state; clicking canonicalizes it to ascending runs, and each
+    /// unbroken run is one output file. Splitting into adjacent-but-separate files (e.g. `1-3 | 4-6`)
+    /// can't be drawn by clicking — that stays a text-field capability, matching custom ranges' own
+    /// "each comma group is a file" rule.
+    private func togglePage(_ page: Int) {
+        var pages = VisualPageSelection.pages(from: rangeText, pageCount: thumbnails.count)
+        if pages.contains(page) {
+            pages.remove(page)
+        } else {
+            pages.insert(page)
+        }
+        rangeText = VisualPageSelection.rangeString(from: pages)
     }
 
     // MARK: - Run

@@ -33,7 +33,10 @@ struct ExtractToolView: View {
                 previewSubtitle: "Every page in the file; the list on the left chooses which pages go into the new PDF.",
                 emptyTitle: "No PDF selected",
                 emptySubtitle: "Drop a PDF here, choose one, or use Add PDF… to see thumbnails.",
-                emptySystemImage: "doc.on.clipboard"
+                emptySystemImage: "doc.on.clipboard",
+                selectedPages: VisualPageSelection.pages(from: rangeText, pageCount: thumbnails.count),
+                onTogglePage: togglePage,
+                selectionPrompt: "Click pages to choose what to extract, or type them on the left."
             )
             .frame(minWidth: 360)
         }
@@ -285,6 +288,22 @@ struct ExtractToolView: View {
                 }
             }
         }
+    }
+
+    // MARK: - Visual selection
+
+    /// Toggles one 1-based page in/out of the selection and writes the result back to the range field
+    /// — the field stays the single source of truth, so a click and a keystroke can never disagree.
+    /// Clicking canonicalizes the text to ascending runs (e.g. `5,1,2` typed, then a click, becomes
+    /// `1-2, 5`); custom order remains available by typing and leaving the thumbnails alone.
+    private func togglePage(_ page: Int) {
+        var pages = VisualPageSelection.pages(from: rangeText, pageCount: thumbnails.count)
+        if pages.contains(page) {
+            pages.remove(page)
+        } else {
+            pages.insert(page)
+        }
+        rangeText = VisualPageSelection.rangeString(from: pages)
     }
 
     // MARK: - Export

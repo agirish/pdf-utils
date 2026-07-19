@@ -2,6 +2,7 @@ import SwiftUI
 
 public struct ToolDetailView: View {
     public let tool: Tool
+    @EnvironmentObject private var settings: SettingsPresenter
     @State private var showHelp = false
 
     public init(tool: Tool) {
@@ -41,7 +42,9 @@ public struct ToolDetailView: View {
         .navigationTitle(tool.title)
         .toolbar {
             ToolbarItemGroup(placement: .primaryAction) {
-                SettingsLink {
+                Button {
+                    settings.open()
+                } label: {
                     Image(systemName: "gearshape")
                 }
                 .help("Open Settings")

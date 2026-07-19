@@ -32,6 +32,9 @@ struct MergeToolView: View {
 
     @State private var mergeResult: MergeResult?
 
+    @AppStorage(ListDensity.defaultsKey) private var listDensityRaw: String = ListDensity.comfortable.rawValue
+    private var density: ListDensity { ListDensity(rawValue: listDensityRaw) ?? .comfortable }
+
     private var entriesSignature: String {
         entries.map { "\($0.id.uuidString)|\($0.url.path)" }.joined(separator: "\u{1e}")
     }
@@ -263,7 +266,7 @@ struct MergeToolView: View {
             List(selection: $selectedEntryID) {
                 ForEach(entries) { entry in
                     mergeRow(for: entry)
-                        .listRowInsets(EdgeInsets(top: 6, leading: 12, bottom: 6, trailing: 8))
+                        .listRowInsets(EdgeInsets(top: density.rowInsetVertical, leading: 12, bottom: density.rowInsetVertical, trailing: 8))
                         .listRowBackground(rowBackground)
                         .tag(Optional(entry.id))
                 }

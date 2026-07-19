@@ -2,7 +2,15 @@ import SwiftUI
 import PdfToolkit
 
 struct DashboardView: View {
+    @EnvironmentObject private var settings: SettingsPresenter
     @State private var showHelp = false
+
+    @AppStorage(LiquidGlass.surfaceStyleKey)
+    private var surfaceStyleRaw: String = SurfaceStyle.unified.rawValue
+
+    private var floatingTiles: Bool {
+        (SurfaceStyle(rawValue: surfaceStyleRaw) ?? .unified) == .cards
+    }
 
     private let columns = [
         GridItem(.adaptive(minimum: 200, maximum: 280), spacing: 20),
@@ -15,7 +23,7 @@ struct DashboardView: View {
                 LazyVGrid(columns: columns, spacing: 20) {
                     ForEach(Tool.allCases) { tool in
                         NavigationLink(value: tool) {
-                            ToolTileView(tool: tool)
+                            ToolTileView(tool: tool, floating: floatingTiles)
                         }
                         .buttonStyle(.plain)
                     }
@@ -26,11 +34,15 @@ struct DashboardView: View {
         .background(DashboardBackground())
         .navigationTitle(AppBrand.displayName)
         .navigationDestination(for: Tool.self) { tool in
+            // Re-inject the presenter so ToolDetailView's toolbar gear can open the overlay.
             ToolDetailView(tool: tool)
+                .environmentObject(settings)
         }
         .toolbar {
             ToolbarItemGroup(placement: .primaryAction) {
-                SettingsLink {
+                Button {
+                    settings.open()
+                } label: {
                     Image(systemName: "gearshape")
                 }
                 .help("Open Settings")
@@ -64,7 +76,16 @@ struct DashboardView: View {
 
 struct ToolTileView: View {
     let tool: Tool
+    /// Cards mode: each tile is an elevated floating card. Unified: tiles read as one flat surface.
+    var floating: Bool = true
     @State private var hovered = false
+
+    private var tileFill: AnyShapeStyle {
+        floating ? AnyShapeStyle(.background) : AnyShapeStyle(Color.primary.opacity(hovered ? 0.07 : 0.04))
+    }
+    private var shadowOpacity: Double { floating ? (hovered ? 0.14 : 0.06) : (hovered ? 0.08 : 0.0) }
+    private var shadowRadius: CGFloat { floating ? (hovered ? 18 : 10) : (hovered ? 10 : 0) }
+    private var shadowY: CGFloat { floating ? (hovered ? 8 : 4) : (hovered ? 4 : 0) }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -115,8 +136,8 @@ struct ToolTileView: View {
         .frame(maxWidth: .infinity, minHeight: 200, alignment: .topLeading)
         .background {
             RoundedRectangle(cornerRadius: 22, style: .continuous)
-                .fill(.background)
-                .shadow(color: .black.opacity(hovered ? 0.14 : 0.06), radius: hovered ? 18 : 10, y: hovered ? 8 : 4)
+                .fill(tileFill)
+                .shadow(color: .black.opacity(shadowOpacity), radius: shadowRadius, y: shadowY)
         }
         .overlay {
             RoundedRectangle(cornerRadius: 22, style: .continuous)

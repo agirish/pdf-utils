@@ -6,6 +6,10 @@ import PdfToolkit
 struct PdfUtilsApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
 
+    /// Drives the in-window Settings overlay (SyncCloud pattern): ⌘, and the toolbar gears both
+    /// open it through this shared presenter rather than a separate Settings window.
+    @StateObject private var settingsPresenter = SettingsPresenter()
+
     init() {
         // Prefer the green zoom / full-screen traffic light over tabbing “+” (system may still override).
         // Do not mutate each NSWindow’s styleMask or collectionBehavior — that breaks native full screen on some macOS versions (see e0656fc).
@@ -15,13 +19,16 @@ struct PdfUtilsApp: App {
     var body: some Scene {
         WindowGroup {
             RootView()
+                .environmentObject(settingsPresenter)
         }
         .defaultSize(width: 1040, height: 720)
-
-        Settings {
-            SettingsView()
+        .commands {
+            // Replace the default ⌘, (which would open a native Settings scene) with one that
+            // raises the in-window overlay.
+            CommandGroup(replacing: .appSettings) {
+                Button("Settings…") { settingsPresenter.open() }
+                    .keyboardShortcut(",", modifiers: .command)
+            }
         }
-        .defaultSize(width: 560, height: 520)
-        .windowResizability(.contentMinSize)
     }
 }

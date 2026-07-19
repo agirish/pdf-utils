@@ -37,7 +37,8 @@ public enum MainWindowBackgroundStyle: String, CaseIterable, Identifiable {
 struct MainWindowBackgroundLayer: View {
     let style: MainWindowBackgroundStyle
     var glassIntensity: Double = 0.65
-    var glassHue: LiquidGlassHue = .purple
+    var glassHue: LiquidGlassHue = LiquidGlass.defaultHue
+    var glassTint: Double = 0
     /// When `false`, liquid glass fills the view edge to edge (e.g. merge preview column). When `true`, the top safe area stays clear for window toolbars.
     var liquidGlassRespectsTopSafeArea: Bool = true
 
@@ -50,6 +51,7 @@ struct MainWindowBackgroundLayer: View {
                     .liquidGlassAppBackground(
                         intensity: glassIntensity,
                         hue: glassHue,
+                        tint: glassTint,
                         respectTopSafeArea: liquidGlassRespectsTopSafeArea
                     )
             case .systemWindow:
@@ -68,23 +70,30 @@ public struct DashboardBackground: View {
     @AppStorage(SettingsKeys.mainWindowBackground)
     private var mainWindowBackgroundRaw: String = MainWindowBackgroundStyle.liquidGlass.rawValue
 
-    @AppStorage(LiquidGlass.intensityKey)
-    private var glassIntensity: Double = 0.65
+    @AppStorage(LiquidGlass.levelKey)
+    private var glassLevelRaw: String = GlassLevel.frosted.rawValue
+
+    @AppStorage(LiquidGlass.tintKey)
+    private var glassTint: Double = 0
 
     @AppStorage(LiquidGlass.hueKey)
-    private var glassHueRaw: String = LiquidGlassHue.purple.rawValue
+    private var glassHueRaw: String = LiquidGlass.defaultHue.rawValue
 
     private var style: MainWindowBackgroundStyle {
         if mainWindowBackgroundRaw == "accentGradient" { return .liquidGlass }
         return MainWindowBackgroundStyle(rawValue: mainWindowBackgroundRaw) ?? .liquidGlass
     }
 
+    private var glassIntensity: Double {
+        (GlassLevel(rawValue: glassLevelRaw) ?? .frosted).backgroundIntensity
+    }
+
     private var glassHue: LiquidGlassHue {
-        LiquidGlassHue(rawValue: glassHueRaw) ?? .purple
+        LiquidGlassHue(rawValue: glassHueRaw) ?? LiquidGlass.defaultHue
     }
 
     public var body: some View {
-        MainWindowBackgroundLayer(style: style, glassIntensity: glassIntensity, glassHue: glassHue)
+        MainWindowBackgroundLayer(style: style, glassIntensity: glassIntensity, glassHue: glassHue, glassTint: glassTint)
             // Keep the top safe area clear so the unified title bar, toolbar, and menu-driven controls stay visible.
             .ignoresSafeArea(edges: [.horizontal, .bottom])
     }

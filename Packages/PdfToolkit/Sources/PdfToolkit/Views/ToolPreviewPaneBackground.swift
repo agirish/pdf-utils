@@ -9,11 +9,14 @@ struct ToolPreviewPaneBackground: View {
     @AppStorage(SettingsKeys.mainWindowBackground)
     private var mainRaw: String = MainWindowBackgroundStyle.liquidGlass.rawValue
 
-    @AppStorage(LiquidGlass.intensityKey)
-    private var glassIntensity: Double = 0.65
+    @AppStorage(LiquidGlass.levelKey)
+    private var glassLevelRaw: String = GlassLevel.frosted.rawValue
+
+    @AppStorage(LiquidGlass.tintKey)
+    private var glassTint: Double = 0
 
     @AppStorage(LiquidGlass.hueKey)
-    private var glassHueRaw: String = LiquidGlassHue.purple.rawValue
+    private var glassHueRaw: String = LiquidGlass.defaultHue.rawValue
 
     private var mergeStyle: MergePreviewBackgroundStyle {
         MergePreviewBackgroundStyle(rawValue: mergeRaw) ?? .white
@@ -24,8 +27,12 @@ struct ToolPreviewPaneBackground: View {
         return MainWindowBackgroundStyle(rawValue: mainRaw) ?? .liquidGlass
     }
 
+    private var glassIntensity: Double {
+        (GlassLevel(rawValue: glassLevelRaw) ?? .frosted).backgroundIntensity
+    }
+
     private var glassHue: LiquidGlassHue {
-        LiquidGlassHue(rawValue: glassHueRaw) ?? .purple
+        LiquidGlassHue(rawValue: glassHueRaw) ?? LiquidGlass.defaultHue
     }
 
     var body: some View {
@@ -40,6 +47,7 @@ struct ToolPreviewPaneBackground: View {
                     style: mainStyle,
                     glassIntensity: glassIntensity,
                     glassHue: glassHue,
+                    glassTint: glassTint,
                     liquidGlassRespectsTopSafeArea: false
                 )
             }

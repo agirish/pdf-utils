@@ -3,7 +3,9 @@ import SwiftUI
 // MARK: - Liquid Glass (aligned with SyncCloud `Modules/Design`)
 
 /// Hue options for the liquid glass background gradient.
-public enum LiquidGlassHue: String, CaseIterable, Identifiable {
+public enum LiquidGlassHue: String, CaseIterable, Identifiable, Sendable {
+    /// No accent wash — defer to the macOS system accent for controls, and paint no gradient.
+    case none
     case blue
     case cyan
     case teal
@@ -19,6 +21,7 @@ public enum LiquidGlassHue: String, CaseIterable, Identifiable {
 
     public var displayName: String {
         switch self {
+        case .none: return "None"
         case .blue: return "Blue"
         case .cyan: return "Cyan"
         case .teal: return "Teal"
@@ -34,6 +37,7 @@ public enum LiquidGlassHue: String, CaseIterable, Identifiable {
 
     public var accentColor: Color {
         switch self {
+        case .none: return Color.accentColor
         case .blue: return Color(red: 0.2, green: 0.5, blue: 1.0)
         case .cyan: return Color(red: 0.25, green: 0.75, blue: 1.0)
         case .teal: return Color(red: 0.2, green: 0.65, blue: 0.65)
@@ -49,6 +53,8 @@ public enum LiquidGlassHue: String, CaseIterable, Identifiable {
 
     public var gradientColors: [Color] {
         switch self {
+        case .none:
+            return [.clear, .clear, .clear]
         case .blue:
             return [
                 Color(red: 0.25, green: 0.75, blue: 1.0),
@@ -113,26 +119,134 @@ public enum LiquidGlassHue: String, CaseIterable, Identifiable {
     }
 }
 
+/// The material of the app's glass surfaces (aligned with SyncCloud `Design/GlassLevel`). Replaces
+/// the old free `intensity` Double — that API only ever had two visible states. Stored via
+/// `LiquidGlass.levelKey`.
+public enum GlassLevel: String, CaseIterable, Identifiable {
+    /// Glass with no frost: the background reads straight through.
+    case clear
+    /// Standard Liquid Glass — translucent and blurred, legible on top.
+    case frosted
+    /// Opaque panels. The only case with no translucency at all.
+    case solid
+
+    public var id: String { rawValue }
+
+    public var displayName: String {
+        switch self {
+        case .clear: return "Clear"
+        case .frosted: return "Frosted"
+        case .solid: return "Solid"
+        }
+    }
+
+    /// One-line explanation shown under the Settings picker.
+    public var detail: String {
+        switch self {
+        case .clear:
+            return "Glass with no frost — the window's background reads through every surface."
+        case .frosted:
+            return "Standard Liquid Glass: translucent and blurred, with content on top staying legible."
+        case .solid:
+            return "Opaque panels for maximum readability, with no translucency."
+        }
+    }
+
+    /// Overlay chrome (Settings, Help) floors `.clear` to `.frosted`: those panels sit over live app
+    /// content, and clear glass over content is two layers competing.
+    public var flooredForChrome: GlassLevel {
+        self == .clear ? .frosted : self
+    }
+
+    /// Backdrop dimming behind an overlay. `.clear` deepens it so the app recedes further.
+    public var overlayScrimOpacity: Double {
+        self == .clear ? 0.55 : 0.35
+    }
+
+    /// Strength of the app background gradient/material, 0...1. `.frosted` keeps 0.65 — the old
+    /// intensity slider's default — so migrating installs see an unchanged background.
+    public var backgroundIntensity: Double {
+        switch self {
+        case .clear: return 0.0
+        case .frosted: return 0.65
+        case .solid: return 1.0
+        }
+    }
+}
+
+/// How content surfaces are *shaped* against the glass background — orthogonal to `GlassLevel`.
+/// Stored via `LiquidGlass.surfaceStyleKey`.
+public enum SurfaceStyle: String, CaseIterable, Identifiable {
+    /// Surfaces read as one continuous plane on the background.
+    case unified
+    /// Each surface floats as a separate elevated card.
+    case cards
+
+    public var id: String { rawValue }
+
+    public var displayName: String {
+        switch self {
+        case .unified: return "Unified"
+        case .cards: return "Cards"
+        }
+    }
+
+    public var detail: String {
+        switch self {
+        case .unified:
+            return "Tools and the dashboard read as one continuous surface on the background."
+        case .cards:
+            return "Each tool tile and panel floats as a separate card on the background."
+        }
+    }
+}
+
 public enum LiquidGlass {
-    static let cardCornerRadius: CGFloat = 14
+    public static let cardCornerRadius: CGFloat = 14
     static let smallCornerRadius: CGFloat = 10
 
     static let cardShadow = (color: Color.black.opacity(0.06), radius: CGFloat(12), x: CGFloat(0), y: CGFloat(4))
 
     /// pdf-utils–scoped keys (do not collide with SyncCloud defaults on the same Mac).
+    /// Retired: read only by `migrateLegacyAppearance`, which maps it onto `levelKey`.
     static let intensityKey = "pdfutils.liquidGlassIntensity"
-    static let hueKey = "pdfutils.liquidGlassHue"
+    public static let hueKey = "pdfutils.liquidGlassHue"
     /// Public: the Theme control is bound from the app target's `RootView` via `@AppStorage`.
     public static let appearanceModeKey = "pdfutils.appearanceMode"
+    /// Glass material (`GlassLevel` raw value). Replaces the retired intensity Double.
+    public static let levelKey = "pdfutils.glassLevel"
+    /// Content surface shape (`SurfaceStyle` raw value).
+    public static let surfaceStyleKey = "pdfutils.contentSurfaceStyle"
+    /// Accent tint strength applied to surfaces (Double, 0...1).
+    public static let tintKey = "pdfutils.contentSurfaceTint"
+
+    /// Default hue when nothing is stored (matches SyncCloud's default accent).
+    public static let defaultHue = LiquidGlassHue.blue
+
+    /// Moves a pre-`GlassLevel` install onto the new model. Idempotent: once `levelKey` is set this
+    /// is a no-op, so it can run on every launch. Any stored intensity maps to `.frosted` (the old
+    /// slider's 0.65 default, and what installs actually rendered), and the retired key is cleared.
+    public static func migrateLegacyAppearance(_ defaults: UserDefaults = .standard) {
+        guard defaults.string(forKey: levelKey) == nil else { return }
+        defaults.set(GlassLevel.frosted.rawValue, forKey: levelKey)
+        defaults.removeObject(forKey: intensityKey)
+    }
 }
 
 public extension View {
-    /// App-level liquid glass backdrop (SyncCloud-style): colored gradient + thin material.
+    /// App-level liquid glass backdrop (SyncCloud-style): colored gradient + thin material. The
+    /// `tint` (0...1) scales the accent wash; `hue == .none` paints no wash at any tint.
     @ViewBuilder
-    public func liquidGlassAppBackground(intensity: Double, hue: LiquidGlassHue = .purple, respectTopSafeArea: Bool = true) -> some View {
+    func liquidGlassAppBackground(
+        intensity: Double,
+        hue: LiquidGlassHue = LiquidGlass.defaultHue,
+        tint: Double = 0,
+        respectTopSafeArea: Bool = true
+    ) -> some View {
         let t = max(0.0, min(1.0, intensity))
+        let washMul = hue == .none ? 0.0 : (0.6 + 0.8 * max(0.0, min(1.0, tint)))
         let colors = hue.gradientColors
-        let opacities: [Double] = [0.06 + 0.16 * t, 0.05 + 0.14 * t, 0.04 + 0.10 * t]
+        let opacities: [Double] = [(0.06 + 0.16 * t) * washMul, (0.05 + 0.14 * t) * washMul, (0.04 + 0.10 * t) * washMul]
         let gradientStops = zip(colors, opacities).map { $0.0.opacity($0.1) }
         let safeEdges: Edge.Set = respectTopSafeArea ? [.horizontal, .bottom] : .all
 
@@ -152,35 +266,45 @@ public extension View {
         }
     }
 
+    /// The material fill for one content surface — the single place the level → appearance decision
+    /// is made (SyncCloud `Design/glassSurface`).
     @ViewBuilder
-    public func glassCardStyle(material: Material = .regularMaterial, intensity: Double = 0.65) -> some View {
-        let t = max(0.0, min(1.0, intensity))
-        if #available(macOS 26.0, *) {
-            self
-                .glassEffect(t > 0.33 ? .regular : .clear, in: .rect(cornerRadius: LiquidGlass.cardCornerRadius))
-        } else {
-            self
-                .background(material.opacity(0.55 + 0.35 * t))
-                .clipShape(RoundedRectangle(cornerRadius: LiquidGlass.cardCornerRadius, style: .continuous))
-                .shadow(
-                    color: LiquidGlass.cardShadow.color,
-                    radius: LiquidGlass.cardShadow.radius,
-                    x: LiquidGlass.cardShadow.x,
-                    y: LiquidGlass.cardShadow.y
-                )
+    func glassSurface(_ level: GlassLevel, cornerRadius: CGFloat) -> some View {
+        let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+        switch level {
+        case .solid:
+            self.background(Color(nsColor: .controlBackgroundColor), in: shape)
+        case .clear, .frosted:
+            if #available(macOS 26.0, *) {
+                self.glassEffect(level == .frosted ? .regular : .clear, in: .rect(cornerRadius: cornerRadius))
+            } else {
+                self.background(level == .frosted ? Material.thinMaterial : Material.ultraThinMaterial, in: shape)
+            }
         }
     }
 
+    /// Frosted glass card style for floating overlay chrome (the Settings overlay). Applies
+    /// `flooredForChrome` so a `.clear` app never produces an unreadable panel over live content.
     @ViewBuilder
-    public func glassBarStyle(intensity: Double = 0.65) -> some View {
-        let t = max(0.0, min(1.0, intensity))
-        if #available(macOS 26.0, *) {
-            self
-                .glassEffect(t > 0.33 ? .regular : .clear, in: .rect(cornerRadius: LiquidGlass.smallCornerRadius))
-        } else {
-            self
-                .background(.ultraThinMaterial.opacity(0.55 + 0.35 * t))
-                .clipShape(RoundedRectangle(cornerRadius: LiquidGlass.smallCornerRadius, style: .continuous))
-        }
+    func glassCardStyle(level: GlassLevel) -> some View {
+        let resolved = level.flooredForChrome
+        let shape = RoundedRectangle(cornerRadius: LiquidGlass.cardCornerRadius, style: .continuous)
+        self
+            .clipShape(shape)
+            .glassSurface(resolved, cornerRadius: LiquidGlass.cardCornerRadius)
+    }
+
+    /// Lighter glass style for bars and inline panels; takes the level verbatim (no floor).
+    @ViewBuilder
+    func glassBarStyle(level: GlassLevel) -> some View {
+        self.glassSurface(level, cornerRadius: LiquidGlass.smallCornerRadius)
+    }
+
+    /// The accent-color wash driven by the Tint slider (`tint`, 0...1). Apply ONCE per region.
+    /// `.none` gets no wash at any tint (its accentColor is the system accent, which would repaint).
+    @ViewBuilder
+    func contentSurface(hue: LiquidGlassHue = LiquidGlass.defaultHue, tint: Double = 0) -> some View {
+        let wash = hue == .none ? Color.clear : hue.accentColor.opacity(max(0.0, min(1.0, tint)) * 0.32)
+        self.background(wash)
     }
 }

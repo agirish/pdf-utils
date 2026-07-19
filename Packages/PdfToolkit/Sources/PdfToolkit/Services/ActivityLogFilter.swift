@@ -46,4 +46,13 @@ public enum ActivityLogHistory {
             .filter { $0.timestamp < sessionStart }
             .reversed()
     }
+
+    /// Like ``loadOlderThan(_:fileURL:)`` but drops any entry whose canonical line is already in
+    /// `shown`. `ActivityLog` seeds its live mirror with the tail of the previous run (so a relaunch
+    /// isn't blank), and those seeded lines are also `< sessionStart`; without this exclusion they'd
+    /// appear both in the live list and again under "Earlier sessions". `shown` holds the
+    /// `formattedString` of every entry already on screen.
+    public static func loadOlderThan(_ sessionStart: Date, excluding shown: Set<String>, fileURL: URL) -> [LogEntry] {
+        loadOlderThan(sessionStart, fileURL: fileURL).filter { !shown.contains($0.formattedString) }
+    }
 }

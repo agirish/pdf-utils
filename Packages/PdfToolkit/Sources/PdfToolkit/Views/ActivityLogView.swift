@@ -335,16 +335,21 @@ public struct ActivityLogView: View {
         pasteboard.setString(text, forType: .string)
     }
 
-    /// Reads previous-session history off the main actor and reveals the first page. The boundary is
-    /// this session's fixed start, so nothing the window already shows live is duplicated.
+    /// Reads previous-session history off the main actor and reveals the first page. The file is read
+    /// from this session's fixed start backwards, but that boundary alone isn't enough to avoid
+    /// duplicates: `ActivityLog` seeds its live mirror with the tail of the previous run (so a relaunch
+    /// isn't blank), and those seeded lines are also `< sessionStart`. So we additionally drop any
+    /// loaded line already visible in the live list — leaving history to show only what predates it.
     private func loadHistory() {
         guard !isLoadingHistory, loadedHistory == nil else { return }
         isLoadingHistory = true
         let boundary = log.sessionStart
         let fileURL = log.fileURL
+        // Snapshot what's already on screen (canonical line form encodes timestamp+level+message).
+        let alreadyShown = Set(log.entries.map(\.formattedString))
         Task {
             let history = await Task.detached(priority: .userInitiated) {
-                ActivityLogHistory.loadOlderThan(boundary, fileURL: fileURL)
+                ActivityLogHistory.loadOlderThan(boundary, excluding: alreadyShown, fileURL: fileURL)
             }.value
             historyLimit = Self.historyPageSize
             loadedHistory = history

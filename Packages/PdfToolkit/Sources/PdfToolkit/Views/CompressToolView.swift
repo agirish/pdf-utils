@@ -2,11 +2,21 @@ import AppKit
 import SwiftUI
 import UniformTypeIdentifiers
 
+/// Which lever the user drives compression with: a direct quality slider, or a size budget the tool
+/// works down to on its own.
+private enum CompressMode: Hashable {
+    case quality
+    case targetSize
+}
+
 struct CompressToolView: View {
     @State private var inputURL: URL?
     // Starts on (and writes back to) the Advanced "Default compression quality" — so the slider is
     // pre-selected and sticky across launches. Same 0.2…1 range as that control.
     @AppStorage(SettingsKeys.defaultCompressionQuality) private var quality: Double = 0.72
+    @State private var mode: CompressMode = .quality
+    // Target file size in megabytes for `.targetSize` mode. A plain, friendly unit for the field.
+    @State private var targetMB: Double = 2
     @State private var busy = false
     @State private var alertMessage: String?
     @State private var showImporter = false
@@ -103,7 +113,7 @@ struct CompressToolView: View {
                     return true
                 }
 
-                qualitySection
+                controlsSection
             }
             .padding(18)
             .formCard()
@@ -113,7 +123,7 @@ struct CompressToolView: View {
 
             Divider()
 
-            RunActionButton(title: "Compress & save…", busy: busy, canRun: inputURL != nil) {
+            RunActionButton(title: "Compress & save…", busy: busy, canRun: canRun) {
                 Task { await runCompress() }
             }
             .padding(16)
@@ -240,7 +250,27 @@ struct CompressToolView: View {
         .accessibilityLabel("Selected file \(url.lastPathComponent)")
     }
 
-    private var qualitySection: some View {
+    private var controlsSection: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Picker("Compression mode", selection: $mode) {
+                Text("By quality").tag(CompressMode.quality)
+                Text("By target size").tag(CompressMode.targetSize)
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+
+            switch mode {
+            case .quality:
+                qualityControls
+            case .targetSize:
+                targetSizeControls
+            }
+        }
+        .padding(16)
+        .formCard()
+    }
+
+    private var qualityControls: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
                 Text("Quality")
@@ -252,8 +282,50 @@ struct CompressToolView: View {
             }
             Slider(value: $quality, in: 0.2...1)
         }
-        .padding(16)
-        .formCard()
+    }
+
+    private var targetSizeControls: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text("Target size")
+                    .font(.subheadline.weight(.semibold))
+                Spacer()
+                if let label = sourceSizeLabel {
+                    Text(label)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            HStack(spacing: 8) {
+                TextField("2", value: $targetMB, format: .number.precision(.fractionLength(0...1)))
+                    .textFieldStyle(.roundedBorder)
+                    .frame(width: 88)
+                    .multilineTextAlignment(.trailing)
+                Text("MB")
+                    .foregroundStyle(.secondary)
+                Stepper("Target size", value: $targetMB, in: 0.1...500, step: 0.5)
+                    .labelsHidden()
+            }
+            Text("Tries progressively lower quality until the file fits under your target.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    private var canRun: Bool {
+        guard inputURL != nil else { return false }
+        if mode == .targetSize { return targetMB > 0 }
+        return true
+    }
+
+    /// The original file's size, shown next to the target field as context. Best-effort — a nil here
+    /// (e.g. the URL isn't currently readable) just hides the hint rather than blocking the tool.
+    private var sourceSizeLabel: String? {
+        guard let url = inputURL,
+              let size = try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize
+        else { return nil }
+        return "Now \(ByteCountFormatter.string(fromByteCount: Int64(size), countStyle: .file))"
     }
 
     // MARK: - Thumbnails
@@ -317,12 +389,19 @@ struct CompressToolView: View {
 
         suggestedName = fileURL.deletingPathExtension().lastPathComponent + "-compressed.pdf"
         let qualityValue = quality
+        let selectedMode = mode
+        let targetBytes = max(1, Int((targetMB * 1_048_576).rounded()))
 
         do {
             let data = try await PDFBackgroundWork.run {
                 try fileURL.withSecurityScopedAccess {
                     try PDFExportSupport.data { out in
-                        try PDFToolkit.compress(inputURL: fileURL, outputURL: out, quality: qualityValue)
+                        switch selectedMode {
+                        case .quality:
+                            try PDFToolkit.compress(inputURL: fileURL, outputURL: out, quality: qualityValue)
+                        case .targetSize:
+                            try PDFToolkit.compressToTarget(inputURL: fileURL, outputURL: out, targetBytes: targetBytes)
+                        }
                     }
                 }
             }

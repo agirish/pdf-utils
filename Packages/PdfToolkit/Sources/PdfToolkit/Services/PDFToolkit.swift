@@ -32,6 +32,14 @@ struct WatermarkOptions: Sendable {
     var tiled: Bool
 }
 
+/// One measured compression attempt: the `quality` it was produced at and the resulting file size.
+/// Kept as a plain value so the "which attempt do we keep for this target?" decision can be unit
+/// tested without any file IO.
+struct CompressionAttempt: Equatable, Sendable {
+    let quality: Double
+    let byteCount: Int
+}
+
 enum PDFToolkit {
     /// Quick page count for UI summaries; the URL must already be readable (e.g. under active security scope).
     static func pageCount(at url: URL) -> Int? {
@@ -289,7 +297,67 @@ enum PDFToolkit {
         guard let source = PDFDocument(url: inputURL) else {
             throw PDFOperationError.couldNotOpen(inputURL)
         }
+        let data = try compressedData(from: source, quality: quality)
+        do {
+            try data.write(to: outputURL)
+        } catch {
+            throw PDFOperationError.couldNotWrite(outputURL)
+        }
+    }
 
+    /// Compresses toward a byte budget by sweeping a bounded ladder of qualities from high to low,
+    /// stopping at the first that lands under `targetBytes`. Writes the best attempt: the highest
+    /// quality that fits, or — when even the lowest quality overshoots — the smallest file produced,
+    /// so an unreachable target still yields the most-compressed result rather than an error.
+    ///
+    /// The sweep rebuilds the document a handful of times at most (the ladder is short), trading a
+    /// few extra rasterizations for a size the caller can actually promise. The pure "which attempt
+    /// wins?" decision lives in `selectBestAttempt` so it can be unit tested without file IO.
+    static func compressToTarget(inputURL: URL, outputURL: URL, targetBytes: Int) throws {
+        try requireDistinctOutput(outputURL, from: [inputURL])
+        guard let source = PDFDocument(url: inputURL) else {
+            throw PDFOperationError.couldNotOpen(inputURL)
+        }
+
+        // Highest first so the loop can stop the moment an attempt fits — a generous target then
+        // costs a single rebuild instead of walking the whole ladder.
+        let ladder: [Double] = [0.9, 0.75, 0.6, 0.45, 0.3, 0.2]
+        var produced: [(attempt: CompressionAttempt, data: Data)] = []
+        for q in ladder {
+            let data = try compressedData(from: source, quality: q)
+            produced.append((CompressionAttempt(quality: q, byteCount: data.count), data))
+            if data.count <= targetBytes { break }
+        }
+
+        guard
+            let best = selectBestAttempt(from: produced.map(\.attempt), targetBytes: targetBytes),
+            let data = produced.first(where: { $0.attempt == best })?.data
+        else {
+            throw PDFOperationError.compressionFailed
+        }
+
+        do {
+            try data.write(to: outputURL)
+        } catch {
+            throw PDFOperationError.couldNotWrite(outputURL)
+        }
+    }
+
+    /// Chooses which measured attempt to keep for a target size: the **highest-quality** attempt whose
+    /// file fits under `targetBytes`, or — when even the smallest overshoots — the **smallest** file
+    /// produced. Pure and IO-free so the target-size loop's decision is directly testable.
+    static func selectBestAttempt(from attempts: [CompressionAttempt], targetBytes: Int) -> CompressionAttempt? {
+        let fitting = attempts.filter { $0.byteCount <= targetBytes }
+        if !fitting.isEmpty {
+            return fitting.max { $0.quality < $1.quality }
+        }
+        return attempts.min { $0.byteCount < $1.byteCount }
+    }
+
+    /// Rebuilds every page as a bitmap at the resolution implied by `quality` and returns the new PDF
+    /// as in-memory `Data`. Shared by `compress` (writes it once) and `compressToTarget` (measures the
+    /// size at several qualities before writing the best one) so the page-rebuild loop lives in one place.
+    private static func compressedData(from source: PDFDocument, quality: Double) throws -> Data {
         let q = min(1, max(0.05, quality))
         let maxPixel = CGFloat(600 + (2400 - 600) * q)
 
@@ -313,13 +381,10 @@ enum PDFToolkit {
             output.insert(newPage, at: output.pageCount)
         }
 
-        guard output.pageCount > 0 else {
+        guard output.pageCount > 0, let data = output.dataRepresentation() else {
             throw PDFOperationError.compressionFailed
         }
-
-        guard output.write(to: outputURL) else {
-            throw PDFOperationError.couldNotWrite(outputURL)
-        }
+        return data
     }
 
     /// Stamps `options.text` onto every page and writes a new PDF.

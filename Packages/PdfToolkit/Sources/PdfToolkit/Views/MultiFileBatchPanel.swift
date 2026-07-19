@@ -79,6 +79,12 @@ struct MultiFileBatchPanel<Config: View>: View {
                 .frame(minWidth: 360)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .onDisappear {
+            // Leaving the tool (Back, or a ⌘K jump) destroys this view but the run task retains
+            // the runner — files kept landing headless with the Cancel control gone. Stopping
+            // between files leaves every completed output valid and the rest pending.
+            runner.cancel()
+        }
         .fileImporter(isPresented: $showImporter, allowedContentTypes: [.pdf], allowsMultipleSelection: true) { result in
             switch result {
             case .success(let urls):
@@ -103,7 +109,10 @@ struct MultiFileBatchPanel<Config: View>: View {
         VStack(spacing: 0) {
             ScrollView {
                 VStack(alignment: .leading, spacing: 14) {
+                    // Flipping back to "One file" mid-run would hide the live queue and its only
+                    // Cancel control while files keep landing headless.
                     ToolFileModePicker(mode: $mode)
+                        .disabled(runner.isRunning)
 
                     headerRow
 

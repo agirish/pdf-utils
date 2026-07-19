@@ -173,11 +173,17 @@ final class BatchRunner: ObservableObject {
         }
         isRunning = true
 
+        // Register like every single-file operation does, so ⌘Q during a run raises the
+        // "Operation in Progress" warning instead of terminating mid-file.
+        let operationName = "\(operation.toolTitle) (multiple files)"
+        AppStateManager.shared.beginOperation(operationName)
+
         runTask = Task { [weak self] in
             guard let self else { return }
             await self.process(operation: operation, into: directory)
             self.isRunning = false
             self.runTask = nil
+            AppStateManager.shared.endOperation(operationName)
         }
     }
 
@@ -188,6 +194,11 @@ final class BatchRunner: ObservableObject {
     }
 
     private func process(operation: BatchOperation, into directory: URL) async {
+        // Read once on the main actor; each file's finalize honors the same Files-tab setting the
+        // single-file coordinator applies. Skipping this made "Strip metadata on export" silently
+        // ignored for exactly the runs that touch the most files.
+        let stripMetadata = UserDefaults.standard.bool(forKey: SettingsKeys.stripMetadataOnExport)
+
         for index in items.indices {
             if Task.isCancelled { break }
             let item = items[index]
@@ -199,19 +210,36 @@ final class BatchRunner: ObservableObject {
             do {
                 let result: (url: URL, bytes: Int64) = try await PDFBackgroundWork.run {
                     try URLCollectionSecurityScope.withAccess([inputURL, directory]) {
+                        // Materialize to a temp file, finalize, then land atomically — the same
+                        // shape as the single-file coordinator. Writing the destination directly
+                        // meant a crash or force-quit mid-file left a truncated PDF at its final
+                        // user-visible name.
+                        let produced = try PDFExportSupport.data { tempURL in
+                            try BatchOperation.apply(operation, inputURL: inputURL, outputURL: tempURL)
+                        }
+                        let finalized = stripMetadata ? PDFExportCoordinator.stripMetadata(produced) : produced
                         let outputURL = PDFExportCoordinator.uniqueURL(inDirectory: directory, filename: filename)
-                        try BatchOperation.apply(operation, inputURL: inputURL, outputURL: outputURL)
-                        let bytes = Self.fileSize(of: outputURL) ?? 0
-                        return (outputURL, bytes)
+                        try finalized.write(to: outputURL, options: .atomic)
+                        return (outputURL, Int64(finalized.count))
                     }
                 }
                 items[index].status = .done(outputURL: result.url, outputBytes: result.bytes)
                 ActivityLog.shared.recordSaved(operation.toolTitle, to: result.url, bytes: Int(result.bytes))
-                AfterExportAction.current().perform(on: [result.url])
             } catch {
                 items[index].status = .failed(error.localizedDescription)
                 ActivityLog.shared.error("\(operation.toolTitle) failed for \(inputURL.lastPathComponent): \(error.localizedDescription)")
             }
+        }
+
+        // One after-export action for the whole run, at the end. Per-file firing activated Finder
+        // (or opened a Preview window) once per file, stealing focus for the entire run; the
+        // action's own multi-file branch exists precisely to reveal a batch in one shot.
+        let produced = items.compactMap { item -> URL? in
+            if case .done(let url, _) = item.status { return url }
+            return nil
+        }
+        if !produced.isEmpty {
+            AfterExportAction.current().perform(on: produced)
         }
     }
 

@@ -171,4 +171,49 @@ import PDFKit
         #expect(FileManager.default.fileExists(atPath: outputs[0].path))
         #expect(FileManager.default.fileExists(atPath: outputs[1].path))
     }
+
+    // MARK: - Runner finalize path
+
+    @MainActor
+    @Test func runnerStripsMetadataWhenTheSettingIsOn() async throws {
+        // The batch path used to write PDFToolkit output straight to the destination, silently
+        // skipping the strip-metadata pass every single-file export applies via the coordinator.
+        let dir = FixtureDir()
+        let plain = dir.url("plain.pdf")
+        try PDFFixtures.writePDF(pageCount: 1, to: plain)
+        let doc = try #require(PDFDocument(url: plain))
+        doc.documentAttributes = [PDFDocumentAttribute.authorAttribute: "Private Author"]
+        let src = dir.url("src.pdf")
+        #expect(doc.write(to: src))
+
+        let defaults = UserDefaults.standard
+        let previousStrip = defaults.object(forKey: SettingsKeys.stripMetadataOnExport)
+        let previousAction = defaults.object(forKey: SettingsKeys.afterExportAction)
+        defaults.set(true, forKey: SettingsKeys.stripMetadataOnExport)
+        defaults.set(AfterExportAction.doNothing.rawValue, forKey: SettingsKeys.afterExportAction)
+        defer {
+            if let previousStrip { defaults.set(previousStrip, forKey: SettingsKeys.stripMetadataOnExport) }
+            else { defaults.removeObject(forKey: SettingsKeys.stripMetadataOnExport) }
+            if let previousAction { defaults.set(previousAction, forKey: SettingsKeys.afterExportAction) }
+            else { defaults.removeObject(forKey: SettingsKeys.afterExportAction) }
+        }
+
+        let runner = BatchRunner()
+        runner.addURLs([src])
+        runner.run(operation: .rotate(quarterTurns: 1), into: dir.url)
+        for _ in 0..<250 where runner.isRunning {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        #expect(!runner.isRunning)
+        #expect(runner.doneCount == 1)
+
+        guard case .done(let outputURL, _) = runner.items[0].status else {
+            Issue.record("expected .done, got \(runner.items[0].status)")
+            return
+        }
+        let out = try #require(PDFDocument(url: outputURL))
+        let author = out.documentAttributes?[PDFDocumentAttribute.authorAttribute] as? String
+        #expect(author == nil)
+        #expect(try PDFFixtures.pageRotations(at: outputURL) == [90])
+    }
 }

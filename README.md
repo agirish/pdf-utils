@@ -2,15 +2,28 @@
 
 Native **macOS** app for everyday PDF tasks: a tile-based **dashboard** (similar in spirit to tool hubs like [Smallpdf’s tools page](https://smallpdf.com/pdf-tools)), implemented with **SwiftUI** and **PDFKit**. Everything runs on your Mac; you pick input PDFs and save results with the system file UI.
 
-## Tools (v1)
+## Tools
 
 | Tool | What it does |
 |------|----------------|
 | **Compress PDF** | Rebuilds pages as images with adjustable quality to reduce file size (best for scan-heavy PDFs; vector text may become rasterized). Uses CoreGraphics (`CGPDFPage` drawing transform) so intrinsic page rotation in the file is flattened into the bitmap; output pages use rotation 0 to avoid double-applying. |
 | **Rotate PDF** | Rotates all pages or a **page range** by 90° / 180° / 270°. |
 | **Merge PDF** | Combines multiple PDFs **top to bottom** in the list (per-row **↑ / ↓** to reorder, **trash** to remove from the list). |
+| **Split PDF** | Cuts one PDF into several files — fixed chunks of **N pages**, or **custom ranges** where each comma group (`1-3, 4-6, 7-10`) becomes its own file. Parts are written into a folder you choose. |
 | **Extract PDF Pages** | Saves a new PDF containing only the pages you list (e.g. `1, 3-5`). Order matches what you type (`5,1,2` → page 5, then 1, then 2). Ranges expand forward (`3-5`) or backward (`5-3`). Leave the field empty to use all pages. |
+| **Reorder Pages** | Lists every page as a draggable row; rearrange them (drag or **↑ / ↓**) and save a new PDF. The preview follows the new order, labeled with each page's original number. |
 | **Delete PDF Pages** | Writes a new PDF with listed pages removed (original file is not modified). |
+| **Watermark PDF** | Stamps text across every page (**centered** or **tiled**) with adjustable color, size, opacity, and angle. The underlying page is copied as vector, so its text stays selectable; the stamp is baked into the page content, not a strippable annotation. |
+| **Redact PDF** | Draws rectangles you ⇧-drag over sensitive regions; those areas are rebuilt as solid black so the text underneath cannot be copied or searched in the export. Irreversible — review before saving. |
+| **Password Protect** | Encrypts a PDF behind an open password, or removes a password from one you can already open. Runs entirely on your Mac; the password is never stored or sent anywhere. |
+
+## Appearance
+
+Open **Settings** (⌘,) to tune how the app looks:
+
+- **Theme** — Light, Dark, or **System** (follows macOS). Applied through `NSApplication.appearance`, so it also reaches the title bar, open/save panels, and alerts — not just the SwiftUI views.
+- **Window background** — Liquid glass (tinted gradient + material), or a flat system / paper-white / neutral canvas.
+- **Accent color** — the hue used for the liquid-glass wash, chosen from a row of swatches.
 
 ### Page range syntax
 

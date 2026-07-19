@@ -21,6 +21,10 @@ struct PdfUtilsApp: App {
             RootView()
                 .environmentObject(settingsPresenter)
         }
+        // Hidden title bar (SyncCloud parity): the traffic lights float on the content and the
+        // window's content backing goes transparent, which is what lets `BehindWindowGlass` show the
+        // desktop at the Clear glass level. A standard title bar keeps the window opaque.
+        .windowStyle(.hiddenTitleBar)
         .defaultSize(width: 1040, height: 720)
         .commands {
             // Replace the default ⌘, (which would open a native Settings scene) with one that
@@ -41,6 +45,7 @@ struct PdfUtilsApp: App {
         Window("Activity Log", id: "activity-log") {
             ActivityLogView()
         }
+        .windowStyle(.hiddenTitleBar)
         .defaultSize(width: 480, height: 640)
     }
 }

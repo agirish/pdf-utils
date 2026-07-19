@@ -4,7 +4,7 @@ import SwiftUI
 /// Preview column backdrop from Settings (`MergePreviewBackgroundStyle`); shared by all tools with a preview column.
 struct ToolPreviewPaneBackground: View {
     @AppStorage(SettingsKeys.mergePreviewBackground)
-    private var mergeRaw: String = MergePreviewBackgroundStyle.white.rawValue
+    private var mergeRaw: String = MergePreviewBackgroundStyle.matchMain.rawValue
 
     @AppStorage(SettingsKeys.mainWindowBackground)
     private var mainRaw: String = MainWindowBackgroundStyle.liquidGlass.rawValue
@@ -12,23 +12,19 @@ struct ToolPreviewPaneBackground: View {
     @AppStorage(LiquidGlass.levelKey)
     private var glassLevelRaw: String = GlassLevel.frosted.rawValue
 
-    @AppStorage(LiquidGlass.tintKey)
-    private var glassTint: Double = 0
-
     @AppStorage(LiquidGlass.hueKey)
     private var glassHueRaw: String = LiquidGlass.defaultHue.rawValue
 
     private var mergeStyle: MergePreviewBackgroundStyle {
-        MergePreviewBackgroundStyle(rawValue: mergeRaw) ?? .white
+        MergePreviewBackgroundStyle(rawValue: mergeRaw) ?? .matchMain
     }
 
-    private var mainStyle: MainWindowBackgroundStyle {
-        if mainRaw == "accentGradient" { return .liquidGlass }
-        return MainWindowBackgroundStyle(rawValue: mainRaw) ?? .liquidGlass
-    }
+    // The main-window background is always liquid glass now (see DashboardBackground), so "Match main
+    // background" mirrors the glass rather than a since-removed window-background style.
+    private var mainStyle: MainWindowBackgroundStyle { .liquidGlass }
 
-    private var glassIntensity: Double {
-        (GlassLevel(rawValue: glassLevelRaw) ?? .frosted).backgroundIntensity
+    private var glassLevel: GlassLevel {
+        GlassLevel(rawValue: glassLevelRaw) ?? .frosted
     }
 
     private var glassHue: LiquidGlassHue {
@@ -45,9 +41,8 @@ struct ToolPreviewPaneBackground: View {
             case .matchMain:
                 MainWindowBackgroundLayer(
                     style: mainStyle,
-                    glassIntensity: glassIntensity,
+                    glassLevel: glassLevel,
                     glassHue: glassHue,
-                    glassTint: glassTint,
                     liquidGlassRespectsTopSafeArea: false
                 )
             }

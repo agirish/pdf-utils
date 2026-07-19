@@ -42,6 +42,11 @@ public struct ToolDetailView: View {
         .background(DashboardBackground())
         .navigationTitle(tool.title)
         .toolbar {
+            // macOS 26's grouped toolbar no longer trails `.primaryAction` on its own, so a leading
+            // flexible spacer keeps the utility pill on the right (SyncCloud parity).
+            if #available(macOS 26.0, *) {
+                ToolbarSpacer(.flexible)
+            }
             ToolbarItemGroup(placement: .primaryAction) {
                 Button {
                     openWindow(id: "activity-log")
@@ -66,7 +71,6 @@ public struct ToolDetailView: View {
                 .accessibilityLabel("Help")
             }
         }
-        .toolbarBackground(.ultraThinMaterial, for: .automatic)
         .sheet(isPresented: $showHelp) {
             ToolHelpSheet(tool: tool)
         }

@@ -234,34 +234,48 @@ public enum LiquidGlass {
 }
 
 public extension View {
-    /// App-level liquid glass backdrop (SyncCloud-style): colored gradient + thin material. The
-    /// `tint` (0...1) scales the accent wash; `hue == .none` paints no wash at any tint.
+    /// App-level liquid glass backdrop, matching SyncCloud `Design/liquidGlassAppBackground`. At
+    /// `.clear` a behind-window vibrancy layer lets the desktop read through the (non-opaque) window;
+    /// at `.frosted`/`.solid` the window stays opaque and this paints the accent gradient over a
+    /// `.thinMaterial` base. `BehindWindowGlass` toggles the window's opacity itself — nothing else
+    /// touches it. The accent *tint* washes content surfaces (see `contentSurface`), not the window
+    /// background, exactly as in SyncCloud.
     @ViewBuilder
     func liquidGlassAppBackground(
-        intensity: Double,
+        level: GlassLevel,
         hue: LiquidGlassHue = LiquidGlass.defaultHue,
-        tint: Double = 0,
         respectTopSafeArea: Bool = true
     ) -> some View {
-        let t = max(0.0, min(1.0, intensity))
-        let washMul = hue == .none ? 0.0 : (0.6 + 0.8 * max(0.0, min(1.0, tint)))
+        let t = level.backgroundIntensity
         let colors = hue.gradientColors
-        let opacities: [Double] = [(0.06 + 0.16 * t) * washMul, (0.05 + 0.14 * t) * washMul, (0.04 + 0.10 * t) * washMul]
-        let gradientStops = zip(colors, opacities).map { $0.0.opacity($0.1) }
+        let opacities: [Double] = [0.06 + 0.16 * t, 0.05 + 0.14 * t, 0.04 + 0.10 * t]
+        let gradientColors = zip(colors, opacities).map { $0.0.opacity($0.1) }
+        // Only `.clear` goes see-through — the thinMaterial base is opaque enough to hide the
+        // desktop, so the two are mutually exclusive (SyncCloud parity).
+        let seeThrough = level == .clear
         let safeEdges: Edge.Set = respectTopSafeArea ? [.horizontal, .bottom] : .all
 
         background {
             ZStack {
+                // Behind-window vibrancy: shows the desktop through the window at `.clear`, inert
+                // otherwise (it also hands the window its opacity back). Always ignores every safe
+                // area so the title-bar band is glass too at `.clear`, not a clear hole.
+                BehindWindowGlass(isEnabled: seeThrough)
+                    .ignoresSafeArea()
+
                 LinearGradient(
-                    colors: gradientStops,
+                    colors: gradientColors,
                     startPoint: .topLeading,
                     endPoint: .bottomTrailing
                 )
                 .ignoresSafeArea(edges: safeEdges)
 
-                Color.clear
-                    .background(.thinMaterial.opacity(0.45 + 0.20 * t))
-                    .ignoresSafeArea(edges: safeEdges)
+                if !seeThrough {
+                    // Base material so content stays readable in light/dark — SyncCloud's non-clear base.
+                    Color.clear
+                        .background(.thinMaterial.opacity(0.45 + 0.20 * t))
+                        .ignoresSafeArea(edges: safeEdges)
+                }
             }
         }
     }

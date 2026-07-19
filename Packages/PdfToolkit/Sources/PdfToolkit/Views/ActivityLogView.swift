@@ -72,7 +72,7 @@ public struct ActivityLogView: View {
             list(filtered: filtered, visibleHistory: visibleHistory, moreHistory: moreHistory)
         }
         .frame(minWidth: 420, minHeight: 420)
-        .liquidGlassAppBackground(intensity: glassLevel.backgroundIntensity, hue: glassHue, tint: glassTint)
+        .liquidGlassAppBackground(level: glassLevel, hue: glassHue)
         .onChange(of: selectedLevel) { _, _ in historyLimit = Self.historyPageSize }
         .onChange(of: searchText) { _, _ in historyLimit = Self.historyPageSize }
     }

@@ -36,9 +36,8 @@ public enum MainWindowBackgroundStyle: String, CaseIterable, Identifiable {
 /// Shared backdrop for dashboard, tools, and merge “match main”.
 struct MainWindowBackgroundLayer: View {
     let style: MainWindowBackgroundStyle
-    var glassIntensity: Double = 0.65
+    var glassLevel: GlassLevel = .frosted
     var glassHue: LiquidGlassHue = LiquidGlass.defaultHue
-    var glassTint: Double = 0
     /// When `false`, liquid glass fills the view edge to edge (e.g. merge preview column). When `true`, the top safe area stays clear for window toolbars.
     var liquidGlassRespectsTopSafeArea: Bool = true
 
@@ -49,9 +48,8 @@ struct MainWindowBackgroundLayer: View {
                 Color.clear
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .liquidGlassAppBackground(
-                        intensity: glassIntensity,
+                        level: glassLevel,
                         hue: glassHue,
-                        tint: glassTint,
                         respectTopSafeArea: liquidGlassRespectsTopSafeArea
                     )
             case .systemWindow:
@@ -67,25 +65,15 @@ struct MainWindowBackgroundLayer: View {
 
 public struct DashboardBackground: View {
     public init() {}
-    @AppStorage(SettingsKeys.mainWindowBackground)
-    private var mainWindowBackgroundRaw: String = MainWindowBackgroundStyle.liquidGlass.rawValue
 
     @AppStorage(LiquidGlass.levelKey)
     private var glassLevelRaw: String = GlassLevel.frosted.rawValue
 
-    @AppStorage(LiquidGlass.tintKey)
-    private var glassTint: Double = 0
-
     @AppStorage(LiquidGlass.hueKey)
     private var glassHueRaw: String = LiquidGlass.defaultHue.rawValue
 
-    private var style: MainWindowBackgroundStyle {
-        if mainWindowBackgroundRaw == "accentGradient" { return .liquidGlass }
-        return MainWindowBackgroundStyle(rawValue: mainWindowBackgroundRaw) ?? .liquidGlass
-    }
-
-    private var glassIntensity: Double {
-        (GlassLevel(rawValue: glassLevelRaw) ?? .frosted).backgroundIntensity
+    private var glassLevel: GlassLevel {
+        GlassLevel(rawValue: glassLevelRaw) ?? .frosted
     }
 
     private var glassHue: LiquidGlassHue {
@@ -93,8 +81,11 @@ public struct DashboardBackground: View {
     }
 
     public var body: some View {
-        MainWindowBackgroundLayer(style: style, glassIntensity: glassIntensity, glassHue: glassHue, glassTint: glassTint)
-            // Keep the top safe area clear so the unified title bar, toolbar, and menu-driven controls stay visible.
+        // Always liquid glass (SyncCloud parity). The old `mainWindowBackground` style switch is gone
+        // from the render path: it had no Settings UI, yet a stored non-glass value (e.g. paper white)
+        // silently painted a flat opaque fill over the whole window — which is exactly what hid the
+        // glass and the behind-window translucency.
+        MainWindowBackgroundLayer(style: .liquidGlass, glassLevel: glassLevel, glassHue: glassHue)
             .ignoresSafeArea(edges: [.horizontal, .bottom])
     }
 }

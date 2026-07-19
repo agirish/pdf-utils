@@ -40,6 +40,11 @@ struct DashboardView: View {
                 .environmentObject(settings)
         }
         .toolbar {
+            // macOS 26's grouped toolbar no longer trails `.primaryAction` on its own, so a leading
+            // flexible spacer keeps the utility pill on the right (SyncCloud parity).
+            if #available(macOS 26.0, *) {
+                ToolbarSpacer(.flexible)
+            }
             ToolbarItemGroup(placement: .primaryAction) {
                 Button {
                     openWindow(id: "activity-log")
@@ -64,7 +69,6 @@ struct DashboardView: View {
                 .accessibilityLabel("Help")
             }
         }
-        .toolbarBackground(.ultraThinMaterial, for: .automatic)
         .sheet(isPresented: $showHelp) {
             DashboardHelpSheet()
         }
@@ -88,9 +92,9 @@ struct ToolTileView: View {
     var floating: Bool = true
     @State private var hovered = false
 
-    private var tileFill: AnyShapeStyle {
-        floating ? AnyShapeStyle(.background) : AnyShapeStyle(Color.primary.opacity(hovered ? 0.07 : 0.04))
-    }
+    @AppStorage(LiquidGlass.levelKey) private var glassLevelRaw: String = GlassLevel.frosted.rawValue
+    private var glassLevel: GlassLevel { GlassLevel(rawValue: glassLevelRaw) ?? .frosted }
+
     private var shadowOpacity: Double { floating ? (hovered ? 0.14 : 0.06) : (hovered ? 0.08 : 0.0) }
     private var shadowRadius: CGFloat { floating ? (hovered ? 18 : 10) : (hovered ? 10 : 0) }
     private var shadowY: CGFloat { floating ? (hovered ? 8 : 4) : (hovered ? 4 : 0) }
@@ -142,11 +146,14 @@ struct ToolTileView: View {
         }
         .padding(18)
         .frame(maxWidth: .infinity, minHeight: 200, alignment: .topLeading)
-        .background {
-            RoundedRectangle(cornerRadius: 22, style: .continuous)
-                .fill(tileFill)
-                .shadow(color: .black.opacity(shadowOpacity), radius: shadowRadius, y: shadowY)
-        }
+        // Make the whole tile the tap target, not just the icon/text: the glass background isn't part
+        // of the enclosing NavigationLink's hit region on its own, so clicks in the empty areas would
+        // otherwise miss.
+        .contentShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+        // Same glass surface as the window background, so Clear shows the desktop through each tile
+        // too (glassEffect(.clear) on macOS 26), Frosted blurs it, Solid stays opaque.
+        .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+        .glassSurface(glassLevel, cornerRadius: 22)
         .overlay {
             RoundedRectangle(cornerRadius: 22, style: .continuous)
                 .strokeBorder(
@@ -154,6 +161,7 @@ struct ToolTileView: View {
                     lineWidth: hovered ? 1.5 : 1
                 )
         }
+        .shadow(color: .black.opacity(shadowOpacity), radius: shadowRadius, y: shadowY)
         .scaleEffect(hovered ? 1.02 : 1)
         .animation(.easeOut(duration: 0.18), value: hovered)
         .onHover { hovered = $0 }

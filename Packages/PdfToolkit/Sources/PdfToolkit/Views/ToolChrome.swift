@@ -24,16 +24,12 @@ struct ToolFormContainer<Content: View>: View {
 }
 
 extension View {
+    /// The surface behind a tool's control card. Uses the same glass material as the Settings card so
+    /// tool panes read as liquid glass — tracking the Glass effect level and accent tint — rather than
+    /// the near-opaque panel they used to draw, which hid the window's glass background everywhere but
+    /// Settings.
     func formCard() -> some View {
-        self
-            .background {
-                RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .fill(.background.opacity(0.92))
-            }
-            .overlay {
-                RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .strokeBorder(.quaternary.opacity(0.6), lineWidth: 1)
-            }
+        modifier(FormCardStyle())
     }
 
     /// Translucent bar behind a tool's primary action row. Mirrors `ToolScreenHeader`'s material top
@@ -42,6 +38,28 @@ extension View {
     /// keep their own `Divider` above the bar.
     func toolActionBar() -> some View {
         self.background(.ultraThinMaterial)
+    }
+}
+
+/// Reads the live appearance settings so every `formCard()` tracks the Glass effect level and accent
+/// tint exactly the way the Settings overlay and the window background do — the single reason tool
+/// panes now show liquid glass. Mirrors `RootView`'s Settings-card styling (`contentSurface` wash +
+/// `glassSurface`) at the tools' 16-pt card radius, with a hairline border to define the edge.
+private struct FormCardStyle: ViewModifier {
+    @AppStorage(LiquidGlass.levelKey) private var glassLevelRaw: String = GlassLevel.frosted.rawValue
+    @AppStorage(LiquidGlass.hueKey) private var glassHueRaw: String = LiquidGlass.defaultHue.rawValue
+    @AppStorage(LiquidGlass.tintKey) private var glassTint: Double = 0
+
+    private var level: GlassLevel { GlassLevel(rawValue: glassLevelRaw) ?? .frosted }
+    private var hue: LiquidGlassHue { LiquidGlassHue(rawValue: glassHueRaw) ?? LiquidGlass.defaultHue }
+
+    func body(content: Content) -> some View {
+        let shape = RoundedRectangle(cornerRadius: 16, style: .continuous)
+        content
+            .contentSurface(hue: hue, tint: glassTint)
+            .clipShape(shape)
+            .glassSurface(level, cornerRadius: 16)
+            .overlay { shape.strokeBorder(.quaternary.opacity(0.6), lineWidth: 1) }
     }
 }
 

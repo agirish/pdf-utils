@@ -86,4 +86,19 @@ import PDFKit
             try PDFToolkit.watermark(inputURL: bad, outputURL: dir.url("out.pdf"), options: options("DRAFT"))
         }?.kind == "couldNotOpen")
     }
+
+    @Test func visibleAnnotationsSurviveWatermarking() throws {
+        // The watermark rebuild replays only the content stream via `drawPDFPage`, so annotation
+        // appearances (form values, signatures, notes) silently vanished. They are now flattened
+        // into the emitted page.
+        let dir = FixtureDir()
+        let src = dir.url("src.pdf"), out = dir.url("out.pdf")
+        let annotationRect = CGRect(x: 300, y: 300, width: 80, height: 60)
+        try PDFFixtures.writePDF(markers: ["ONLY"], greenSquareOnFirstPage: annotationRect, to: src)
+
+        try PDFToolkit.watermark(inputURL: src, outputURL: out, options: options("DRAFT"))
+
+        let brightness = try PDFFixtures.brightnessSampler(at: out)
+        #expect(brightness(340, 330) < 0.8)   // green square present, not blank white
+    }
 }

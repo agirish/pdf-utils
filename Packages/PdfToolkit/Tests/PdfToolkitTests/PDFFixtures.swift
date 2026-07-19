@@ -107,6 +107,22 @@ enum PDFFixtures {
         try (data as Data).write(to: url, options: .atomic)
     }
 
+    /// A marker PDF whose first page carries a green square annotation (border + interior), for
+    /// tests that pin annotation appearances surviving a page rebuild. Built via a throwaway
+    /// sibling for the same write-back-reliability reason as the rotation fixture above.
+    static func writePDF(markers: [String], greenSquareOnFirstPage rect: CGRect, to url: URL) throws {
+        let base = url.deletingLastPathComponent()
+            .appendingPathComponent("ann-base-\(UUID().uuidString).pdf")
+        defer { try? FileManager.default.removeItem(at: base) }
+        try writePDF(markers: markers, to: base)
+        let doc = try #require(PDFDocument(url: base))
+        let annotation = PDFAnnotation(bounds: rect, forType: .square, withProperties: nil)
+        annotation.color = .green
+        annotation.interiorColor = .green
+        try #require(doc.page(at: 0)).addAnnotation(annotation)
+        #expect(doc.write(to: url))
+    }
+
     /// A file that is not a valid PDF, for "corrupt input" cases.
     static func writeCorrupt(to url: URL) throws {
         try Data([0xDE, 0xAD, 0xBE, 0xEF]).write(to: url, options: .atomic)
@@ -135,6 +151,48 @@ enum PDFFixtures {
     static func pageRotations(at url: URL) throws -> [Int] {
         let doc = try #require(PDFDocument(url: url))
         return (0..<doc.pageCount).map { doc.page(at: $0)?.rotation ?? 0 }
+    }
+
+    /// The media-box size of one page.
+    static func pageSize(at url: URL, page index: Int = 0) throws -> CGSize {
+        let doc = try #require(PDFDocument(url: url))
+        return try #require(doc.page(at: index)).bounds(for: .mediaBox).size
+    }
+
+    /// Renders a page to a bitmap and returns a sampler from PDF-space points (origin bottom-left)
+    /// to average brightness in 0…1 (0 = black, 1 = white), so geometry tests can assert *where*
+    /// content, annotations, and redaction fills landed on the emitted page.
+    static func brightnessSampler(at url: URL, page index: Int = 0) throws -> (CGFloat, CGFloat) -> CGFloat {
+        let doc = try #require(PDFDocument(url: url))
+        let page = try #require(doc.page(at: index))
+        let media = page.bounds(for: .mediaBox)
+        let image = page.thumbnail(of: media.size, for: .mediaBox)
+        let tiff = try #require(image.tiffRepresentation)
+        let rep = try #require(NSBitmapImageRep(data: tiff))
+        let sx = CGFloat(rep.pixelsWide) / media.width
+        let sy = CGFloat(rep.pixelsHigh) / media.height
+        return { pdfX, pdfY in
+            let col = min(rep.pixelsWide - 1, max(0, Int(pdfX * sx)))
+            let row = min(rep.pixelsHigh - 1, max(0, Int((media.height - pdfY) * sy)))   // flip: PDF y-up → image y-down
+            guard let c = rep.colorAt(x: col, y: row)?.usingColorSpace(.deviceRGB) else { return 1 }
+            return (c.redComponent + c.greenComponent + c.blueComponent) / 3
+        }
+    }
+
+    /// The darkest sample over a grid of PDF-space points — a cheap "are there glyph strokes in
+    /// this band?" probe for asserting text rendered where the geometry says it should.
+    static func darkestSample(
+        _ sampler: (CGFloat, CGFloat) -> CGFloat,
+        xRange: StrideThrough<CGFloat>,
+        yValues: [CGFloat]
+    ) -> CGFloat {
+        var darkest: CGFloat = 1
+        for x in xRange {
+            for y in yValues {
+                darkest = min(darkest, sampler(x, y))
+            }
+        }
+        return darkest
     }
 }
 

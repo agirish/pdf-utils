@@ -280,9 +280,11 @@ enum PDFToolkit {
             guard let image = renderPage(page, maxPixelDimension: maxPixel) else {
                 throw PDFOperationError.compressionFailed
             }
-            let media = page.bounds(for: .mediaBox)
+            // The bitmap is the page as *displayed* (rotation applied, crop box), so the emitted
+            // page must use that size — the raw media box would letterbox rotated pages.
+            let pageRect = CGRect(origin: .zero, size: image.size)
             let imageOpts: [PDFPage.ImageInitializationOption: Any] = [
-                .mediaBox: NSValue(rect: media),
+                .mediaBox: NSValue(rect: pageRect),
             ]
             guard let newPage = PDFPage(image: image, options: imageOpts) else {
                 throw PDFOperationError.compressionFailed
@@ -309,6 +311,8 @@ enum PDFToolkit {
     /// an `NSGraphicsContext` bridge, so it is baked into the page content stream — not a strippable
     /// annotation. Intrinsic page rotation is honored: the output page's media box uses the page's
     /// *displayed* size and `getDrawingTransform` maps the source upright before the stamp is added.
+    /// Visible annotation appearances (form values, signatures, notes) are drawn after the content
+    /// so they survive the rebuild — flattened into the page rather than silently dropped.
     static func watermark(inputURL: URL, outputURL: URL, options: WatermarkOptions) throws {
         let trimmed = options.text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { throw PDFOperationError.watermarkTextRequired }
@@ -327,19 +331,22 @@ enum PDFToolkit {
 
         for i in 0..<source.pageCount {
             guard let page = source.page(at: i), let cgPage = page.pageRef else { continue }
-            let media = page.bounds(for: .mediaBox)
+            // Crop box, not media box: it is what viewers display, so the stamped page keeps the
+            // visible size and never resurfaces content the source's crop deliberately hid.
+            let cropBox = page.bounds(for: .cropBox)
             let rotation = ((page.rotation % 360) + 360) % 360
             let displaySize = (rotation == 90 || rotation == 270)
-                ? CGSize(width: media.height, height: media.width)
-                : media.size
+                ? CGSize(width: cropBox.height, height: cropBox.width)
+                : cropBox.size
             let box = CGRect(origin: .zero, size: displaySize)
 
             ctx.beginPDFPage([kCGPDFContextMediaBox as String: box] as CFDictionary)
 
             ctx.saveGState()
-            let transform = cgPage.getDrawingTransform(.mediaBox, rect: box, rotate: 0, preserveAspectRatio: false)
+            let transform = cgPage.getDrawingTransform(.cropBox, rect: box, rotate: 0, preserveAspectRatio: false)
             ctx.concatenate(transform)
             ctx.drawPDFPage(cgPage)
+            drawAnnotations(of: page, in: ctx)
             ctx.restoreGState()
 
             drawWatermark(in: ctx, box: box, text: trimmed, options: options)
@@ -429,14 +436,21 @@ enum PDFToolkit {
                     stripAnnotations: options.stripAnnotationsFromUnredactedPages
                 )
             } else {
-                let mediaRect = page.bounds(for: .mediaBox)
                 guard
-                    let cgImage = renderPageWithRedactions(
-                        page,
-                        redactionRects: rectsForPage,
-                        maxPixelDimension: options.maxPixelDimension
-                    ),
-                    let pdfData = Self.singlePagePDFData(cgImage: cgImage, sourceMediaBox: mediaRect),
+                    let cgPage = page.pageRef,
+                    let geometry = rasterGeometry(
+                        for: page,
+                        maxPixelDimension: options.maxPixelDimension,
+                        allowUpscale: true
+                    )
+                else {
+                    throw PDFOperationError.redactionFailed
+                }
+                let fills = mergeOverlappingRedactions(rectsForPage, pageBox: geometry.pageBox)
+                guard
+                    !fills.isEmpty,
+                    let cgImage = renderBitmap(page, cgPage: cgPage, geometry: geometry, redactionFills: fills),
+                    let pdfData = Self.singlePagePDFData(cgImage: cgImage, pageSize: geometry.displaySize),
                     let tempDoc = PDFDocument(data: pdfData),
                     let newPage = tempDoc.page(at: 0)
                 else {
@@ -457,14 +471,11 @@ enum PDFToolkit {
         }
     }
 
-    /// Media box for the emitted page: origin at zero, size from the source (avoids odd origins confusing viewers).
-    private static func normalizedMediaRectForOutput(_ mediaBox: CGRect) -> CGRect {
-        CGRect(x: 0, y: 0, width: abs(mediaBox.width), height: abs(mediaBox.height))
-    }
-
     /// One-page PDF with explicit Core Graphics MediaBox and bitmap drawn into the full page rect.
-    private static func singlePagePDFData(cgImage: CGImage, sourceMediaBox: CGRect) -> Data? {
-        let pageRect = normalizedMediaRectForOutput(sourceMediaBox)
+    /// The page is emitted at origin zero with the given (displayed) size, so odd source origins and
+    /// intrinsic rotation never confuse viewers.
+    private static func singlePagePDFData(cgImage: CGImage, pageSize: CGSize) -> Data? {
+        let pageRect = CGRect(x: 0, y: 0, width: abs(pageSize.width), height: abs(pageSize.height))
         guard pageRect.width > 0.5, pageRect.height > 0.5 else { return nil }
 
         let data = NSMutableData()
@@ -481,25 +492,53 @@ enum PDFToolkit {
         return data as Data
     }
 
-    private static func renderPageWithRedactions(
+    /// How a page maps onto a raster: the crop box drawn (what viewers actually display), its
+    /// rotation-aware displayed size in points, and the exact pixels-per-point scale.
+    private struct PageRasterGeometry {
+        let pageBox: CGRect
+        let displaySize: CGSize
+        let scale: CGFloat
+        var pixelWidth: Int { max(1, Int(ceil(displaySize.width * scale))) }
+        var pixelHeight: Int { max(1, Int(ceil(displaySize.height * scale))) }
+    }
+
+    private static func rasterGeometry(
+        for page: PDFPage,
+        maxPixelDimension: CGFloat,
+        allowUpscale: Bool
+    ) -> PageRasterGeometry? {
+        let box = page.bounds(for: .cropBox)
+        guard box.width > 0, box.height > 0, page.pageRef != nil else { return nil }
+        let rotation = ((page.rotation % 360) + 360) % 360
+        let displaySize = (rotation == 90 || rotation == 270)
+            ? CGSize(width: box.height, height: box.width)
+            : box.size
+        let longest = max(displaySize.width, displaySize.height)
+        let raw = maxPixelDimension / max(longest, 1)
+        // Redaction supersamples past 1 PDF point per pixel (otherwise pages look ~72 dpi and text
+        // is fuzzy); compression only ever downsamples.
+        let scale = allowUpscale ? min(max(raw, 0.5), 12) : min(1, raw)
+        return PageRasterGeometry(pageBox: box, displaySize: displaySize, scale: scale)
+    }
+
+    /// Draws the page — content stream, then visible annotation appearances, then any redaction
+    /// fills — upright into a fresh bitmap of `geometry`'s pixel size.
+    ///
+    /// The supersample scale is applied to the context *before* the page transform, and the
+    /// transform maps into a 1x, display-sized rect. Both halves matter: `getDrawingTransform`
+    /// refuses to scale a page up, so asking it to map straight into a supersampled pixel rect
+    /// silently drew the page 1:1 and centered — a redacted US Letter page came out at ~1/5 size in
+    /// a field of white. And the rect must use the rotation-swapped *displayed* size, or a
+    /// /Rotate 90 page gets letterboxed into its unrotated aspect. Redaction rects arrive in PDF
+    /// user space and are filled under the same transform, so they track the content exactly.
+    private static func renderBitmap(
         _ page: PDFPage,
-        redactionRects: [CGRect],
-        maxPixelDimension: CGFloat
+        cgPage: CGPDFPage,
+        geometry: PageRasterGeometry,
+        redactionFills: [CGRect]
     ) -> CGImage? {
-        let mediaRect = page.bounds(for: .mediaBox)
-        guard mediaRect.width > 0, mediaRect.height > 0, let cgPage = page.pageRef else { return nil }
-
-        let merged = mergeOverlappingRedactions(redactionRects, mediaBox: mediaRect)
-        guard !merged.isEmpty else { return nil }
-
-        let longest = max(mediaRect.width, mediaRect.height)
-        // Supersample past 1 PDF point ≈ 1 pixel (otherwise pages look ~72 dpi and text is fuzzy).
-        let rawScale = maxPixelDimension / max(longest, 1)
-        let scale = min(max(rawScale, 0.5), 12)
-        let pixelW = max(1, Int(ceil(mediaRect.width * scale)))
-        let pixelH = max(1, Int(ceil(mediaRect.height * scale)))
-        let targetRect = CGRect(x: 0, y: 0, width: CGFloat(pixelW), height: CGFloat(pixelH))
-
+        let pixelW = geometry.pixelWidth
+        let pixelH = geometry.pixelHeight
         guard let colorSpace = CGColorSpace(name: CGColorSpace.sRGB) else { return nil }
         guard let ctx = CGContext(
             data: nil,
@@ -513,16 +552,19 @@ enum PDFToolkit {
         else { return nil }
 
         ctx.setFillColor(gray: 1, alpha: 1)
-        ctx.fill(targetRect)
+        ctx.fill(CGRect(x: 0, y: 0, width: CGFloat(pixelW), height: CGFloat(pixelH)))
 
         ctx.saveGState()
-        let transform = cgPage.getDrawingTransform(.mediaBox, rect: targetRect, rotate: 0, preserveAspectRatio: true)
+        ctx.scaleBy(x: geometry.scale, y: geometry.scale)
+        let displayRect = CGRect(origin: .zero, size: geometry.displaySize)
+        let transform = cgPage.getDrawingTransform(.cropBox, rect: displayRect, rotate: 0, preserveAspectRatio: true)
         ctx.concatenate(transform)
         ctx.drawPDFPage(cgPage)
+        drawAnnotations(of: page, in: ctx)
 
         ctx.setBlendMode(.normal)
         ctx.setFillColor(gray: 0, alpha: 1)
-        for r in merged {
+        for r in redactionFills {
             ctx.fill(r)
         }
         ctx.restoreGState()
@@ -530,9 +572,25 @@ enum PDFToolkit {
         return ctx.makeImage()
     }
 
+    /// Annotation appearances (typed form values, ink signatures, notes, highlights, stamps) live in
+    /// `/Annots`, outside the content stream `drawPDFPage` replays — a rebuilt page silently loses
+    /// them unless they are drawn here, in the same PDF-space transform as the content. Redaction
+    /// fills paint after this, so a marked annotation stays buried under black.
+    private static func drawAnnotations(of page: PDFPage, in ctx: CGContext) {
+        let visible = page.annotations.filter(\.shouldDisplay)
+        guard !visible.isEmpty else { return }
+        let graphics = NSGraphicsContext(cgContext: ctx, flipped: false)
+        NSGraphicsContext.saveGraphicsState()
+        NSGraphicsContext.current = graphics
+        for annotation in visible {
+            annotation.draw(with: .cropBox, in: ctx)
+        }
+        NSGraphicsContext.restoreGraphicsState()
+    }
+
     /// Keep redaction passes from leaving thin gaps between adjacent user rectangles.
-    private static func mergeOverlappingRedactions(_ rects: [CGRect], mediaBox: CGRect) -> [CGRect] {
-        var list: [CGRect] = rects.compactMap { RedactionMarkGeometry.clipToMediaBox($0, mediaBox: mediaBox) }
+    private static func mergeOverlappingRedactions(_ rects: [CGRect], pageBox: CGRect) -> [CGRect] {
+        var list: [CGRect] = rects.compactMap { RedactionMarkGeometry.clipToMediaBox($0, mediaBox: pageBox) }
         guard !list.isEmpty else { return [] }
 
         var merged = true
@@ -569,41 +627,15 @@ enum PDFToolkit {
         output.insert(copy, at: output.pageCount)
     }
 
-    /// Renders using `CGPDFPage`’s drawing transform so page rotation from the PDF (and PDFKit’s `rotation`) appears upright in the bitmap.
+    /// Renders the page — content plus visible annotations — upright at its displayed size via the
+    /// shared raster pipeline (rotation-swapped crop box, exact scale). Compression never upscales.
     private static func renderPage(_ page: PDFPage, maxPixelDimension: CGFloat) -> NSImage? {
-        let mediaRect = page.bounds(for: .mediaBox)
-        guard mediaRect.width > 0, mediaRect.height > 0 else { return nil }
-
-        guard let cgPage = page.pageRef else { return nil }
-        let longest = max(mediaRect.width, mediaRect.height)
-        let scale = min(1, maxPixelDimension / longest)
-        let pixelW = max(1, Int(mediaRect.width * scale))
-        let pixelH = max(1, Int(mediaRect.height * scale))
-        let targetRect = CGRect(x: 0, y: 0, width: CGFloat(pixelW), height: CGFloat(pixelH))
-
-        guard let colorSpace = CGColorSpace(name: CGColorSpace.sRGB) else { return nil }
-        guard let ctx = CGContext(
-            data: nil,
-            width: pixelW,
-            height: pixelH,
-            bitsPerComponent: 8,
-            bytesPerRow: 0,
-            space: colorSpace,
-            bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue
-        )
+        guard
+            let cgPage = page.pageRef,
+            let geometry = rasterGeometry(for: page, maxPixelDimension: maxPixelDimension, allowUpscale: false),
+            let cgImage = renderBitmap(page, cgPage: cgPage, geometry: geometry, redactionFills: [])
         else { return nil }
-
-        ctx.setFillColor(gray: 1, alpha: 1)
-        ctx.fill(targetRect)
-
-        ctx.saveGState()
-        let transform = cgPage.getDrawingTransform(.mediaBox, rect: targetRect, rotate: 0, preserveAspectRatio: true)
-        ctx.concatenate(transform)
-        ctx.drawPDFPage(cgPage)
-        ctx.restoreGState()
-
-        guard let cgImage = ctx.makeImage() else { return nil }
-        let logicalSize = NSSize(width: mediaRect.width, height: mediaRect.height)
+        let logicalSize = NSSize(width: geometry.displaySize.width, height: geometry.displaySize.height)
         return NSImage(cgImage: cgImage, size: logicalSize)
     }
 }

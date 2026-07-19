@@ -65,4 +65,40 @@ import PDFKit
             try PDFToolkit.compress(inputURL: bad, outputURL: dir.url("out.pdf"), quality: 0.5)
         }?.kind == "couldNotOpen")
     }
+
+    @Test func compressingARotatedPageKeepsItsDisplayedSize() throws {
+        // A /Rotate 90 US-Letter page displays landscape (792x612). The old raster kept the
+        // unrotated portrait box, letterboxing the upright content at ~77% between white bars.
+        let dir = FixtureDir()
+        let src = dir.url("src.pdf"), out = dir.url("out.pdf")
+        try PDFFixtures.writePDF(markers: ["ONLY"], rotations: [0: 90], to: src)
+
+        try PDFToolkit.compress(inputURL: src, outputURL: out, quality: 1.0)
+
+        #expect(try PDFFixtures.pageSize(at: out) == CGSize(width: 792, height: 612))
+        #expect(try PDFFixtures.pageRotations(at: out) == [0])
+        let brightness = try PDFFixtures.brightnessSampler(at: out)
+        // "ONLY" runs from portrait (72, 396), which maps to a vertical run near display x ~400,
+        // y ~485-540; strokes there prove the content is upright and unshrunken.
+        let glyphs = PDFFixtures.darkestSample(
+            brightness, xRange: stride(from: 398, through: 406, by: 4),
+            yValues: Array(stride(from: CGFloat(490), through: 535, by: 3))
+        )
+        #expect(glyphs < 0.5)
+    }
+
+    @Test func visibleAnnotationsSurviveCompression() throws {
+        // `drawPDFPage` replays only the content stream, so the rebuilt page silently lost every
+        // annotation appearance — typed form values, signatures, notes. They must be baked in.
+        let dir = FixtureDir()
+        let src = dir.url("src.pdf"), out = dir.url("out.pdf")
+        let annotationRect = CGRect(x: 300, y: 300, width: 80, height: 60)
+        try PDFFixtures.writePDF(markers: ["ONLY"], greenSquareOnFirstPage: annotationRect, to: src)
+
+        try PDFToolkit.compress(inputURL: src, outputURL: out, quality: 1.0)
+
+        let brightness = try PDFFixtures.brightnessSampler(at: out)
+        #expect(brightness(340, 330) < 0.8)   // green square present, not blank white
+        #expect(try #require(PDFDocument(url: out)).page(at: 0)?.annotations.isEmpty == true)
+    }
 }

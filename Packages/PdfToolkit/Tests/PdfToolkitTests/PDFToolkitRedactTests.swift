@@ -151,4 +151,85 @@ import CoreGraphics
         }
         #expect(bottomMin < 0.5)
     }
+
+    @Test func supersampledRedactionKeepsPageContentAtFullSize() throws {
+        // Regression: `getDrawingTransform` refuses to scale a page up, so mapping it straight into
+        // the supersampled pixel rect drew it 1:1 and centered — every real redaction (the app's
+        // raster ceiling is always >= 2400px) emitted its page content at a fraction of its size in
+        // a field of white.
+        let dir = FixtureDir()
+        let src = dir.url("src.pdf"), out = dir.url("out.pdf")
+        try PDFFixtures.writePDF(pageCount: 1, to: src)
+
+        let mark = RedactionMark(pageIndex: 0, rect: CGRect(x: 400, y: 100, width: 120, height: 60))
+        try PDFToolkit.redact(
+            inputURL: src, outputURL: out, marks: [mark],
+            options: PDFRedactionExportOptions(stripAnnotationsFromUnredactedPages: false, maxPixelDimension: 2400)
+        )
+
+        #expect(try PDFFixtures.pageSize(at: out) == PDFFixtures.letter)
+        let brightness = try PDFFixtures.brightnessSampler(at: out)
+        // The marker text still renders where the source drew it (baseline starts at x 72, y 396)...
+        let glyphs = PDFFixtures.darkestSample(
+            brightness, xRange: stride(from: 74, through: 200, by: 2), yValues: [400, 404, 408]
+        )
+        #expect(glyphs < 0.5)
+        // ...and the black fill sits exactly where the mark was placed.
+        #expect(brightness(460, 130) < 0.2)
+    }
+
+    @Test func redactingARotatedPageEmitsItsDisplayedSizeUpright() throws {
+        // A /Rotate 90 US-Letter page displays landscape (792x612). The old raster sized its bitmap
+        // and output page from the unrotated media box, letterboxing the content at ~77% inside a
+        // portrait page.
+        let dir = FixtureDir()
+        let src = dir.url("src.pdf"), out = dir.url("out.pdf")
+        try PDFFixtures.writePDF(markers: [PDFFixtures.marker(1)], rotations: [0: 90], to: src)
+
+        // Portrait-space rect (500, 100)+(60x40) lands at display x 100-140, y 52-112 — far from the text.
+        let mark = RedactionMark(pageIndex: 0, rect: CGRect(x: 500, y: 100, width: 60, height: 40))
+        try PDFToolkit.redact(inputURL: src, outputURL: out, marks: [mark], options: fastOptions)
+
+        #expect(try PDFFixtures.pageSize(at: out) == CGSize(width: 792, height: 612))
+        #expect(try PDFFixtures.pageRotations(at: out) == [0])
+        let brightness = try PDFFixtures.brightnessSampler(at: out)
+        // The portrait baseline (x 72..., y 396) maps to a vertical run near display x ~400,
+        // descending from y ~540; glyph strokes must be there at full size.
+        let glyphs = PDFFixtures.darkestSample(
+            brightness, xRange: stride(from: 398, through: 406, by: 4),
+            yValues: Array(stride(from: CGFloat(400), through: 535, by: 4))
+        )
+        #expect(glyphs < 0.5)
+        #expect(brightness(120, 80) < 0.2)
+    }
+
+    @Test func visibleAnnotationsAreFlattenedIntoRedactedPagesUnlessCovered() throws {
+        // Annotation appearances used to vanish from rasterized pages (`drawPDFPage` skips /Annots).
+        // They must be baked in as pixels — and a mark placed over one must bury it in black.
+        let dir = FixtureDir()
+        let src = dir.url("src.pdf")
+        let annotationRect = CGRect(x: 300, y: 300, width: 80, height: 60)
+        try PDFFixtures.writePDF(markers: [PDFFixtures.marker(1)], greenSquareOnFirstPage: annotationRect, to: src)
+
+        // Marked elsewhere: the green square survives as pixels (no longer a live annotation).
+        let kept = dir.url("kept.pdf")
+        try PDFToolkit.redact(
+            inputURL: src, outputURL: kept,
+            marks: [RedactionMark(pageIndex: 0, rect: CGRect(x: 30, y: 30, width: 50, height: 40))],
+            options: fastOptions
+        )
+        let keptBrightness = try PDFFixtures.brightnessSampler(at: kept)
+        #expect(keptBrightness(340, 330) < 0.8)   // green, not blank white
+        #expect(try #require(PDFDocument(url: kept)).page(at: 0)?.annotations.isEmpty == true)
+
+        // Marked over the annotation: buried under solid black.
+        let buried = dir.url("buried.pdf")
+        try PDFToolkit.redact(
+            inputURL: src, outputURL: buried,
+            marks: [RedactionMark(pageIndex: 0, rect: annotationRect.insetBy(dx: -10, dy: -10))],
+            options: fastOptions
+        )
+        let buriedBrightness = try PDFFixtures.brightnessSampler(at: buried)
+        #expect(buriedBrightness(340, 330) < 0.2)
+    }
 }

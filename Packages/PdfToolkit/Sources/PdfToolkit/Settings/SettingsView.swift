@@ -16,6 +16,13 @@ public struct SettingsView: View {
     @AppStorage(SettingsKeys.mergePreviewBackground)
     private var mergePreviewBackgroundRaw: String = MergePreviewBackgroundStyle.white.rawValue
 
+    @AppStorage(LiquidGlass.appearanceModeKey)
+    private var appearanceModeRaw: String = AppearanceMode.system.rawValue
+
+    private var appearanceMode: AppearanceMode {
+        AppearanceMode(rawValue: appearanceModeRaw) ?? .system
+    }
+
     private var selectedHue: LiquidGlassHue {
         LiquidGlassHue(rawValue: selectedHueRaw) ?? .purple
     }
@@ -31,6 +38,7 @@ public struct SettingsView: View {
 
             ScrollView {
                 VStack(alignment: .leading, spacing: 24) {
+                    themeSection
                     mainBackgroundSection
                     liquidGlassSection
                     mergePreviewSection
@@ -48,6 +56,41 @@ public struct SettingsView: View {
         .background(VisualEffectView(material: .hudWindow, blendingMode: .behindWindow))
         .background(SettingsWindowResizableHook())
         .onAppear(perform: migrateLegacyDefaults)
+        // Apply immediately from the window that owns the control, so the change is visible even
+        // before the main window's observer runs.
+        .onChange(of: appearanceModeRaw) { _, _ in
+            AppAppearance.applyPersisted()
+        }
+    }
+
+    private var themeSection: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            sectionLabel("Theme")
+
+            VStack(alignment: .leading, spacing: 10) {
+                Picker("Theme", selection: $appearanceModeRaw) {
+                    ForEach(AppearanceMode.allCases) { mode in
+                        Label(mode.displayName, systemImage: mode.symbolName)
+                            .tag(mode.rawValue)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+
+                Text(appearanceMode.detail)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .padding(16)
+            .glassCardStyle(material: .regularMaterial, intensity: glassIntensity)
+            .overlay(cardStroke)
+        }
+    }
+
+    private var cardStroke: some View {
+        RoundedRectangle(cornerRadius: LiquidGlass.cardCornerRadius, style: .continuous)
+            .strokeBorder(.quaternary.opacity(0.5), lineWidth: 0.5)
     }
 
     /// Older builds stored `accentGradient`; map to liquid glass once.
@@ -244,10 +287,12 @@ private struct HueOptionView: View {
                         )
                         .shadow(color: hue.accentColor.opacity(0.4), radius: isSelected ? 6 : 2)
                     if isSelected {
+                        // Pair the checkmark with the swatch it sits on: white vanishes on the
+                        // lighter hues (amber ~2.1:1, cyan ~2.5:1), so route through onFillLabel.
                         Image(systemName: "checkmark")
                             .font(.system(size: 16, weight: .semibold))
-                            .foregroundStyle(.white)
-                            .shadow(color: .black.opacity(0.35), radius: 0.5, x: 0, y: 0.5)
+                            .foregroundStyle(Color.onFillLabel(hue.accentColor))
+                            .shadow(color: .black.opacity(0.15), radius: 0.5, x: 0, y: 0.5)
                     }
                 }
                 Text(hue.displayName)

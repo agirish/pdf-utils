@@ -122,6 +122,8 @@ public enum LiquidGlass {
     /// pdf-utils–scoped keys (do not collide with SyncCloud defaults on the same Mac).
     static let intensityKey = "pdfutils.liquidGlassIntensity"
     static let hueKey = "pdfutils.liquidGlassHue"
+    /// Public: the Theme control is bound from the app target's `RootView` via `@AppStorage`.
+    public static let appearanceModeKey = "pdfutils.appearanceMode"
 }
 
 public extension View {

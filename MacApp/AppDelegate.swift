@@ -21,6 +21,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationWillFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.regular)
         applyDockIconIfAvailable()
+        // Set NSApp.appearance before any window exists so the title bar, panels, and Settings
+        // window all open in the chosen theme rather than flashing the system appearance first.
+        AppAppearance.applyPersisted()
     }
 
     @MainActor

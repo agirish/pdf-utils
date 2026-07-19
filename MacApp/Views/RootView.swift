@@ -3,6 +3,8 @@ import PdfToolkit
 
 struct RootView: View {
     @EnvironmentObject private var settings: SettingsPresenter
+    @EnvironmentObject private var quickActions: QuickActionsPresenter
+    @Environment(\.openWindow) private var openWindow
 
     @AppStorage(LiquidGlass.appearanceModeKey)
     private var appearanceModeRaw: String = AppearanceMode.system.rawValue
@@ -45,8 +47,15 @@ struct RootView: View {
             if settings.isPresented {
                 settingsOverlay
             }
+
+            // Layered above the Settings overlay so ⌘K stays reachable and legible even if Settings
+            // happens to be open when the palette is raised.
+            if quickActions.isPresented {
+                quickActionsOverlay
+            }
         }
         .animation(.easeOut(duration: 0.15), value: settings.isPresented)
+        .animation(.easeOut(duration: 0.15), value: quickActions.isPresented)
         .onAppear {
             if UserDefaults.standard.string(forKey: SettingsKeys.mainWindowBackground) == "accentGradient" {
                 UserDefaults.standard.set(
@@ -92,5 +101,53 @@ struct RootView: View {
                     .strokeBorder(.quaternary, lineWidth: 0.5)
             )
             .shadow(color: .black.opacity(0.3), radius: 30, y: 8)
+    }
+
+    /// In-window ⌘K palette overlay — the exact parallel of `settingsOverlay`: the same dimmed,
+    /// tap-to-dismiss backdrop behind a centered glass card. It lives here (not in the palette view)
+    /// because activating an action mutates state this view owns: the tool navigation `toolPath`, the
+    /// Settings presenter, and the Activity Log window.
+    private var quickActionsOverlay: some View {
+        ZStack {
+            Rectangle()
+                .fill(Color.black.opacity(glassLevel.overlayScrimOpacity))
+                .ignoresSafeArea()
+                .onTapGesture { quickActions.close() }
+
+            quickActionsCard
+                // Absorb clicks on the card so they don't fall through to the dismiss backdrop.
+                .contentShape(Rectangle())
+        }
+        .transition(.opacity)
+    }
+
+    private var quickActionsCard: some View {
+        QuickActionsPalette(
+            actions: QuickAction.catalog,
+            onActivate: { activateQuickAction($0) },
+            onClose: { quickActions.close() }
+        )
+        .contentSurface(hue: glassHue, tint: glassTint)
+        .glassCardStyle(level: glassLevel)
+        .overlay(
+            RoundedRectangle(cornerRadius: LiquidGlass.cardCornerRadius, style: .continuous)
+                .strokeBorder(.quaternary, lineWidth: 0.5)
+        )
+        .shadow(color: .black.opacity(0.3), radius: 30, y: 8)
+    }
+
+    /// Runs a chosen Quick Action, then dismisses the palette. Navigating replaces the stack with just
+    /// the target tool, so the palette jumps straight to it from anywhere and leaves a single Back step
+    /// to the dashboard.
+    private func activateQuickAction(_ action: QuickAction) {
+        quickActions.close()
+        switch action.kind {
+        case .tool(let tool):
+            toolPath = [tool]
+        case .settings(let tab):
+            settings.open(tab)
+        case .activityLog:
+            openWindow(id: "activity-log")
+        }
     }
 }

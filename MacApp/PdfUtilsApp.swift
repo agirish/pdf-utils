@@ -10,6 +10,10 @@ struct PdfUtilsApp: App {
     /// open it through this shared presenter rather than a separate Settings window.
     @StateObject private var settingsPresenter = SettingsPresenter()
 
+    /// Drives the in-window ⌘K "Quick Actions" palette. Sibling of `settingsPresenter`: the ⌘K
+    /// command below toggles it, and `RootView` renders the overlay from its `isPresented`.
+    @StateObject private var quickActionsPresenter = QuickActionsPresenter()
+
     init() {
         // Prefer the green zoom / full-screen traffic light over tabbing “+” (system may still override).
         // Do not mutate each NSWindow’s styleMask or collectionBehavior — that breaks native full screen on some macOS versions (see e0656fc).
@@ -20,6 +24,7 @@ struct PdfUtilsApp: App {
         WindowGroup {
             RootView()
                 .environmentObject(settingsPresenter)
+                .environmentObject(quickActionsPresenter)
         }
         // Hidden title bar (SyncCloud parity): the traffic lights float on the content and the
         // window's content backing goes transparent, which is what lets `BehindWindowGlass` show the
@@ -32,6 +37,13 @@ struct PdfUtilsApp: App {
             CommandGroup(replacing: .appSettings) {
                 Button("Settings…") { settingsPresenter.open() }
                     .keyboardShortcut(",", modifiers: .command)
+            }
+            // ⌘K raises (and, pressed again, dismisses) the Quick Actions palette from anywhere —
+            // `toggle()` rather than `open()` so the one shortcut both opens and closes it, wired
+            // alongside ⌘, / ⇧⌘L. Sits just after Settings in the app menu, its ⌘-overlay sibling.
+            CommandGroup(after: .appSettings) {
+                Button("Quick Actions…") { quickActionsPresenter.toggle() }
+                    .keyboardShortcut("k", modifiers: .command)
             }
             // A Help-menu entry that raises the Activity Log window — the app's first menu command,
             // mirroring SyncCloud's "Open Activity Log".

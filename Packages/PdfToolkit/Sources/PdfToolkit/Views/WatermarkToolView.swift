@@ -27,7 +27,9 @@ struct WatermarkToolView: View {
     @State private var opacity: CGFloat = 0.25
     @State private var rotation: CGFloat = 45
     @State private var tiled = false
-    @State private var colorID = "gray"
+    // Holds the actual chosen color (not just a palette id) so the ColorPicker can reach any color;
+    // the quick swatches simply set this. RGB for the export is pulled from it at run time.
+    @State private var chosenColor: Color = WatermarkColor.palette[0].color
 
     @State private var busy = false
     @State private var alertMessage: String?
@@ -44,9 +46,23 @@ struct WatermarkToolView: View {
         inputURL?.standardizedFileURL.path ?? ""
     }
 
-    private var selectedColor: WatermarkColor {
-        WatermarkColor.palette.first { $0.id == colorID } ?? WatermarkColor.palette[0]
+    /// sRGB components of the chosen color, threaded into `WatermarkOptions` and mirrored by the live
+    /// preview so both the on-screen sample and the stamped output use exactly the picked color.
+    private var chosenRGB: (red: Double, green: Double, blue: Double) {
+        let ns = NSColor(chosenColor).usingColorSpace(.sRGB) ?? NSColor(srgbRed: 0.5, green: 0.5, blue: 0.5, alpha: 1)
+        return (Double(ns.redComponent), Double(ns.greenComponent), Double(ns.blueComponent))
     }
+
+    /// Whether a quick swatch matches the chosen color, so it can show a selection ring. Compared on
+    /// RGB (with a small tolerance) since the color may have arrived from the ColorPicker.
+    private func swatchIsSelected(_ swatch: WatermarkColor) -> Bool {
+        let c = chosenRGB
+        return abs(c.red - swatch.red) < 0.02
+            && abs(c.green - swatch.green) < 0.02
+            && abs(c.blue - swatch.blue) < 0.02
+    }
+
+    private let textPresets = ["CONFIDENTIAL", "DRAFT", "COPY"]
 
     private var canRun: Bool {
         inputURL != nil && !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
@@ -268,6 +284,15 @@ struct WatermarkToolView: View {
                     .font(.subheadline.weight(.semibold))
                 TextField("e.g. DRAFT", text: $text)
                     .textFieldStyle(.roundedBorder)
+                HStack(spacing: 8) {
+                    ForEach(textPresets, id: \.self) { preset in
+                        Button(preset) { text = preset }
+                            .buttonStyle(.bordered)
+                            .controlSize(.small)
+                            .font(.caption.weight(.semibold))
+                            .help("Use “\(preset)” as the watermark text")
+                    }
+                }
             }
 
             livePreview
@@ -278,14 +303,14 @@ struct WatermarkToolView: View {
                 HStack(spacing: 12) {
                     ForEach(WatermarkColor.palette) { swatch in
                         Button {
-                            colorID = swatch.id
+                            chosenColor = swatch.color
                         } label: {
                             Circle()
                                 .fill(swatch.color)
                                 .frame(width: 26, height: 26)
                                 .overlay {
                                     Circle().strokeBorder(
-                                        colorID == swatch.id ? Color.primary.opacity(0.5) : .clear,
+                                        swatchIsSelected(swatch) ? Color.primary.opacity(0.5) : .clear,
                                         lineWidth: 2.5
                                     )
                                 }
@@ -293,6 +318,15 @@ struct WatermarkToolView: View {
                         .buttonStyle(.plain)
                         .help(swatch.name)
                     }
+
+                    Divider().frame(height: 22)
+
+                    ColorPicker(selection: $chosenColor, supportsOpacity: false) {
+                        Text("Custom…")
+                            .font(.caption.weight(.medium))
+                    }
+                    .fixedSize()
+                    .help("Pick any color")
                 }
             }
 
@@ -323,7 +357,7 @@ struct WatermarkToolView: View {
                 .strokeBorder(Color.primary.opacity(0.12), lineWidth: 1)
             Text(text.isEmpty ? "DRAFT" : text)
                 .font(.system(size: min(34, fontSize * 0.6), weight: .bold))
-                .foregroundStyle(selectedColor.color)
+                .foregroundStyle(chosenColor)
                 .opacity(opacity)
                 .rotationEffect(.degrees(rotation))
                 .lineLimit(1)
@@ -413,15 +447,15 @@ struct WatermarkToolView: View {
         }
 
         suggestedName = fileURL.deletingPathExtension().lastPathComponent + "-watermarked.pdf"
-        let swatch = selectedColor
+        let rgb = chosenRGB
         let options = WatermarkOptions(
             text: trimmed,
             fontSize: fontSize,
             opacity: opacity,
             rotationDegrees: rotation,
-            red: swatch.red,
-            green: swatch.green,
-            blue: swatch.blue,
+            red: rgb.red,
+            green: rgb.green,
+            blue: rgb.blue,
             tiled: tiled
         )
 

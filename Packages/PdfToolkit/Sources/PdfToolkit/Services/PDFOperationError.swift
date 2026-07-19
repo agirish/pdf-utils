@@ -17,6 +17,8 @@ enum PDFOperationError: LocalizedError {
     case redactionFailed
     case watermarkTextRequired
     case watermarkFailed
+    case noFillSignItems
+    case fillSignFailed
     case passwordRequired
     case incorrectPassword
     case notEncrypted
@@ -56,6 +58,10 @@ enum PDFOperationError: LocalizedError {
             return "Enter the watermark text to stamp on each page."
         case .watermarkFailed:
             return "Could not build the watermarked PDF."
+        case .noFillSignItems:
+            return "Add some text or a signature to a page before saving."
+        case .fillSignFailed:
+            return "Could not build the filled PDF."
         case .passwordRequired:
             return "Enter a password."
         case .incorrectPassword:

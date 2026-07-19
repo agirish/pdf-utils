@@ -26,6 +26,8 @@ import Foundation
         .redactionFailed,
         .watermarkTextRequired,
         .watermarkFailed,
+        .noFillSignItems,
+        .fillSignFailed,
         .passwordRequired,
         .incorrectPassword,
         .notEncrypted,
@@ -33,8 +35,8 @@ import Foundation
     ]
 
     @Test func listCoversEveryCase() {
-        // 20 distinct kinds — guards against forgetting to describe a newly added case.
-        #expect(Set(all.map(\.kind)).count == 20)
+        // 22 distinct kinds — guards against forgetting to describe a newly added case.
+        #expect(Set(all.map(\.kind)).count == 22)
     }
 
     @Test func everyCaseHasANonEmptyDescription() {

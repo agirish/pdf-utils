@@ -486,6 +486,136 @@ enum PDFToolkit {
         NSGraphicsContext.restoreGraphicsState()
     }
 
+    /// Bakes placed text and drawn signatures onto their pages and writes a new PDF.
+    ///
+    /// Built exactly like ``watermark``: each page is redrawn as **vector** content with
+    /// `drawPDFPage` (so the underlying text stays selectable) and its visible annotations are
+    /// flattened in. The placed items are then drawn *inside the same crop-box drawing transform* as
+    /// the content — so an item's page-space rectangle (captured from the placement canvas) lands on
+    /// exactly the pixels the user saw, honoring page rotation and crop just like redaction fills.
+    /// Typed runs are drawn with CoreText (they remain selectable, searchable vector text); drawn
+    /// signatures are stroked as vector paths from their normalized polylines — never rasterized.
+    static func fillAndSign(inputURL: URL, outputURL: URL, items: [FillSignItem]) throws {
+        let inked = items.filter(\.hasInk)
+        guard !inked.isEmpty else { throw PDFOperationError.noFillSignItems }
+        try requireDistinctOutput(outputURL, from: [inputURL])
+        guard let source = PDFDocument(url: inputURL) else {
+            throw PDFOperationError.couldNotOpen(inputURL)
+        }
+        guard source.pageCount > 0 else { throw PDFOperationError.emptyPDF }
+
+        let byPage = Dictionary(grouping: inked, by: \.pageIndex)
+        for key in byPage.keys where key < 0 || key >= source.pageCount {
+            throw PDFOperationError.pageOutOfBounds(key + 1)
+        }
+
+        let pdfData = NSMutableData()
+        guard let consumer = CGDataConsumer(data: pdfData as CFMutableData),
+              let ctx = CGContext(consumer: consumer, mediaBox: nil, nil)
+        else {
+            throw PDFOperationError.fillSignFailed
+        }
+
+        for i in 0..<source.pageCount {
+            guard let page = source.page(at: i), let cgPage = page.pageRef else { continue }
+            let cropBox = page.bounds(for: .cropBox)
+            let rotation = ((page.rotation % 360) + 360) % 360
+            let displaySize = (rotation == 90 || rotation == 270)
+                ? CGSize(width: cropBox.height, height: cropBox.width)
+                : cropBox.size
+            let box = CGRect(origin: .zero, size: displaySize)
+
+            ctx.beginPDFPage([kCGPDFContextMediaBox as String: box] as CFDictionary)
+
+            ctx.saveGState()
+            let transform = cgPage.getDrawingTransform(.cropBox, rect: box, rotate: 0, preserveAspectRatio: false)
+            ctx.concatenate(transform)
+            ctx.drawPDFPage(cgPage)
+            drawAnnotations(of: page, in: ctx)
+            for item in byPage[i] ?? [] {
+                drawFillSignItem(item, in: ctx)
+            }
+            ctx.restoreGState()
+
+            ctx.endPDFPage()
+        }
+        ctx.closePDF()
+
+        guard pdfData.length > 0 else { throw PDFOperationError.fillSignFailed }
+        try (pdfData as Data).write(to: outputURL)
+    }
+
+    private static func drawFillSignItem(_ item: FillSignItem, in ctx: CGContext) {
+        switch item.content {
+        case .text(let text):
+            drawFillText(text, in: item.rect, ctx: ctx)
+        case .signature(let signature):
+            drawFillSignature(signature, in: item.rect, ctx: ctx)
+        }
+    }
+
+    private static func drawFillText(_ text: FillSignText, in rect: CGRect, ctx: CGContext) {
+        let trimmed = text.string
+        guard !trimmed.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+
+        let graphics = NSGraphicsContext(cgContext: ctx, flipped: false)
+        NSGraphicsContext.saveGraphicsState()
+        NSGraphicsContext.current = graphics
+
+        let color = NSColor(srgbRed: text.red, green: text.green, blue: text.blue, alpha: 1)
+        let paragraph = NSMutableParagraphStyle()
+        paragraph.lineBreakMode = .byWordWrapping
+        let attributes: [NSAttributedString.Key: Any] = [
+            .font: scriptOrSystemFont(size: max(4, text.fontSize), script: text.isScript),
+            .foregroundColor: color,
+            .paragraphStyle: paragraph,
+        ]
+        // `flipped: false` matches the placement overlay: the first line sits at the top of the box.
+        NSAttributedString(string: trimmed, attributes: attributes).draw(in: rect)
+
+        NSGraphicsContext.restoreGraphicsState()
+    }
+
+    /// A handwriting face for typed signatures, falling back down a chain and finally to an italic
+    /// system font so a machine missing the script fonts still renders something signature-like.
+    static func scriptOrSystemFont(size: CGFloat, script: Bool) -> NSFont {
+        guard script else { return NSFont.systemFont(ofSize: size) }
+        for name in ["SnellRoundhand", "SavoyeLetPlain", "Zapfino", "BradleyHandITCTT-Bold"] {
+            if let font = NSFont(name: name, size: size) { return font }
+        }
+        return NSFontManager.shared.convert(NSFont.systemFont(ofSize: size), toHaveTrait: .italicFontMask)
+    }
+
+    private static func drawFillSignature(_ signature: FillSignSignature, in rect: CGRect, ctx: CGContext) {
+        guard rect.width > 0, rect.height > 0 else { return }
+        let strokes = signature.strokes.filter { !$0.isEmpty }
+        guard !strokes.isEmpty else { return }
+
+        ctx.saveGState()
+        ctx.setStrokeColor(red: signature.red, green: signature.green, blue: signature.blue, alpha: 1)
+        ctx.setFillColor(red: signature.red, green: signature.green, blue: signature.blue, alpha: 1)
+        let lineWidth = max(0.4, signature.penWidthFraction * min(rect.width, rect.height))
+        ctx.setLineWidth(lineWidth)
+        ctx.setLineCap(.round)
+        ctx.setLineJoin(.round)
+
+        for stroke in strokes {
+            let points = stroke.map { FillSignGeometry.pagePoint(normalized: $0, in: rect) }
+            if points.count == 1 {
+                // A single tap (a dot on an "i", a period) has no length to stroke — fill a nib blob.
+                let p = points[0]
+                let r = lineWidth / 2
+                ctx.fillEllipse(in: CGRect(x: p.x - r, y: p.y - r, width: lineWidth, height: lineWidth))
+                continue
+            }
+            ctx.beginPath()
+            ctx.addLines(between: points)
+            ctx.strokePath()
+        }
+
+        ctx.restoreGState()
+    }
+
     /// Permanently removes visual content inside the given rectangles by rasterizing affected pages and painting solid black over those regions—
     /// underlying text and vectors in those areas cannot be copied out afterward (same model as professional “burn-in” redaction). Unmarked pages are copied as PDF unless `options.stripAnnotationsFromUnredactedPages` is true.
     static func redact(

@@ -267,6 +267,9 @@ enum PDFToolkit {
         // encryption into the output, so `write(to:)` on a just-unlocked doc produces a file that
         // is still locked with the same password. Rebuild the pages into a fresh document, which
         // has no encryption dictionary, so the saved copy genuinely opens with no password.
+        // The rebuild keeps pages and the info dictionary; document-level structure that PDFKit
+        // can't re-attach (outline/bookmarks, attachments, form dictionary) does not survive —
+        // the tool's UI discloses this.
         let output = PDFDocument()
         for i in 0..<doc.pageCount {
             guard let page = doc.page(at: i)?.copy() as? PDFPage else {
@@ -274,6 +277,7 @@ enum PDFToolkit {
             }
             output.insert(page, at: output.pageCount)
         }
+        output.documentAttributes = doc.documentAttributes
         guard output.pageCount > 0, output.write(to: outputURL) else {
             throw PDFOperationError.protectionFailed
         }

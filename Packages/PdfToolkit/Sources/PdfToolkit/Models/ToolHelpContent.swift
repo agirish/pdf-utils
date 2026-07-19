@@ -212,6 +212,7 @@ extension Tool {
                 tips: [
                     "There is no password recovery — if you forget an Add-password password, the file cannot be opened.",
                     "Removing a password only works on files you can already open with their current password.",
+                    "Removing a password rebuilds the file: pages and document info carry over, but bookmarks, attachments, and interactive form structure do not.",
                 ]
             )
         }

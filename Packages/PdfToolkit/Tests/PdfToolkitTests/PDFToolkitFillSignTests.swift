@@ -167,4 +167,34 @@ import PDFKit
             )
         }?.kind == "pageOutOfBounds")
     }
+
+    @Test func aCroppedPageEmitsItsVisibleSizeWithItemsAndAnnotationsPlacedOnce() throws {
+        // Same geometry contract as watermark: the emitted page is the displayed crop size (the
+        // media-box value must be CFData — a bridged CGRect was ignored, defaulting every page to
+        // US Letter), placed items ride the page transform, and annotation appearances draw in
+        // display space (drawing them under the page transform shifted them by the crop origin).
+        let dir = FixtureDir()
+        let src = dir.url("src.pdf"), out = dir.url("out.pdf")
+        try PDFFixtures.writePDF(
+            markers: ["ONLY"],
+            cropFirstPageTo: CGRect(x: 50, y: 50, width: 500, height: 600),
+            greenSquareOnFirstPage: CGRect(x: 300, y: 300, width: 80, height: 60), to: src
+        )
+
+        try PDFToolkit.fillAndSign(
+            inputURL: src,
+            outputURL: out,
+            items: [textItem("XX", page: 0, rect: CGRect(x: 300, y: 450, width: 150, height: 40), fontSize: 30)]
+        )
+
+        #expect(try PDFFixtures.pageSize(at: out) == CGSize(width: 500, height: 600))
+        let brightness = try PDFFixtures.brightnessSampler(at: out)
+        // Placed text at page-space (300,450) → display (250,400): glyph strokes in that band.
+        let glyphs = PDFFixtures.darkestSample(
+            brightness, xRange: stride(from: 252, through: 286, by: 2), yValues: [415, 420, 425]
+        )
+        #expect(glyphs < 0.6)
+        #expect(brightness(310, 290) < 0.8)   // annotation at (250,250)+(80x60), origin subtracted once
+        #expect(brightness(215, 215) > 0.9)   // double-subtraction home — blank now
+    }
 }

@@ -101,4 +101,43 @@ import PDFKit
         #expect(brightness(340, 330) < 0.8)   // green square present, not blank white
         #expect(try #require(PDFDocument(url: out)).page(at: 0)?.annotations.isEmpty == true)
     }
+
+    @Test func annotationsLandUprightOnARotatedPage() throws {
+        // PDFAnnotation.draw maps into displayed-page space itself; drawing it under the page
+        // transform rotated it twice. Fixture: /Rotate 90 letter page, green square at page-space
+        // (300,300)+(80x60) — displayed (rotated) home is x 300-359, y 232-311 on the 792x612 page;
+        // the double-rotation bug parked it around x 232-311, y 252-311 instead.
+        let dir = FixtureDir()
+        let src = dir.url("src.pdf"), out = dir.url("out.pdf")
+        try PDFFixtures.writePDF(
+            markers: ["ONLY"], rotations: [0: 90],
+            greenSquareOnFirstPage: CGRect(x: 300, y: 300, width: 80, height: 60), to: src
+        )
+
+        try PDFToolkit.compress(inputURL: src, outputURL: out, quality: 1.0)
+
+        let brightness = try PDFFixtures.brightnessSampler(at: out)
+        #expect(brightness(335, 270) < 0.8)   // inside the correct displayed rect (and outside the buggy one)
+        #expect(brightness(250, 290) > 0.9)   // inside the buggy rect only — must be blank now
+    }
+
+    @Test func aCroppedPageKeepsItsVisibleSizeAndPlacement() throws {
+        // Crop box (50,50)+(500x600) on a letter page: the output page must be the 500x600 the user
+        // sees, with content AND annotations shifted by the crop origin exactly once. The old
+        // annotation path subtracted the origin twice.
+        let dir = FixtureDir()
+        let src = dir.url("src.pdf"), out = dir.url("out.pdf")
+        try PDFFixtures.writePDF(
+            markers: ["ONLY"],
+            cropFirstPageTo: CGRect(x: 50, y: 50, width: 500, height: 600),
+            greenSquareOnFirstPage: CGRect(x: 300, y: 300, width: 80, height: 60), to: src
+        )
+
+        try PDFToolkit.compress(inputURL: src, outputURL: out, quality: 1.0)
+
+        #expect(try PDFFixtures.pageSize(at: out) == CGSize(width: 500, height: 600))
+        let brightness = try PDFFixtures.brightnessSampler(at: out)
+        #expect(brightness(310, 290) < 0.8)   // green square at (250,250)+(80x60): origin subtracted once
+        #expect(brightness(215, 215) > 0.9)   // where double-subtraction used to put it — blank now
+    }
 }

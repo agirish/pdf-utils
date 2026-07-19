@@ -123,6 +123,37 @@ enum PDFFixtures {
         #expect(doc.write(to: url))
     }
 
+    /// A one-page marker PDF composed from any mix of: custom media size, intrinsic rotation, a
+    /// first-page crop box (possibly with non-zero origin), and a green square annotation — for
+    /// geometry tests that pin where content and annotations land on rebuilt pages.
+    static func writePDF(
+        markers: [String],
+        size: CGSize = PDFFixtures.letter,
+        rotations: [Int: Int] = [:],
+        cropFirstPageTo crop: CGRect? = nil,
+        greenSquareOnFirstPage annotationRect: CGRect? = nil,
+        to url: URL
+    ) throws {
+        let base = url.deletingLastPathComponent()
+            .appendingPathComponent("mix-base-\(UUID().uuidString).pdf")
+        defer { try? FileManager.default.removeItem(at: base) }
+        try writePDF(markers: markers, to: base, size: size)
+        let doc = try #require(PDFDocument(url: base))
+        if let crop {
+            try #require(doc.page(at: 0)).setBounds(crop, for: .cropBox)
+        }
+        for (index, degrees) in rotations {
+            try #require(doc.page(at: index)).rotation = degrees
+        }
+        if let annotationRect {
+            let annotation = PDFAnnotation(bounds: annotationRect, forType: .square, withProperties: nil)
+            annotation.color = .green
+            annotation.interiorColor = .green
+            try #require(doc.page(at: 0)).addAnnotation(annotation)
+        }
+        #expect(doc.write(to: url))
+    }
+
     /// A file that is not a valid PDF, for "corrupt input" cases.
     static func writeCorrupt(to url: URL) throws {
         try Data([0xDE, 0xAD, 0xBE, 0xEF]).write(to: url, options: .atomic)

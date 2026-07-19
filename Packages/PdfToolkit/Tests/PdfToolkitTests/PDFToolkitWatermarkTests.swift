@@ -101,4 +101,40 @@ import PDFKit
         let brightness = try PDFFixtures.brightnessSampler(at: out)
         #expect(brightness(340, 330) < 0.8)   // green square present, not blank white
     }
+
+    @Test func keepsTheSourcePageSizeInsteadOfDefaultingToUSLetter() throws {
+        // beginPDFPage's media-box value must be CFData wrapping the CGRect; the bridged CGRect it
+        // was fed before is silently ignored, so EVERY watermarked page came out 612x792 — an A4's
+        // top 50pt of content simply fell off the page.
+        let dir = FixtureDir()
+        let src = dir.url("src.pdf"), out = dir.url("out.pdf")
+        let a4 = CGSize(width: 595, height: 842)
+        // Marker text sits at y = height/2 = 421; also prove the page is truly A4-sized.
+        try PDFFixtures.writePDF(markers: ["ONLY"], size: a4, to: src)
+
+        try PDFToolkit.watermark(inputURL: src, outputURL: out, options: options("DRAFT"))
+
+        #expect(try PDFFixtures.pageSize(at: out) == a4)
+        let glyphs = PDFFixtures.darkestSample(
+            try PDFFixtures.brightnessSampler(at: out),
+            xRange: stride(from: 74, through: 160, by: 2), yValues: [425, 429, 433]
+        )
+        #expect(glyphs < 0.6)
+    }
+
+    @Test func aCroppedPageEmitsItsVisibleSize() throws {
+        let dir = FixtureDir()
+        let src = dir.url("src.pdf"), out = dir.url("out.pdf")
+        try PDFFixtures.writePDF(
+            markers: ["ONLY"],
+            cropFirstPageTo: CGRect(x: 50, y: 50, width: 500, height: 600),
+            greenSquareOnFirstPage: CGRect(x: 300, y: 300, width: 80, height: 60), to: src
+        )
+
+        try PDFToolkit.watermark(inputURL: src, outputURL: out, options: options("DRAFT"))
+
+        #expect(try PDFFixtures.pageSize(at: out) == CGSize(width: 500, height: 600))
+        let brightness = try PDFFixtures.brightnessSampler(at: out)
+        #expect(brightness(310, 290) < 0.8)   // annotation shifted by the crop origin exactly once
+    }
 }

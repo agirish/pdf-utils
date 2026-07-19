@@ -424,14 +424,23 @@ enum PDFToolkit {
                 : cropBox.size
             let box = CGRect(origin: .zero, size: displaySize)
 
-            ctx.beginPDFPage([kCGPDFContextMediaBox as String: box] as CFDictionary)
+            // The media-box value must be CFData wrapping the CGRect bytes — a bridged CGRect is
+            // silently ignored, and the context then falls back to its default US Letter page:
+            // every watermarked page came out 612×792, clipping content off anything larger (A4's
+            // top 50pt simply vanished) and padding anything smaller.
+            var pageBox = box
+            let pageBoxData = Data(bytes: &pageBox, count: MemoryLayout<CGRect>.size)
+            ctx.beginPDFPage([kCGPDFContextMediaBox as String: pageBoxData] as CFDictionary)
 
             ctx.saveGState()
             let transform = cgPage.getDrawingTransform(.cropBox, rect: box, rotate: 0, preserveAspectRatio: false)
             ctx.concatenate(transform)
             ctx.drawPDFPage(cgPage)
-            drawAnnotations(of: page, in: ctx)
             ctx.restoreGState()
+
+            // Outside the page transform: annotation drawing maps into displayed-page space itself
+            // (see drawAnnotations), and the context's base space here *is* display space.
+            drawAnnotations(of: page, in: ctx)
 
             drawWatermark(in: ctx, box: box, text: trimmed, options: options)
 
@@ -490,9 +499,10 @@ enum PDFToolkit {
     ///
     /// Built exactly like ``watermark``: each page is redrawn as **vector** content with
     /// `drawPDFPage` (so the underlying text stays selectable) and its visible annotations are
-    /// flattened in. The placed items are then drawn *inside the same crop-box drawing transform* as
-    /// the content — so an item's page-space rectangle (captured from the placement canvas) lands on
-    /// exactly the pixels the user saw, honoring page rotation and crop just like redaction fills.
+    /// flattened in (in displayed-page space — PDFKit's annotation draw maps there itself). The
+    /// placed items are then drawn *inside the crop-box drawing transform* like the content — so an
+    /// item's page-space rectangle (captured from the placement canvas) lands on exactly the pixels
+    /// the user saw, honoring page rotation and crop just like redaction fills.
     /// Typed runs are drawn with CoreText (they remain selectable, searchable vector text); drawn
     /// signatures are stroked as vector paths from their normalized polylines — never rasterized.
     static func fillAndSign(inputURL: URL, outputURL: URL, items: [FillSignItem]) throws {
@@ -525,13 +535,26 @@ enum PDFToolkit {
                 : cropBox.size
             let box = CGRect(origin: .zero, size: displaySize)
 
-            ctx.beginPDFPage([kCGPDFContextMediaBox as String: box] as CFDictionary)
+            // CFData-wrapped rect, as in `watermark`: a bridged CGRect is silently ignored and the
+            // context falls back to US Letter, clipping content off larger pages.
+            var pageBox = box
+            let pageBoxData = Data(bytes: &pageBox, count: MemoryLayout<CGRect>.size)
+            ctx.beginPDFPage([kCGPDFContextMediaBox as String: pageBoxData] as CFDictionary)
 
-            ctx.saveGState()
             let transform = cgPage.getDrawingTransform(.cropBox, rect: box, rotate: 0, preserveAspectRatio: false)
+            ctx.saveGState()
             ctx.concatenate(transform)
             ctx.drawPDFPage(cgPage)
+            ctx.restoreGState()
+
+            // Outside the page transform: annotation drawing maps into displayed-page space itself
+            // (see drawAnnotations).
             drawAnnotations(of: page, in: ctx)
+
+            // The user's placed items go back under the page transform — their rects are captured
+            // in PDF user space, like redaction fills — and draw on top of the annotations.
+            ctx.saveGState()
+            ctx.concatenate(transform)
             for item in byPage[i] ?? [] {
                 drawFillSignItem(item, in: ctx)
             }
@@ -772,10 +795,21 @@ enum PDFToolkit {
         ctx.scaleBy(x: geometry.scale, y: geometry.scale)
         let displayRect = CGRect(origin: .zero, size: geometry.displaySize)
         let transform = cgPage.getDrawingTransform(.cropBox, rect: displayRect, rotate: 0, preserveAspectRatio: true)
+
+        ctx.saveGState()
         ctx.concatenate(transform)
         ctx.drawPDFPage(cgPage)
+        ctx.restoreGState()
+
+        // Scale-only state: `PDFAnnotation.draw(with:in:)` maps into *displayed-page* coordinates
+        // itself — it applies the page's rotation and subtracts the crop origin — so it must not
+        // run under the page transform above. Composing both shifted annotations by the crop
+        // origin on cropped pages and rotated them twice on rotated pages.
         drawAnnotations(of: page, in: ctx)
 
+        // Redaction rects are in PDF user space, so the fills do need the page transform. Painting
+        // after the annotations keeps a marked annotation buried under black.
+        ctx.concatenate(transform)
         ctx.setBlendMode(.normal)
         ctx.setFillColor(gray: 0, alpha: 1)
         for r in redactionFills {
@@ -788,8 +822,9 @@ enum PDFToolkit {
 
     /// Annotation appearances (typed form values, ink signatures, notes, highlights, stamps) live in
     /// `/Annots`, outside the content stream `drawPDFPage` replays — a rebuilt page silently loses
-    /// them unless they are drawn here, in the same PDF-space transform as the content. Redaction
-    /// fills paint after this, so a marked annotation stays buried under black.
+    /// them unless they are drawn here. The context must be in *displayed-page* space (origin at the
+    /// displayed crop box's corner, rotation already upright): PDFKit's draw performs the page's
+    /// display mapping internally.
     private static func drawAnnotations(of page: PDFPage, in ctx: CGContext) {
         let visible = page.annotations.filter(\.shouldDisplay)
         guard !visible.isEmpty else { return }

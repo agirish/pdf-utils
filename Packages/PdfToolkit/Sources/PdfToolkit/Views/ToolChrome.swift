@@ -49,17 +49,26 @@ private struct FormCardStyle: ViewModifier {
     @AppStorage(LiquidGlass.levelKey) private var glassLevelRaw: String = GlassLevel.frosted.rawValue
     @AppStorage(LiquidGlass.hueKey) private var glassHueRaw: String = LiquidGlass.defaultHue.rawValue
     @AppStorage(LiquidGlass.tintKey) private var glassTint: Double = 0
+    @Environment(\.colorScheme) private var scheme
 
     private var level: GlassLevel { GlassLevel(rawValue: glassLevelRaw) ?? .frosted }
     private var hue: LiquidGlassHue { LiquidGlassHue(rawValue: glassHueRaw) ?? LiquidGlass.defaultHue }
 
     func body(content: Content) -> some View {
+        let dark = scheme == .dark
         let shape = RoundedRectangle(cornerRadius: 16, style: .continuous)
+        // Dark gets a top-lit specular hairline and a drop shadow so the card lifts off the ground;
+        // light keeps the original quaternary hairline with no shadow (unchanged).
+        let border: AnyShapeStyle = dark
+            ? AnyShapeStyle(LinearGradient(colors: [.white.opacity(0.26), .white.opacity(0.07)],
+                                           startPoint: .top, endPoint: .bottom))
+            : AnyShapeStyle(.quaternary.opacity(0.6))
         content
             .contentSurface(hue: hue, tint: glassTint)
             .clipShape(shape)
             .glassSurface(level, cornerRadius: 16)
-            .overlay { shape.strokeBorder(.quaternary.opacity(0.6), lineWidth: 1) }
+            .overlay { shape.strokeBorder(border, lineWidth: 1) }
+            .shadow(color: .black.opacity(dark ? 0.48 : 0), radius: dark ? 16 : 0, y: dark ? 8 : 0)
     }
 }
 

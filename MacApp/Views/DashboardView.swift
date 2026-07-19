@@ -91,6 +91,8 @@ struct ToolTileView: View {
     /// Cards mode: each tile is an elevated floating card. Unified: tiles read as one flat surface.
     var floating: Bool = true
     @State private var hovered = false
+    @Environment(\.colorScheme) private var scheme
+    private var dark: Bool { scheme == .dark }
 
     @AppStorage(LiquidGlass.levelKey) private var glassLevelRaw: String = GlassLevel.frosted.rawValue
     @AppStorage(LiquidGlass.hueKey) private var glassHueRaw: String = LiquidGlass.defaultHue.rawValue
@@ -98,9 +100,20 @@ struct ToolTileView: View {
     private var glassLevel: GlassLevel { GlassLevel(rawValue: glassLevelRaw) ?? .frosted }
     private var glassHue: LiquidGlassHue { LiquidGlassHue(rawValue: glassHueRaw) ?? LiquidGlass.defaultHue }
 
-    private var shadowOpacity: Double { floating ? (hovered ? 0.14 : 0.06) : (hovered ? 0.08 : 0.0) }
-    private var shadowRadius: CGFloat { floating ? (hovered ? 18 : 10) : (hovered ? 10 : 0) }
-    private var shadowY: CGFloat { floating ? (hovered ? 8 : 4) : (hovered ? 4 : 0) }
+    // Black shadows are near-invisible on a dark ground, so dark carries a deeper shadow — with a
+    // non-zero floor even when idle/unified — to lift the tile. Light keeps the original values.
+    private var shadowOpacity: Double {
+        if dark { return floating ? (hovered ? 0.66 : 0.50) : (hovered ? 0.44 : 0.30) }
+        return floating ? (hovered ? 0.14 : 0.06) : (hovered ? 0.08 : 0.0)
+    }
+    private var shadowRadius: CGFloat {
+        if dark { return floating ? (hovered ? 23 : 17) : (hovered ? 14 : 10) }
+        return floating ? (hovered ? 18 : 10) : (hovered ? 10 : 0)
+    }
+    private var shadowY: CGFloat {
+        if dark { return floating ? (hovered ? 9 : 5) : (hovered ? 5 : 3) }
+        return floating ? (hovered ? 8 : 4) : (hovered ? 4 : 0)
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -108,7 +121,9 @@ struct ToolTileView: View {
                 RoundedRectangle(cornerRadius: 16, style: .continuous)
                     .fill(
                         LinearGradient(
-                            colors: [tool.accent.opacity(0.30), tool.accent.opacity(0.12)],
+                            colors: dark
+                                ? [tool.accent.opacity(0.64), tool.accent.opacity(0.27)]
+                                : [tool.accent.opacity(0.30), tool.accent.opacity(0.12)],
                             startPoint: .topLeading,
                             endPoint: .bottomTrailing
                         )
@@ -116,7 +131,18 @@ struct ToolTileView: View {
                     .frame(height: 92)
                     .overlay {
                         RoundedRectangle(cornerRadius: 16, style: .continuous)
-                            .strokeBorder(tool.accent.opacity(0.22), lineWidth: 1)
+                            .strokeBorder(tool.accent.opacity(dark ? 0.60 : 0.22), lineWidth: 1)
+                    }
+                    // Dark-only inner top highlight so the plate reads as lit glass, not a flat chip.
+                    .overlay {
+                        if dark {
+                            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                                .strokeBorder(
+                                    LinearGradient(colors: [.white.opacity(0.36), .clear],
+                                                   startPoint: .top, endPoint: .center),
+                                    lineWidth: 1
+                                )
+                        }
                     }
                 Image(systemName: tool.symbolName)
                     .font(.system(size: 34, weight: .medium))
@@ -164,9 +190,22 @@ struct ToolTileView: View {
         .overlay {
             RoundedRectangle(cornerRadius: 22, style: .continuous)
                 .strokeBorder(
-                    hovered ? tool.accent.opacity(0.55) : Color.primary.opacity(0.08),
+                    hovered ? tool.accent.opacity(0.6)
+                            : (dark ? Color.white.opacity(0.22) : Color.primary.opacity(0.08)),
                     lineWidth: hovered ? 1.5 : 1
                 )
+        }
+        // Dark-only specular: a bright top edge fading by the middle, so the tile catches light like
+        // real glass. Skipped while hovered (the accent border takes over) and in light mode.
+        .overlay {
+            if dark && !hovered {
+                RoundedRectangle(cornerRadius: 22, style: .continuous)
+                    .strokeBorder(
+                        LinearGradient(colors: [.white.opacity(0.40), .clear],
+                                       startPoint: .top, endPoint: .center),
+                        lineWidth: 1
+                    )
+            }
         }
         .shadow(color: .black.opacity(shadowOpacity), radius: shadowRadius, y: shadowY)
         .scaleEffect(hovered ? 1.02 : 1)

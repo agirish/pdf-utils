@@ -96,11 +96,7 @@ struct RootView: View {
         SettingsView(selection: $settings.tab, onClose: { settings.close() })
             .contentSurface(hue: glassHue, tint: glassTint)
             .glassCardStyle(level: glassLevel)
-            .overlay(
-                RoundedRectangle(cornerRadius: LiquidGlass.cardCornerRadius, style: .continuous)
-                    .strokeBorder(.quaternary, lineWidth: 0.5)
-            )
-            .shadow(color: .black.opacity(0.3), radius: 30, y: 8)
+            .overlayCardChrome()
     }
 
     /// In-window ⌘K palette overlay — the exact parallel of `settingsOverlay`: the same dimmed,
@@ -129,11 +125,7 @@ struct RootView: View {
         )
         .contentSurface(hue: glassHue, tint: glassTint)
         .glassCardStyle(level: glassLevel)
-        .overlay(
-            RoundedRectangle(cornerRadius: LiquidGlass.cardCornerRadius, style: .continuous)
-                .strokeBorder(.quaternary, lineWidth: 0.5)
-        )
-        .shadow(color: .black.opacity(0.3), radius: 30, y: 8)
+        .overlayCardChrome()
     }
 
     /// Runs a chosen Quick Action, then dismisses the palette. Navigating replaces the stack with just

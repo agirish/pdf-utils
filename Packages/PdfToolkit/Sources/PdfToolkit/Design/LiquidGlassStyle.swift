@@ -238,44 +238,15 @@ public extension View {
     /// `.thinMaterial` base. `BehindWindowGlass` toggles the window's opacity itself — nothing else
     /// touches it. The accent *tint* washes content surfaces (see `contentSurface`), not the window
     /// background, exactly as in SyncCloud.
-    @ViewBuilder
+    /// Dark mode routes through `LiquidGlassBackground` so it can read `@Environment(\.colorScheme)`:
+    /// the shared light-tuned constants collapse to a flat gray slab on a dark appearance, so dark
+    /// gets a deep graded base under the material and a soft accent glow over it. Light is unchanged.
     func liquidGlassAppBackground(
         level: GlassLevel,
         hue: LiquidGlassHue = LiquidGlass.defaultHue,
         respectTopSafeArea: Bool = true
     ) -> some View {
-        let t = level.backgroundIntensity
-        let colors = hue.gradientColors
-        let opacities: [Double] = [0.06 + 0.16 * t, 0.05 + 0.14 * t, 0.04 + 0.10 * t]
-        let gradientColors = zip(colors, opacities).map { $0.0.opacity($0.1) }
-        // Only `.clear` goes see-through — the thinMaterial base is opaque enough to hide the
-        // desktop, so the two are mutually exclusive (SyncCloud parity).
-        let seeThrough = level == .clear
-        let safeEdges: Edge.Set = respectTopSafeArea ? [.horizontal, .bottom] : .all
-
-        background {
-            ZStack {
-                // Behind-window vibrancy: shows the desktop through the window at `.clear`, inert
-                // otherwise (it also hands the window its opacity back). Always ignores every safe
-                // area so the title-bar band is glass too at `.clear`, not a clear hole.
-                BehindWindowGlass(isEnabled: seeThrough)
-                    .ignoresSafeArea()
-
-                LinearGradient(
-                    colors: gradientColors,
-                    startPoint: .topLeading,
-                    endPoint: .bottomTrailing
-                )
-                .ignoresSafeArea(edges: safeEdges)
-
-                if !seeThrough {
-                    // Base material so content stays readable in light/dark — SyncCloud's non-clear base.
-                    Color.clear
-                        .background(.thinMaterial.opacity(0.45 + 0.20 * t))
-                        .ignoresSafeArea(edges: safeEdges)
-                }
-            }
-        }
+        modifier(LiquidGlassBackground(level: level, hue: hue, respectTopSafeArea: respectTopSafeArea))
     }
 
     /// The material fill for one content surface — the single place the level → appearance decision
@@ -306,10 +277,19 @@ public extension View {
             .glassSurface(resolved, cornerRadius: LiquidGlass.cardCornerRadius)
     }
 
-    /// Lighter glass style for bars and inline panels; takes the level verbatim (no floor).
-    @ViewBuilder
+    /// Lighter glass style for bars and inline panels; takes the level verbatim (no floor). Dark adds
+    /// a top-lit specular hairline (via `GlassBarStyle`) so the bar reads as distinct glass chrome
+    /// against the dark background; light is unchanged.
     func glassBarStyle(level: GlassLevel) -> some View {
-        self.glassSurface(level, cornerRadius: LiquidGlass.smallCornerRadius)
+        modifier(GlassBarStyle(level: level))
+    }
+
+    /// Border + drop shadow for a floating overlay card (the Settings overlay, the ⌘K palette) sitting
+    /// over a dimmed backdrop. Dark gets a top-lit specular hairline and a deeper, larger shadow so the
+    /// card lifts off the scrim — the light-tuned `black 0.3` shadow is nearly invisible on a dark
+    /// backdrop. Light keeps the original `.quaternary` hairline + shadow, unchanged.
+    func overlayCardChrome(cornerRadius: CGFloat = LiquidGlass.cardCornerRadius) -> some View {
+        modifier(OverlayCardChrome(cornerRadius: cornerRadius))
     }
 
     /// The accent-color wash driven by the Tint slider (`tint`, 0...1). Apply ONCE per region.
@@ -318,5 +298,129 @@ public extension View {
     func contentSurface(hue: LiquidGlassHue = LiquidGlass.defaultHue, tint: Double = 0) -> some View {
         let wash = hue == .none ? Color.clear : hue.accentColor.opacity(max(0.0, min(1.0, tint)) * 0.32)
         self.background(wash)
+    }
+}
+
+// MARK: - Appearance-aware background (the dark-mode re-tune)
+
+/// The app background, split into a `ViewModifier` so it can read `@Environment(\.colorScheme)` —
+/// the original free function could not, which is why every constant was one light-tuned value.
+///
+/// **Light** reproduces the original background exactly: the accent diagonal gradient over a
+/// `.thinMaterial` base at `0.45 + 0.20·t`. **Dark** adds two things the flat gray slab was missing —
+/// a deep, faintly-cool near-black gradient *under* the material so the ground grades with depth, and
+/// a soft pool of the accent hue at the top edge *over* the material so the chosen accent actually
+/// reads. The accent diagonal also lifts its opacity in dark to survive the darker base. `.clear`
+/// (see-through) still skips the material entirely; only its diagonal wash strengthens.
+private struct LiquidGlassBackground: ViewModifier {
+    let level: GlassLevel
+    let hue: LiquidGlassHue
+    let respectTopSafeArea: Bool
+    @Environment(\.colorScheme) private var scheme
+
+    func body(content: Content) -> some View {
+        let dark = scheme == .dark
+        let t = level.backgroundIntensity
+        // Only `.clear` goes see-through — the material base hides the desktop otherwise (SyncCloud parity).
+        let seeThrough = level == .clear
+        let safeEdges: Edge.Set = respectTopSafeArea ? [.horizontal, .bottom] : .all
+
+        let colors = hue.gradientColors
+        let opacities: [Double] = dark
+            ? [0.19 + 0.28 * t, 0.15 + 0.23 * t, 0.10 + 0.16 * t]
+            : [0.06 + 0.16 * t, 0.05 + 0.14 * t, 0.04 + 0.10 * t]
+        let gradientColors = zip(colors, opacities).map { $0.0.opacity($0.1) }
+
+        content.background {
+            ZStack {
+                // Behind-window vibrancy: shows the desktop at `.clear`, inert otherwise (it also hands
+                // the window its opacity back). Always ignores every safe area so the title-bar band is
+                // glass too at `.clear`, not a clear hole.
+                BehindWindowGlass(isEnabled: seeThrough)
+                    .ignoresSafeArea()
+
+                // Dark-only deep base: a near-black, faintly-cool gradient beneath the material so the
+                // ground reads as graded depth rather than one muddy plane.
+                if !seeThrough && dark {
+                    LinearGradient(
+                        colors: [Color(red: 0.065, green: 0.082, blue: 0.115),
+                                 Color(red: 0.02, green: 0.027, blue: 0.043)],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    )
+                    .ignoresSafeArea(edges: safeEdges)
+                }
+
+                LinearGradient(
+                    colors: gradientColors,
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
+                .ignoresSafeArea(edges: safeEdges)
+
+                if !seeThrough {
+                    // Base material so content stays readable. Dark thins it a touch so the deep base
+                    // reads through instead of flattening back to system gray.
+                    Color.clear
+                        .background(.thinMaterial.opacity((dark ? 0.27 : 0.45) + 0.20 * t))
+                        .ignoresSafeArea(edges: safeEdges)
+                }
+
+                // Dark-only accent glow: a soft pool of the hue at the top, over the material so the
+                // accent reads. `.none` opts out (it defers to the system accent).
+                if !seeThrough && dark && hue != .none {
+                    RadialGradient(
+                        colors: [hue.accentColor.opacity(0.26 + 0.10 * t), .clear],
+                        center: .top,
+                        startRadius: 0,
+                        endRadius: 700
+                    )
+                    .blendMode(.plusLighter)
+                    .ignoresSafeArea(edges: safeEdges)
+                }
+            }
+        }
+    }
+}
+
+// MARK: - Appearance-aware chrome (dark-mode re-tune for overlay cards & bars)
+
+/// Border + shadow for a floating overlay card (Settings, ⌘K palette). See `View.overlayCardChrome`.
+private struct OverlayCardChrome: ViewModifier {
+    let cornerRadius: CGFloat
+    @Environment(\.colorScheme) private var scheme
+
+    func body(content: Content) -> some View {
+        let dark = scheme == .dark
+        let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+        let border: AnyShapeStyle = dark
+            ? AnyShapeStyle(LinearGradient(colors: [.white.opacity(0.24), .white.opacity(0.06)],
+                                           startPoint: .top, endPoint: .bottom))
+            : AnyShapeStyle(.quaternary)
+        content
+            .overlay(shape.strokeBorder(border, lineWidth: dark ? 1 : 0.5))
+            .shadow(color: .black.opacity(dark ? 0.55 : 0.3), radius: dark ? 34 : 30, y: dark ? 12 : 8)
+    }
+}
+
+/// Bar/panel glass with a dark-only top-lit specular hairline. See `View.glassBarStyle`.
+private struct GlassBarStyle: ViewModifier {
+    let level: GlassLevel
+    @Environment(\.colorScheme) private var scheme
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        let shape = RoundedRectangle(cornerRadius: LiquidGlass.smallCornerRadius, style: .continuous)
+        content
+            .glassSurface(level, cornerRadius: LiquidGlass.smallCornerRadius)
+            .overlay {
+                if scheme == .dark {
+                    shape.strokeBorder(
+                        LinearGradient(colors: [.white.opacity(0.12), .white.opacity(0.03)],
+                                       startPoint: .top, endPoint: .bottom),
+                        lineWidth: 1
+                    )
+                }
+            }
     }
 }

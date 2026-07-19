@@ -28,11 +28,44 @@ struct CompressToolView: View {
     @State private var isGeneratingPreviews = false
     @State private var thumbnailSize: CGFloat = 120
 
+    // Multiple-files mode: the same quality/target config runs across a queue of PDFs. The runner is
+    // owned here so the queue survives flipping back and forth to one-file mode.
+    @State private var fileMode: ToolFileMode = .single
+    @StateObject private var batchRunner = BatchRunner()
+
     private var selectionPathKey: String {
         inputURL?.standardizedFileURL.path ?? ""
     }
 
+    /// The current quality/target config as a batch operation, mirroring `runCompress`'s single-file
+    /// choice. Nil only when the target-size field is emptied.
+    private var currentBatchOperation: BatchOperation? {
+        switch mode {
+        case .quality:
+            return .compressQuality(quality: quality)
+        case .targetSize:
+            guard targetMB > 0 else { return nil }
+            return .compressTarget(targetBytes: max(1, Int((targetMB * 1_048_576).rounded())))
+        }
+    }
+
     var body: some View {
+        if fileMode == .multiple {
+            MultiFileBatchPanel(
+                runner: batchRunner,
+                tool: .compress,
+                mode: $fileMode,
+                makeOperation: { currentBatchOperation },
+                fallbackSuffix: "compressed"
+            ) {
+                controlsSection
+            }
+        } else {
+            singleFileBody
+        }
+    }
+
+    private var singleFileBody: some View {
         HSplitView {
             sidebarColumn
                 .frame(minWidth: 280, idealWidth: 340, maxWidth: 520)
@@ -99,6 +132,8 @@ struct CompressToolView: View {
     private var sidebarColumn: some View {
         VStack(spacing: 0) {
             VStack(alignment: .leading, spacing: 14) {
+                ToolFileModePicker(mode: $fileMode)
+
                 headerRow
 
                 Group {

@@ -19,6 +19,11 @@ struct RotateToolView: View {
     @State private var isGeneratingPreviews = false
     @State private var thumbnailSize: CGFloat = 120
 
+    // Multiple-files mode. The batch engine rotates every page of every file (there is no per-file
+    // page picking), so the page-scope controls are replaced by an all-pages note in this mode.
+    @State private var fileMode: ToolFileMode = .single
+    @StateObject private var batchRunner = BatchRunner()
+
     enum PageScope: String, CaseIterable, Identifiable {
         case all
         case range
@@ -36,6 +41,22 @@ struct RotateToolView: View {
     }
 
     var body: some View {
+        if fileMode == .multiple {
+            MultiFileBatchPanel(
+                runner: batchRunner,
+                tool: .rotate,
+                mode: $fileMode,
+                makeOperation: { .rotate(quarterTurns: quarterTurns) },
+                fallbackSuffix: "rotated"
+            ) {
+                batchRotationSection
+            }
+        } else {
+            singleFileBody
+        }
+    }
+
+    private var singleFileBody: some View {
         HSplitView {
             sidebarColumn
                 .frame(minWidth: 280, idealWidth: 340, maxWidth: 520)
@@ -98,6 +119,8 @@ struct RotateToolView: View {
     private var sidebarColumn: some View {
         VStack(spacing: 0) {
             VStack(alignment: .leading, spacing: 14) {
+                ToolFileModePicker(mode: $fileMode)
+
                 headerRow
 
                 Group {
@@ -280,6 +303,28 @@ struct RotateToolView: View {
                 Text("270° clockwise").tag(3)
             }
             .pickerStyle(.segmented)
+        }
+        .padding(16)
+        .formCard()
+    }
+
+    /// Rotation config for Multiple-files mode: the same turn picker, but with an all-pages note in
+    /// place of the page-scope controls — the batch engine turns every page of every file.
+    private var batchRotationSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Rotation")
+                .font(.subheadline.weight(.semibold))
+            Picker("Turns", selection: $quarterTurns) {
+                Text("90° clockwise").tag(1)
+                Text("180°").tag(2)
+                Text("270° clockwise").tag(3)
+            }
+            .pickerStyle(.segmented)
+            Label("Every page of every file is rotated. Page ranges aren't available in Multiple files mode.",
+                  systemImage: "info.circle")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
         }
         .padding(16)
         .formCard()

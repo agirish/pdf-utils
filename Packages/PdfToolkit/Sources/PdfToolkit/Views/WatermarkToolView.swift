@@ -42,8 +42,30 @@ struct WatermarkToolView: View {
     @State private var isGeneratingPreviews = false
     @State private var thumbnailSize: CGFloat = 120
 
+    // Multiple-files mode: the same watermark options are stamped onto every queued PDF.
+    @State private var fileMode: ToolFileMode = .single
+    @StateObject private var batchRunner = BatchRunner()
+
     private var selectionPathKey: String {
         inputURL?.standardizedFileURL.path ?? ""
+    }
+
+    /// The current watermark options as a batch operation, mirroring `runWatermark`. Nil when the
+    /// text field is empty (there is nothing to stamp).
+    private var currentBatchOperation: BatchOperation? {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        let rgb = chosenRGB
+        return .watermark(WatermarkOptions(
+            text: trimmed,
+            fontSize: fontSize,
+            opacity: opacity,
+            rotationDegrees: rotation,
+            red: rgb.red,
+            green: rgb.green,
+            blue: rgb.blue,
+            tiled: tiled
+        ))
     }
 
     /// sRGB components of the chosen color, threaded into `WatermarkOptions` and mirrored by the live
@@ -69,6 +91,22 @@ struct WatermarkToolView: View {
     }
 
     var body: some View {
+        if fileMode == .multiple {
+            MultiFileBatchPanel(
+                runner: batchRunner,
+                tool: .watermark,
+                mode: $fileMode,
+                makeOperation: { currentBatchOperation },
+                fallbackSuffix: "watermarked"
+            ) {
+                watermarkOptions
+            }
+        } else {
+            singleFileBody
+        }
+    }
+
+    private var singleFileBody: some View {
         HSplitView {
             sidebarColumn
                 .frame(minWidth: 320, idealWidth: 380, maxWidth: 560)
@@ -132,6 +170,8 @@ struct WatermarkToolView: View {
         VStack(spacing: 0) {
             ScrollView {
                 VStack(alignment: .leading, spacing: 14) {
+                    ToolFileModePicker(mode: $fileMode)
+
                     headerRow
 
                     Group {

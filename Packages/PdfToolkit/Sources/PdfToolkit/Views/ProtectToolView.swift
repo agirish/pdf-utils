@@ -32,6 +32,10 @@ struct ProtectToolView: View {
     @State private var suggestedName = "protected.pdf"
     @State private var isDropTargeted = false
 
+    // Multiple-files mode: the same encrypt / remove-password sub-mode runs across a queue of PDFs.
+    @State private var fileMode: ToolFileMode = .single
+    @StateObject private var batchRunner = BatchRunner()
+
     private var passwordsMatch: Bool {
         !newPassword.isEmpty && newPassword == confirmPassword
     }
@@ -44,7 +48,39 @@ struct ProtectToolView: View {
         }
     }
 
+    /// The current sub-mode + password as a batch operation, mirroring `run()`. Nil until the
+    /// passwords are valid (matching for Add, non-empty for Remove).
+    private var currentBatchOperation: BatchOperation? {
+        switch mode {
+        case .protect:
+            guard passwordsMatch else { return nil }
+            return .encrypt(password: newPassword)
+        case .remove:
+            guard !currentPassword.isEmpty else { return nil }
+            return .removePassword(password: currentPassword)
+        }
+    }
+
     var body: some View {
+        if fileMode == .multiple {
+            MultiFileBatchPanel(
+                runner: batchRunner,
+                tool: .protect,
+                mode: $fileMode,
+                makeOperation: { currentBatchOperation },
+                fallbackSuffix: mode == .protect ? "protected" : "unlocked"
+            ) {
+                VStack(alignment: .leading, spacing: 14) {
+                    modeCard
+                    passwordCard
+                }
+            }
+        } else {
+            singleFileBody
+        }
+    }
+
+    private var singleFileBody: some View {
         VStack(spacing: 0) {
             ScrollView {
                 VStack(alignment: .leading, spacing: 18) {
@@ -115,6 +151,8 @@ struct ProtectToolView: View {
 
     private var fileCard: some View {
         VStack(alignment: .leading, spacing: 14) {
+            ToolFileModePicker(mode: $fileMode)
+
             HStack(alignment: .center, spacing: 12) {
                 Image(systemName: "lock.doc")
                     .symbolRenderingMode(.hierarchical)

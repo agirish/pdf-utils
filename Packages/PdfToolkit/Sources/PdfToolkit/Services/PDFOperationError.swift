@@ -3,6 +3,7 @@ import Foundation
 enum PDFOperationError: LocalizedError {
     case couldNotOpen(URL)
     case couldNotWrite(URL)
+    case outputMatchesInput(URL)
     case invalidPageRange(String)
     case pageOutOfBounds(Int)
     case pageRangeRequired
@@ -27,6 +28,8 @@ enum PDFOperationError: LocalizedError {
             return "Could not open PDF: \(url.lastPathComponent)"
         case .couldNotWrite(let url):
             return "Could not save to: \(url.lastPathComponent)"
+        case .outputMatchesInput(let url):
+            return "The result would overwrite the original “\(url.lastPathComponent)”. Choose a different location."
         case .invalidPageRange(let s):
             return "Invalid page range: \(s)"
         case .pageOutOfBounds(let n):

@@ -87,6 +87,26 @@ enum PDFFixtures {
         #expect(doc.write(to: url))
     }
 
+    /// A single US-Letter page carrying two well-separated text tokens: `top` drawn near the top edge
+    /// and `bottom` near the bottom edge (PDF coordinates, origin bottom-left). A redaction rectangle
+    /// over one half then covers exactly one token, so a pixel-level test can prove the black fill lands
+    /// only where the mark is — the covered token gone, the other still rendered.
+    static func writeTwoZonePage(top: String, bottom: String, to url: URL, size: CGSize = PDFFixtures.letter) throws {
+        let data = NSMutableData()
+        var mediaBox = CGRect(origin: .zero, size: size)
+        let consumer = try #require(CGDataConsumer(data: data as CFMutableData))
+        let context = try #require(CGContext(consumer: consumer, mediaBox: &mediaBox, nil))
+        context.beginPDFPage(nil)
+        for (line, y) in [(top, size.height - 100), (bottom, CGFloat(80))] {
+            let attributed = NSAttributedString(string: line, attributes: [.font: NSFont.systemFont(ofSize: 24)])
+            context.textPosition = CGPoint(x: 72, y: y)
+            CTLineDraw(CTLineCreateWithAttributedString(attributed), context)
+        }
+        context.endPDFPage()
+        context.closePDF()
+        try (data as Data).write(to: url, options: .atomic)
+    }
+
     /// A file that is not a valid PDF, for "corrupt input" cases.
     static func writeCorrupt(to url: URL) throws {
         try Data([0xDE, 0xAD, 0xBE, 0xEF]).write(to: url, options: .atomic)
@@ -127,6 +147,7 @@ extension PDFOperationError {
         switch self {
         case .couldNotOpen: return "couldNotOpen"
         case .couldNotWrite: return "couldNotWrite"
+        case .outputMatchesInput: return "outputMatchesInput"
         case .invalidPageRange: return "invalidPageRange"
         case .pageOutOfBounds: return "pageOutOfBounds"
         case .pageRangeRequired: return "pageRangeRequired"

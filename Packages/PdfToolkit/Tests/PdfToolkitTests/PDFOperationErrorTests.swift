@@ -12,6 +12,7 @@ import Foundation
     private let all: [PDFOperationError] = [
         .couldNotOpen(URL(fileURLWithPath: "/tmp/in.pdf")),
         .couldNotWrite(URL(fileURLWithPath: "/tmp/out.pdf")),
+        .outputMatchesInput(URL(fileURLWithPath: "/tmp/report.pdf")),
         .invalidPageRange("q-z"),
         .pageOutOfBounds(7),
         .pageRangeRequired,
@@ -32,8 +33,8 @@ import Foundation
     ]
 
     @Test func listCoversEveryCase() {
-        // 19 distinct kinds — guards against forgetting to describe a newly added case.
-        #expect(Set(all.map(\.kind)).count == 19)
+        // 20 distinct kinds — guards against forgetting to describe a newly added case.
+        #expect(Set(all.map(\.kind)).count == 20)
     }
 
     @Test func everyCaseHasANonEmptyDescription() {
@@ -49,6 +50,8 @@ import Foundation
             .errorDescription?.contains("report.pdf") == true)
         #expect(PDFOperationError.couldNotWrite(URL(fileURLWithPath: "/x/final.pdf"))
             .errorDescription?.contains("final.pdf") == true)
+        #expect(PDFOperationError.outputMatchesInput(URL(fileURLWithPath: "/x/original.pdf"))
+            .errorDescription?.contains("original.pdf") == true)
         #expect(PDFOperationError.fileAccessDenied(URL(fileURLWithPath: "/x/locked.pdf"))
             .errorDescription?.contains("locked.pdf") == true)
         #expect(PDFOperationError.pageOutOfBounds(42).errorDescription?.contains("42") == true)

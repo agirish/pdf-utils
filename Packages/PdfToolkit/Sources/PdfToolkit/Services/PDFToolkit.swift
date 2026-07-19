@@ -39,6 +39,23 @@ enum PDFToolkit {
         return doc.pageCount
     }
 
+    /// Refuses to write an operation's result on top of one of its own inputs.
+    ///
+    /// Every write path here targets a *fresh* file, so this only fires on caller misuse — but the
+    /// consequences of that misuse are silent and unrecoverable: `deletePages`/`rotate` mutate the
+    /// loaded `PDFDocument` and then `write(to:)` back over the very file it lazily reads from,
+    /// producing an unopenable, zero-recoverable-pages source; the CoreGraphics paths (watermark)
+    /// fully materialize the output in memory and would overwrite the original with the transformed
+    /// copy. Called before the source is ever opened, this converts that data-losing accident into a
+    /// clear error while the source is still untouched. Paths are compared after resolving symlinks
+    /// and `.`/`..` so `/var`↔`/private/var`-style aliases don't slip through.
+    private static func requireDistinctOutput(_ output: URL, from inputs: [URL]) throws {
+        let target = output.resolvingSymlinksInPath().standardizedFileURL
+        for input in inputs where input.resolvingSymlinksInPath().standardizedFileURL == target {
+            throw PDFOperationError.outputMatchesInput(output)
+        }
+    }
+
     /// Merges PDFs in the order given, copying each source page into the result.
     ///
     /// Uses `page.copy()` rather than moving the original page out of its document — the same
@@ -48,6 +65,7 @@ enum PDFToolkit {
     /// sidesteps it.
     static func merge(inputURLs: [URL], outputURL: URL) throws {
         guard !inputURLs.isEmpty else { throw PDFOperationError.noInputFiles }
+        try requireDistinctOutput(outputURL, from: inputURLs)
 
         let merged = PDFDocument()
         for url in inputURLs {
@@ -96,6 +114,7 @@ enum PDFToolkit {
             }
             let suffix = String(format: "%0\(width)d", partIndex + 1)
             let url = directory.appendingPathComponent("\(baseName)-\(suffix).pdf")
+            try requireDistinctOutput(url, from: [inputURL])
             guard out.write(to: url) else {
                 throw PDFOperationError.couldNotWrite(url)
             }
@@ -109,6 +128,7 @@ enum PDFToolkit {
     /// Copies listed pages (zero-based) into a new PDF.
     static func extract(inputURL: URL, outputURL: URL, pageIndices: [Int]) throws {
         guard !pageIndices.isEmpty else { throw PDFOperationError.noPagesSelected }
+        try requireDistinctOutput(outputURL, from: [inputURL])
         guard let source = PDFDocument(url: inputURL) else {
             throw PDFOperationError.couldNotOpen(inputURL)
         }
@@ -141,6 +161,7 @@ enum PDFToolkit {
     /// Removes pages (zero-based). Duplicates are ignored. Removed from highest index first.
     static func deletePages(inputURL: URL, outputURL: URL, pageIndices: [Int]) throws {
         guard !pageIndices.isEmpty else { throw PDFOperationError.noPagesSelected }
+        try requireDistinctOutput(outputURL, from: [inputURL])
         guard let doc = PDFDocument(url: inputURL) else {
             throw PDFOperationError.couldNotOpen(inputURL)
         }
@@ -164,6 +185,7 @@ enum PDFToolkit {
 
     /// Rotates selected pages by `quarterTurns` × 90° clockwise.
     static func rotate(inputURL: URL, outputURL: URL, pageIndices: [Int], quarterTurns: Int) throws {
+        try requireDistinctOutput(outputURL, from: [inputURL])
         guard let doc = PDFDocument(url: inputURL) else {
             throw PDFOperationError.couldNotOpen(inputURL)
         }
@@ -193,6 +215,7 @@ enum PDFToolkit {
     /// document is fully locked behind one password. The input must be an openable, unencrypted PDF.
     static func encrypt(inputURL: URL, outputURL: URL, password: String) throws {
         guard !password.isEmpty else { throw PDFOperationError.passwordRequired }
+        try requireDistinctOutput(outputURL, from: [inputURL])
         guard let doc = PDFDocument(url: inputURL) else {
             throw PDFOperationError.couldNotOpen(inputURL)
         }
@@ -212,6 +235,7 @@ enum PDFToolkit {
     /// `password` first (wrong password → `incorrectPassword`); a source that isn't encrypted at all
     /// throws `notEncrypted` so the tool can say there's nothing to remove.
     static func removePassword(inputURL: URL, outputURL: URL, password: String) throws {
+        try requireDistinctOutput(outputURL, from: [inputURL])
         guard let doc = PDFDocument(url: inputURL) else {
             throw PDFOperationError.couldNotOpen(inputURL)
         }
@@ -242,6 +266,7 @@ enum PDFToolkit {
 
     /// Rebuilds the PDF from rendered page images to reduce size. `quality` is 0...1 (JPEG-style tradeoff).
     static func compress(inputURL: URL, outputURL: URL, quality: Double) throws {
+        try requireDistinctOutput(outputURL, from: [inputURL])
         guard let source = PDFDocument(url: inputURL) else {
             throw PDFOperationError.couldNotOpen(inputURL)
         }
@@ -287,6 +312,7 @@ enum PDFToolkit {
     static func watermark(inputURL: URL, outputURL: URL, options: WatermarkOptions) throws {
         let trimmed = options.text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { throw PDFOperationError.watermarkTextRequired }
+        try requireDistinctOutput(outputURL, from: [inputURL])
         guard let source = PDFDocument(url: inputURL) else {
             throw PDFOperationError.couldNotOpen(inputURL)
         }
@@ -378,6 +404,7 @@ enum PDFToolkit {
         options: PDFRedactionExportOptions = .default
     ) throws {
         guard !marks.isEmpty else { throw PDFOperationError.noRedactions }
+        try requireDistinctOutput(outputURL, from: [inputURL])
         guard let source = PDFDocument(url: inputURL) else {
             throw PDFOperationError.couldNotOpen(inputURL)
         }

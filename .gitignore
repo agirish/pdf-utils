@@ -7,3 +7,8 @@ tmp_icon/
 
 # XcodeGen Generated IDE Elements
 PdfUtils.xcodeproj/
+
+# Claude Code local state (per-user settings + transient worktrees; shared
+# .claude config like settings.json is still tracked)
+.claude/settings.local.json
+.claude/worktrees/

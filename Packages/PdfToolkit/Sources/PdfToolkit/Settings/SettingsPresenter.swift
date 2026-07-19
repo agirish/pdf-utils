@@ -3,7 +3,7 @@ import SwiftUI
 /// Identifies a Settings tab. Raw values are the stored format of `selectedTabDefaultsKey`, so treat
 /// them as stable. `CaseIterable` backs the segmented picker.
 public enum SettingsTab: String, CaseIterable, Sendable, Identifiable {
-    case general
+    case files
     case appearance
     case advanced
 
@@ -11,7 +11,7 @@ public enum SettingsTab: String, CaseIterable, Sendable, Identifiable {
 
     public var displayName: String {
         switch self {
-        case .general: return "General"
+        case .files: return "Files"
         case .appearance: return "Appearance"
         case .advanced: return "Advanced"
         }

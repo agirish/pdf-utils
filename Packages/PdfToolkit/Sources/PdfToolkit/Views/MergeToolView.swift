@@ -517,16 +517,22 @@ struct MergeToolView: View {
             return
         }
 
-        let panel = NSSavePanel()
-        panel.allowedContentTypes = [.pdf]
-        if let first = entries.first?.url {
-            panel.nameFieldStringValue = first.deletingPathExtension().lastPathComponent + "-merged.pdf"
-        } else {
-            panel.nameFieldStringValue = "merged.pdf"
-        }
+        let firstURL = entries.first?.url
+        let stem = firstURL?.deletingPathExtension().lastPathComponent ?? "merged"
+        let filename = PDFExportCoordinator.suggestedFilename(stem: stem, suffixWord: "merged")
 
-        guard panel.runModal() == .OK, let outputURL = panel.url else {
-            return
+        let outputURL: URL
+        if SaveLocation.current() == .besideOriginal, let firstURL {
+            // Write next to the first input, numbering rather than overwriting on a clash.
+            outputURL = PDFExportCoordinator.uniqueURL(inDirectory: firstURL.deletingLastPathComponent(), filename: filename)
+        } else {
+            let panel = NSSavePanel()
+            panel.allowedContentTypes = [.pdf]
+            panel.nameFieldStringValue = filename
+            guard panel.runModal() == .OK, let url = panel.url else {
+                return
+            }
+            outputURL = url
         }
 
         busy = true
@@ -556,6 +562,7 @@ struct MergeToolView: View {
                 mergeResult = MergeResult(outputURL: outputURL, totalPages: finalPages, fileBytes: bytes)
             }
             ActivityLog.shared.recordSaved(Tool.merge.title, to: outputURL, bytes: Int(bytes), detail: "\(urlsSnapshot.count) files")
+            AfterExportAction.current().perform(on: [outputURL])
         } catch {
             alertMessage = error.localizedDescription
             ActivityLog.shared.error("\(Tool.merge.title) failed: \(error.localizedDescription)")

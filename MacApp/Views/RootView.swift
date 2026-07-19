@@ -16,9 +16,28 @@ struct RootView: View {
     private var glassLevel: GlassLevel { GlassLevel(rawValue: glassLevelRaw) ?? .frosted }
     private var glassHue: LiquidGlassHue { LiquidGlassHue(rawValue: glassHueRaw) ?? LiquidGlass.defaultHue }
 
+    /// The tool navigation path, owned here (not implicit) so launch can open straight to the last-used
+    /// tool. Seeded in `init` rather than `onAppear`: mutating the path on the first render cycle races
+    /// the `navigationDestination` registration and the push is silently dropped, so the stack must be
+    /// *born* with the tool already on it.
+    @State private var toolPath: [Tool]
+
+    init() {
+        _toolPath = State(initialValue: Self.initialToolPath())
+    }
+
+    /// `[lastTool]` when "Reopen last tool on launch" is on and a valid tool was recorded, else empty.
+    private static func initialToolPath() -> [Tool] {
+        let defaults = UserDefaults.standard
+        guard defaults.bool(forKey: SettingsKeys.reopenLastTool),
+              let raw = defaults.string(forKey: SettingsKeys.lastToolUsed),
+              let tool = Tool(rawValue: raw) else { return [] }
+        return [tool]
+    }
+
     var body: some View {
         ZStack {
-            NavigationStack {
+            NavigationStack(path: $toolPath) {
                 DashboardView()
             }
             .frame(minWidth: 960, minHeight: 640)

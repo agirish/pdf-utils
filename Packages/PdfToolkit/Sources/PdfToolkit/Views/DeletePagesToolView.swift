@@ -64,7 +64,7 @@ struct DeletePagesToolView: View {
             exportDoc = nil
             switch result {
             case .success(let url):
-                ActivityLog.shared.recordSaved(Tool.deletePages.title, to: url, bytes: savedBytes)
+                PDFExportCoordinator.didExport(to: url, toolTitle: Tool.deletePages.title, bytes: savedBytes)
             case .failure(let err):
                 guard !err.isUserCancelled else { break }
                 alertMessage = err.localizedDescription
@@ -319,8 +319,20 @@ struct DeletePagesToolView: View {
                     }
                 }
             }
-            exportDoc = PDFFileDocument(data: data)
-            showExporter = true
+            switch try await PDFExportCoordinator.route(
+                data: data,
+                source: fileURL,
+                toolTitle: Tool.deletePages.title,
+                defaultStem: "edited",
+                suffixWord: "edited"
+            ) {
+            case .savedBeside:
+                break
+            case .present(let document, let name):
+                exportDoc = document
+                suggestedName = name
+                showExporter = true
+            }
         } catch {
             alertMessage = error.localizedDescription
             ActivityLog.shared.error("\(Tool.deletePages.title) failed: \(error.localizedDescription)")

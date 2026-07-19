@@ -81,7 +81,7 @@ struct ReorderToolView: View {
             exportDoc = nil
             switch result {
             case .success(let url):
-                ActivityLog.shared.recordSaved(Tool.reorder.title, to: url, bytes: savedBytes)
+                PDFExportCoordinator.didExport(to: url, toolTitle: Tool.reorder.title, bytes: savedBytes)
             case .failure(let err):
                 guard !err.isUserCancelled else { break }
                 alertMessage = err.localizedDescription
@@ -388,8 +388,20 @@ struct ReorderToolView: View {
                     }
                 }
             }
-            exportDoc = PDFFileDocument(data: data)
-            showExporter = true
+            switch try await PDFExportCoordinator.route(
+                data: data,
+                source: fileURL,
+                toolTitle: Tool.reorder.title,
+                defaultStem: "reordered",
+                suffixWord: "reordered"
+            ) {
+            case .savedBeside:
+                break
+            case .present(let document, let name):
+                exportDoc = document
+                suggestedName = name
+                showExporter = true
+            }
         } catch {
             alertMessage = error.localizedDescription
             ActivityLog.shared.error("\(Tool.reorder.title) failed: \(error.localizedDescription)")

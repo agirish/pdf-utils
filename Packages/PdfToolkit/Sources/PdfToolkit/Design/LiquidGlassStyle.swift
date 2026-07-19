@@ -205,8 +205,6 @@ public enum LiquidGlass {
     public static let cardCornerRadius: CGFloat = 14
     static let smallCornerRadius: CGFloat = 10
 
-    static let cardShadow = (color: Color.black.opacity(0.06), radius: CGFloat(12), x: CGFloat(0), y: CGFloat(4))
-
     /// pdf-utils–scoped keys (do not collide with SyncCloud defaults on the same Mac).
     /// Retired: read only by `migrateLegacyAppearance`, which maps it onto `levelKey`.
     static let intensityKey = "pdfutils.liquidGlassIntensity"

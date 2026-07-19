@@ -4,7 +4,9 @@ import UniformTypeIdentifiers
 
 struct CompressToolView: View {
     @State private var inputURL: URL?
-    @State private var quality: Double = 0.72
+    // Starts on (and writes back to) the Advanced "Default compression quality" — so the slider is
+    // pre-selected and sticky across launches. Same 0.2…1 range as that control.
+    @AppStorage(SettingsKeys.defaultCompressionQuality) private var quality: Double = 0.72
     @State private var busy = false
     @State private var alertMessage: String?
     @State private var showImporter = false
@@ -62,7 +64,7 @@ struct CompressToolView: View {
             exportDoc = nil
             switch result {
             case .success(let url):
-                ActivityLog.shared.recordSaved(Tool.compress.title, to: url, bytes: savedBytes)
+                PDFExportCoordinator.didExport(to: url, toolTitle: Tool.compress.title, bytes: savedBytes)
             case .failure(let err):
                 guard !err.isUserCancelled else { break }
                 alertMessage = err.localizedDescription
@@ -317,8 +319,20 @@ struct CompressToolView: View {
                     }
                 }
             }
-            exportDoc = PDFFileDocument(data: data)
-            showExporter = true
+            switch try await PDFExportCoordinator.route(
+                data: data,
+                source: fileURL,
+                toolTitle: Tool.compress.title,
+                defaultStem: "compressed",
+                suffixWord: "compressed"
+            ) {
+            case .savedBeside:
+                break
+            case .present(let document, let name):
+                exportDoc = document
+                suggestedName = name
+                showExporter = true
+            }
         } catch {
             alertMessage = error.localizedDescription
             ActivityLog.shared.error("\(Tool.compress.title) failed: \(error.localizedDescription)")

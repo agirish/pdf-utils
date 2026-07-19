@@ -379,14 +379,26 @@ struct SplitToolView: View {
             return
         }
 
-        let panel = NSOpenPanel()
-        panel.canChooseFiles = false
-        panel.canChooseDirectories = true
-        panel.canCreateDirectories = true
-        panel.allowsMultipleSelection = false
-        panel.prompt = "Choose Folder"
-        panel.message = "Choose a folder for the split PDF files"
-        guard panel.runModal() == .OK, let directory = panel.url else { return }
+        let directory: URL
+        // Which URLs need security scope for the write. A folder picked by the user is scoped; the
+        // source's own parent folder (used by "Save beside original") is not — and in this unsandboxed
+        // app doesn't need to be. Scoping it would fail `startAccessingSecurityScopedResource`.
+        let scopeURLs: [URL]
+        if SaveLocation.current() == .besideOriginal {
+            directory = fileURL.deletingLastPathComponent()
+            scopeURLs = [fileURL]
+        } else {
+            let panel = NSOpenPanel()
+            panel.canChooseFiles = false
+            panel.canChooseDirectories = true
+            panel.canCreateDirectories = true
+            panel.allowsMultipleSelection = false
+            panel.prompt = "Choose Folder"
+            panel.message = "Choose a folder for the split PDF files"
+            guard panel.runModal() == .OK, let chosen = panel.url else { return }
+            directory = chosen
+            scopeURLs = [fileURL, directory]
+        }
 
         busy = true
         AppStateManager.shared.beginOperation(Tool.split.title)
@@ -402,7 +414,7 @@ struct SplitToolView: View {
 
         do {
             let files = try await PDFBackgroundWork.run {
-                try URLCollectionSecurityScope.withAccess([fileURL, directory]) {
+                try URLCollectionSecurityScope.withAccess(scopeURLs) {
                     guard let doc = PDFDocument(url: fileURL) else {
                         throw PDFOperationError.couldNotOpen(fileURL)
                     }
@@ -429,6 +441,7 @@ struct SplitToolView: View {
                 result = SplitResult(directory: directory, files: files)
             }
             ActivityLog.shared.recordSaved(Tool.split.title, to: directory, bytes: nil, detail: "\(files.count) \(files.count == 1 ? "file" : "files")")
+            AfterExportAction.current().perform(on: files)
         } catch {
             alertMessage = error.localizedDescription
             ActivityLog.shared.error("\(Tool.split.title) failed: \(error.localizedDescription)")

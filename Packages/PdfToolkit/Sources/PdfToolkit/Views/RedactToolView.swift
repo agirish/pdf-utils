@@ -51,7 +51,7 @@ struct RedactToolView: View {
             exportDoc = nil
             switch result {
             case .success(let url):
-                ActivityLog.shared.recordSaved(Tool.redact.title, to: url, bytes: savedBytes)
+                PDFExportCoordinator.didExport(to: url, toolTitle: Tool.redact.title, bytes: savedBytes)
             case .failure(let err):
                 guard !err.isUserCancelled else { break }
                 alertMessage = err.localizedDescription
@@ -415,8 +415,20 @@ struct RedactToolView: View {
                     }
                 }
             }
-            exportDoc = PDFFileDocument(data: data)
-            showExporter = true
+            switch try await PDFExportCoordinator.route(
+                data: data,
+                source: fileURL,
+                toolTitle: Tool.redact.title,
+                defaultStem: "redacted",
+                suffixWord: "redacted"
+            ) {
+            case .savedBeside:
+                break
+            case .present(let document, let name):
+                exportDoc = document
+                suggestedName = name
+                showExporter = true
+            }
         } catch {
             alertMessage = error.localizedDescription
             ActivityLog.shared.error("\(Tool.redact.title) failed: \(error.localizedDescription)")

@@ -74,5 +74,9 @@ public struct ToolDetailView: View {
         .sheet(isPresented: $showHelp) {
             ToolHelpSheet(tool: tool)
         }
+        // Remember the tool in view so "Reopen last tool on launch" (Files settings) can restore it.
+        .onAppear {
+            UserDefaults.standard.set(tool.rawValue, forKey: SettingsKeys.lastToolUsed)
+        }
     }
 }

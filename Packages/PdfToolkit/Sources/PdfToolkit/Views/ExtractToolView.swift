@@ -59,7 +59,7 @@ struct ExtractToolView: View {
             exportDoc = nil
             switch result {
             case .success(let url):
-                ActivityLog.shared.recordSaved(Tool.extract.title, to: url, bytes: savedBytes)
+                PDFExportCoordinator.didExport(to: url, toolTitle: Tool.extract.title, bytes: savedBytes)
             case .failure(let err):
                 guard !err.isUserCancelled else { break }
                 alertMessage = err.localizedDescription
@@ -315,8 +315,20 @@ struct ExtractToolView: View {
                     }
                 }
             }
-            exportDoc = PDFFileDocument(data: data)
-            showExporter = true
+            switch try await PDFExportCoordinator.route(
+                data: data,
+                source: fileURL,
+                toolTitle: Tool.extract.title,
+                defaultStem: "extracted",
+                suffixWord: "extracted"
+            ) {
+            case .savedBeside:
+                break
+            case .present(let document, let name):
+                exportDoc = document
+                suggestedName = name
+                showExporter = true
+            }
         } catch {
             alertMessage = error.localizedDescription
             ActivityLog.shared.error("\(Tool.extract.title) failed: \(error.localizedDescription)")

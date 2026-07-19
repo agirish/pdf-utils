@@ -90,7 +90,7 @@ struct ProtectToolView: View {
             clearPasswords()
             switch result {
             case .success(let url):
-                ActivityLog.shared.recordSaved(Tool.protect.title, to: url, bytes: savedBytes)
+                PDFExportCoordinator.didExport(to: url, toolTitle: Tool.protect.title, bytes: savedBytes)
             case .failure(let err):
                 guard !err.isUserCancelled else { break }
                 alertMessage = err.localizedDescription
@@ -334,8 +334,21 @@ struct ProtectToolView: View {
                     }
                 }
             }
-            exportDoc = PDFFileDocument(data: data)
-            showExporter = true
+            let suffixWord = modeSnapshot == .protect ? "protected" : "unlocked"
+            switch try await PDFExportCoordinator.route(
+                data: data,
+                source: fileURL,
+                toolTitle: Tool.protect.title,
+                defaultStem: suffixWord,
+                suffixWord: suffixWord
+            ) {
+            case .savedBeside:
+                break
+            case .present(let document, let name):
+                exportDoc = document
+                suggestedName = name
+                showExporter = true
+            }
         } catch {
             alertMessage = error.localizedDescription
             ActivityLog.shared.error("\(Tool.protect.title) failed: \(error.localizedDescription)")

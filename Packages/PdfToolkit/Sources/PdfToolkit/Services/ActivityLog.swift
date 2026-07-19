@@ -259,9 +259,16 @@ public final class ActivityLog: ObservableObject {
     private nonisolated func log(_ level: LogLevel, _ message: String) -> Bool {
         guard level.severity >= minimumLevel.severity else { return false }
         let entry = LogEntry(level: level, message: message)
-        writer.append(entry.formattedString + "\n")
-        pending.mutate { $0.append(entry) }
-        DispatchQueue.main.async { [weak self] in self?.drainPending() }
+        // The handoff-buffer append rides the writer queue with the disk append: both mutations
+        // happen in one ordered domain, so `clearLogs`' queued purge either drops an entry from
+        // both destinations or keeps it in both. Mutating `pending` here on the caller's thread
+        // let an entry whose bytes the clear truncated from disk still surface in the viewer —
+        // a line that then silently vanished on relaunch.
+        writer.append(entry.formattedString + "\n") { [weak self] in
+            guard let self else { return }
+            self.pending.mutate { $0.append(entry) }
+            DispatchQueue.main.async { self.drainPending() }
+        }
         return true
     }
 
@@ -276,12 +283,16 @@ public final class ActivityLog: ObservableObject {
 
     // MARK: Clearing / flushing
 
-    /// Empties the in-memory mirror and the on-disk file. Also drops anything still in the handoff
-    /// buffer so a line enqueued just before the clear can't resurrect afterward.
+    /// Empties the in-memory mirror and the on-disk file. The handoff buffer is dropped twice: once
+    /// here (anything already handed off but not yet drained) and once on the writer queue after
+    /// the truncate lands (anything a concurrent `log()` appended to disk ahead of the truncate),
+    /// so an entry the clear wiped from disk can never resurrect in the viewer.
     public func clearLogs() {
         _ = pending.take()
         entries.removeAll()
-        writer.clear()
+        writer.clear { [pending] in
+            _ = pending.take()
+        }
     }
 
     /// Blocks until every buffered disk write is committed. Called at app termination so an in-flight
@@ -402,8 +413,11 @@ final class LogFileWriter: @unchecked Sendable {
         try? tail.write(to: url, options: .atomic)
     }
 
-    func append(_ text: String) {
+    /// `completion` runs on the writer queue immediately after the bytes land, so callers can
+    /// sequence their own bookkeeping against the disk state (see `ActivityLog.log`).
+    func append(_ text: String, then completion: (@Sendable () -> Void)? = nil) {
         queue.async { [weak self] in
+            defer { completion?() }
             guard let self, let data = text.data(using: .utf8) else { return }
             // Reopen if the path's current inode no longer matches the handle's — never opened,
             // removed, or replaced externally — so a stale handle can't write into an orphaned inode.
@@ -447,9 +461,11 @@ final class LogFileWriter: @unchecked Sendable {
         queue.sync {}
     }
 
-    /// Truncates the file to empty, keeping the open handle valid.
-    func clear() {
+    /// Truncates the file to empty, keeping the open handle valid. `completion` runs on the writer
+    /// queue right after the truncate, ordered after every previously enqueued append.
+    func clear(then completion: (@Sendable () -> Void)? = nil) {
         queue.async { [weak self] in
+            defer { completion?() }
             guard let self else { return }
             if let handle = self.handle {
                 try? handle.truncate(atOffset: 0)

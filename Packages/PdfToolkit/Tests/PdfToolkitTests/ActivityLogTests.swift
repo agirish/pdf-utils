@@ -48,4 +48,28 @@ struct ActivityLogTests {
         let contents = (try? String(contentsOf: url, encoding: .utf8)) ?? ""
         #expect(contents.isEmpty)
     }
+
+    @Test func entryLoggedAfterClearSurvivesBothDestinations() async throws {
+        // Clearing now purges the handoff buffer on the writer queue, ordered after the truncate —
+        // this pins that the purge drops only pre-clear entries: one logged after the clear must
+        // reach both the file and the in-memory mirror, and the pre-clear one may never resurrect.
+        let url = tempURL()
+        defer { try? FileManager.default.removeItem(at: url) }
+        let log = ActivityLog(fileURL: url)
+        log.info("before-clear")
+        log.flushToDisk()
+        log.clearLogs()
+        log.info("after-clear")
+        log.flushToDisk()
+
+        let contents = (try? String(contentsOf: url, encoding: .utf8)) ?? ""
+        #expect(!contents.contains("before-clear"))
+        #expect(contents.contains("after-clear"))
+
+        // The mirror drains on the main queue; yield until it catches up.
+        for _ in 0..<50 where !log.entries.contains(where: { $0.message == "after-clear" }) {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        #expect(log.entries.map(\.message) == ["after-clear"])
+    }
 }

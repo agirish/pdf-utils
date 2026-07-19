@@ -70,13 +70,25 @@ struct ToolTileView: View {
         VStack(alignment: .leading, spacing: 14) {
             ZStack {
                 RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .fill(tool.accent.opacity(0.18))
-                    .frame(height: 88)
+                    .fill(
+                        LinearGradient(
+                            colors: [tool.accent.opacity(0.30), tool.accent.opacity(0.12)],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
+                    .frame(height: 92)
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 16, style: .continuous)
+                            .strokeBorder(tool.accent.opacity(0.22), lineWidth: 1)
+                    }
                 Image(systemName: tool.symbolName)
-                    .font(.system(size: 36, weight: .medium))
+                    .font(.system(size: 34, weight: .medium))
                     .symbolRenderingMode(.hierarchical)
                     .foregroundStyle(tool.accent)
+                    .shadow(color: tool.accent.opacity(hovered ? 0.35 : 0), radius: 6)
             }
+
             VStack(alignment: .leading, spacing: 4) {
                 Text(tool.title)
                     .font(.headline)
@@ -87,17 +99,31 @@ struct ToolTileView: View {
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
+
+            Spacer(minLength: 0)
+
+            HStack(spacing: 5) {
+                Text("Open")
+                Image(systemName: "arrow.right")
+            }
+            .font(.caption.weight(.semibold))
+            .foregroundStyle(tool.accent)
+            .opacity(hovered ? 1 : 0)
+            .offset(x: hovered ? 0 : -4)
         }
         .padding(18)
         .frame(maxWidth: .infinity, minHeight: 200, alignment: .topLeading)
         .background {
             RoundedRectangle(cornerRadius: 22, style: .continuous)
                 .fill(.background)
-                .shadow(color: .black.opacity(hovered ? 0.12 : 0.06), radius: hovered ? 16 : 10, y: hovered ? 6 : 4)
+                .shadow(color: .black.opacity(hovered ? 0.14 : 0.06), radius: hovered ? 18 : 10, y: hovered ? 8 : 4)
         }
         .overlay {
             RoundedRectangle(cornerRadius: 22, style: .continuous)
-                .strokeBorder(.quaternary, lineWidth: 1)
+                .strokeBorder(
+                    hovered ? tool.accent.opacity(0.55) : Color.primary.opacity(0.08),
+                    lineWidth: hovered ? 1.5 : 1
+                )
         }
         .scaleEffect(hovered ? 1.02 : 1)
         .animation(.easeOut(duration: 0.18), value: hovered)

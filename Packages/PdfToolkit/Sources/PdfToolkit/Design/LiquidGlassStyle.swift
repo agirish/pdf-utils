@@ -16,6 +16,9 @@ public enum LiquidGlassHue: String, CaseIterable, Identifiable, Sendable {
     case purple
     case indigo
     case slate
+    /// A true neutral gray — the monochrome accent. Paired with the `single` tool-color style it makes
+    /// every tool (and the window) read as graphite, with no color.
+    case graphite
 
     public var id: String { rawValue }
 
@@ -32,6 +35,7 @@ public enum LiquidGlassHue: String, CaseIterable, Identifiable, Sendable {
         case .purple: return "Purple"
         case .indigo: return "Indigo"
         case .slate: return "Slate"
+        case .graphite: return "Graphite"
         }
     }
 
@@ -48,6 +52,7 @@ public enum LiquidGlassHue: String, CaseIterable, Identifiable, Sendable {
         case .purple: return Color(red: 0.55, green: 0.35, blue: 0.95)
         case .indigo: return Color(red: 0.4, green: 0.35, blue: 0.9)
         case .slate: return Color(red: 0.4, green: 0.45, blue: 0.55)
+        case .graphite: return Color(red: 0.53, green: 0.54, blue: 0.56)
         }
     }
 
@@ -114,6 +119,13 @@ public enum LiquidGlassHue: String, CaseIterable, Identifiable, Sendable {
                 Color(red: 0.5, green: 0.55, blue: 0.65),
                 Color(red: 0.4, green: 0.45, blue: 0.55),
                 Color(red: 0.25, green: 0.3, blue: 0.4),
+            ]
+        case .graphite:
+            // A neutral gray triad — no hue, so `single + graphite` reads as a true monochrome window.
+            return [
+                Color(red: 0.60, green: 0.61, blue: 0.63),
+                Color(red: 0.45, green: 0.46, blue: 0.48),
+                Color(red: 0.29, green: 0.30, blue: 0.32),
             ]
         }
     }

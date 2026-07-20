@@ -311,6 +311,10 @@ struct AppearanceSettingsTab: View {
                 }
                 .pickerStyle(.segmented)
                 .labelsHidden()
+
+                // A live strip of representative tool icons in their resolved accent, so the effect of
+                // the style (and, under Single, the accent hue above) is visible right here.
+                AccentStylePreviewStrip(style: accentStyle, hue: selectedHue)
             } header: {
                 Text("Tool colors")
             } footer: {
@@ -404,6 +408,46 @@ struct AppearanceSettingsTab: View {
         .onChange(of: appearanceModeRaw) { _, _ in
             AppAppearance.applyPersisted()
         }
+    }
+}
+
+/// A live row of representative tool icons rendered in their resolved accent, shown under the
+/// "Tool colors" picker so Multicolor vs Single (and, under Single, the accent hue) is visible at a
+/// glance rather than only described.
+private struct AccentStylePreviewStrip: View {
+    let style: AccentStyle
+    let hue: LiquidGlassHue
+
+    // A spread of tools whose default colors differ most, so the multicolor → single change is obvious.
+    private let sample: [Tool] = [.compress, .merge, .split, .watermark, .redact, .protect]
+
+    var body: some View {
+        HStack(spacing: 8) {
+            ForEach(sample) { tool in
+                let accent = style.accent(for: tool, hue: hue)
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .fill(
+                        LinearGradient(colors: [accent.opacity(0.32), accent.opacity(0.14)],
+                                       startPoint: .topLeading, endPoint: .bottomTrailing)
+                    )
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                            .strokeBorder(accent.opacity(0.5), lineWidth: 1)
+                    }
+                    .overlay {
+                        Image(systemName: tool.symbolName)
+                            .font(.system(size: 14, weight: .semibold))
+                            .symbolRenderingMode(.hierarchical)
+                            .foregroundStyle(accent)
+                    }
+                    .frame(width: 34, height: 34)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.top, 2)
+        .accessibilityHidden(true)
+        .animation(.easeOut(duration: 0.15), value: style)
+        .animation(.easeOut(duration: 0.15), value: hue)
     }
 }
 

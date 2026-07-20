@@ -2,8 +2,9 @@ import Testing
 import SwiftUI
 @testable import PdfToolkit
 
-/// The accent-style preset resolves a tool's effective accent three ways. Pin each so a future change
-/// to the palette or the resolver can't silently break the Settings option.
+/// The accent-style preset resolves a tool's effective accent two ways (a monochrome look is Single +
+/// the neutral Graphite hue). Pin each so a future change to the palette or resolver can't silently
+/// break the Settings option.
 @Suite struct AccentStyleTests {
 
     @Test func multicolorKeepsEachToolsOwnAccent() {
@@ -23,9 +24,10 @@ import SwiftUI
         #expect(AccentStyle.single.accent(for: .compress, hue: .none) == Color.accentColor)
     }
 
-    @Test func monochromeIsOneNeutralForEveryTool() {
+    @Test func singleWithGraphiteGivesOneNeutralForEveryTool() {
+        // The monochrome look is Single + the neutral Graphite hue — the same gray for every tool.
         for tool in Tool.allCases {
-            #expect(AccentStyle.monochrome.accent(for: tool, hue: .blue) == AccentStyle.monochromeAccent)
+            #expect(AccentStyle.single.accent(for: tool, hue: .graphite) == LiquidGlassHue.graphite.accentColor)
         }
     }
 }

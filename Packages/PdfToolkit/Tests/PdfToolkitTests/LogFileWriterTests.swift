@@ -30,6 +30,32 @@ struct LogFileWriterTests {
         #expect(contents.isEmpty)
     }
 
+    @Test func twoWritersSharingOneFileKeepEveryAppendedLine() {
+        // The app and the menu-bar Helper each own a LogFileWriter over the same `~/pdf-utils.log`.
+        // Two writers on one path stand in for the two processes here: O_APPEND makes concurrent
+        // appends atomic, so no line is interleaved or lost even when they write at the same time.
+        let url = tempURL()
+        defer { try? FileManager.default.removeItem(at: url) }
+        let appWriter = LogFileWriter(url: url)
+        let helperWriter = LogFileWriter(url: url)
+
+        let perWriter = 200
+        DispatchQueue.concurrentPerform(iterations: perWriter) { i in
+            appWriter.append("app-\(i)\n")
+            helperWriter.append("helper-\(i)\n")
+        }
+        appWriter.flush()
+        helperWriter.flush()
+
+        let contents = (try? String(contentsOf: url, encoding: .utf8)) ?? ""
+        let lines = contents.split(separator: "\n", omittingEmptySubsequences: true)
+        // Every line lands intact (no partial/spliced lines) and none are dropped.
+        #expect(lines.count == perWriter * 2)
+        #expect(lines.allSatisfy { $0.hasPrefix("app-") || $0.hasPrefix("helper-") })
+        #expect(lines.filter { $0.hasPrefix("app-") }.count == perWriter)
+        #expect(lines.filter { $0.hasPrefix("helper-") }.count == perWriter)
+    }
+
     @Test func initTrimsOversizedFileToLineBoundary() throws {
         let url = tempURL()
         defer { try? FileManager.default.removeItem(at: url) }

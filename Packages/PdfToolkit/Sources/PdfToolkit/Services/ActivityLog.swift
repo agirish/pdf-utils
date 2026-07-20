@@ -4,8 +4,9 @@ import SwiftUI
 // MARK: - Log level
 
 /// The severity of an Activity Log entry. Ported from SyncCloud's `Events/Logger` so the two apps'
-/// logs read and parse identically; pdf-utils is a single process (no CLI sharing the file), so the
-/// cross-process machinery SyncCloud carries is deliberately left out here.
+/// logs read and parse identically. Like SyncCloud, pdf-utils shares its log file across processes —
+/// the main app and the menu-bar Helper both write it — so the cross-process trim lock is carried;
+/// only SyncCloud's CLI-specific machinery is left out.
 public enum LogLevel: String, CaseIterable, Identifiable, Sendable {
     /// Informational telemetry — the standard "operation succeeded" event.
     case info = "INFO"
@@ -369,8 +370,10 @@ extension LockedValue where Value: RangeReplaceableCollection {
 
 /// Appends log text to a file on a dedicated serial queue, keeping one `FileHandle` open across
 /// writes instead of an open/seek/close per line. All handle access is confined to `queue`. Adapted
-/// from SyncCloud's `LogFileWriter` minus the cross-process `flock` trim lock (pdf-utils is a single
-/// process — no CLI shares the file). Internal so tests can drive the trim/clear behavior directly.
+/// from SyncCloud's `LogFileWriter`, including its cross-process `flock` trim lock: the main app and
+/// the menu-bar Helper both write `~/pdf-utils.log` (the Helper records Finder-triggered runs), so
+/// the shared file needs the same trim serialization SyncCloud uses for its app + CLI. Internal so
+/// tests can drive the trim/clear behavior directly.
 final class LogFileWriter: @unchecked Sendable {
     private static let defaultMaxFileSize = 5 * 1024 * 1024
 
@@ -390,9 +393,30 @@ final class LogFileWriter: @unchecked Sendable {
         self.maxFileSize = maxFileSize
         trimCheckInterval = min(1024 * 1024, max(1, maxFileSize / 2))
         queue.async { [self] in
-            trimTailIfOversized(maxFileSize: maxFileSize)
+            withTrimLock { trimTailIfOversized(maxFileSize: maxFileSize) }
             openHandle()
         }
+    }
+
+    /// Runs `body` holding an exclusive `flock` on a sidecar `<log>.lock` file. The main app and the
+    /// menu-bar Helper both write `~/pdf-utils.log`, and a trim is a read-tail + atomic-rename of the
+    /// whole file: two concurrent trims could each rewrite from a stale tail and clobber the other's
+    /// result. The lock serializes trims across processes; each caller re-stats the size INSIDE
+    /// `body`, so a trim that lost the race re-checks and finds nothing left to do.
+    ///
+    /// Appends deliberately stay off this lock — `O_APPEND` already makes each write atomic across
+    /// processes, and a cross-process syscall on every line isn't worth it. The one accepted residual
+    /// is that the other process's in-flight append can land on the old inode during our rename and
+    /// be lost; its next append's inode-identity check (see ``append``) reopens and self-heals. If
+    /// the lock file can't be opened, the trim proceeds unguarded rather than letting the log grow
+    /// unbounded. Runs on `queue`.
+    private func withTrimLock(_ body: () -> Void) {
+        let fd = open(url.path + ".lock", O_WRONLY | O_CREAT, 0o644)
+        guard fd >= 0 else { body(); return }
+        defer { close(fd) }  // closing the descriptor releases the flock too
+        _ = flock(fd, LOCK_EX)
+        body()
+        _ = flock(fd, LOCK_UN)
     }
 
     /// Inode of the item currently at `url`; nil when the path does not exist. Runs on `queue`.
@@ -471,13 +495,17 @@ final class LogFileWriter: @unchecked Sendable {
     /// Mid-session counterpart to the init-time trim. The trim rewrites the file atomically (new
     /// inode), so the open handle is closed first and reopened after. Runs on `queue`.
     private func trimMidSessionIfOversized() {
-        guard let attributes = try? FileManager.default.attributesOfItem(atPath: url.path),
-              let size = (attributes[.size] as? NSNumber)?.intValue,
-              size > maxFileSize else { return }
-        try? handle?.close()
-        handle = nil
-        trimTailIfOversized(maxFileSize: maxFileSize)
-        openHandle()
+        // The size check runs UNDER the trim lock: the other process may have just trimmed, and a
+        // decision made from a pre-lock stat would re-cut a file already back under the cap.
+        withTrimLock {
+            guard let attributes = try? FileManager.default.attributesOfItem(atPath: url.path),
+                  let size = (attributes[.size] as? NSNumber)?.intValue,
+                  size > maxFileSize else { return }
+            try? handle?.close()
+            handle = nil
+            trimTailIfOversized(maxFileSize: maxFileSize)
+            openHandle()
+        }
     }
 
     /// Blocks until every append/clear enqueued before this call has finished — the barrier behind

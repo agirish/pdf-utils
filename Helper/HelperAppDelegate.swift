@@ -40,6 +40,15 @@ final class HelperAppDelegate: NSObject, NSApplicationDelegate, UNUserNotificati
         center.delegate = self // so banners show even while the helper is the active app
         center.requestAuthorization(options: [.alert, .sound]) { _, _ in }
 
+        // Finder-triggered work records into the same `~/pdf-utils.log` the app writes, so honor the
+        // "Activity logging level" the user picked in the app. That setting lives in the app's
+        // defaults domain, not the helper's own (we have a separate bundle id), so read it explicitly;
+        // an unreadable/absent value falls back to the shared default level. Touching `.shared` here
+        // also initializes it on the main actor, ahead of the background work queue's log calls.
+        if let appDefaults = UserDefaults(suiteName: Self.mainAppBundleID) {
+            ActivityLog.shared.minimumLevel = ActivityLog.persistedMinimumLevel(from: appDefaults)
+        }
+
         // A ping may have launched us specifically to handle a request already on disk.
         processCommand()
     }
@@ -178,6 +187,11 @@ final class HelperAppDelegate: NSObject, NSApplicationDelegate, UNUserNotificati
               let action = obj["action"] as? String,
               let paths = obj["paths"] as? [String], !paths.isEmpty else { return }
         let inputs = paths.map { URL(fileURLWithPath: $0) }
+        // Captured on the main actor so the background work queue can record into the shared log
+        // without touching the main-actor-isolated `.shared` accessor off-thread (the logging methods
+        // themselves are nonisolated). Attribution matches the in-app tools so the log reads uniformly
+        // regardless of whether an operation started in the app or from a Finder right-click.
+        let log = ActivityLog.shared
 
         switch action {
         case "compress":
@@ -187,8 +201,14 @@ final class HelperAppDelegate: NSObject, NSApplicationDelegate, UNUserNotificati
                 var failed: [String] = []
                 for input in inputs {
                     let output = Self.uniqueOutput(for: input, suffix: "compressed")
-                    do { try PDFToolkit.compress(inputURL: input, outputURL: output, quality: 0.6); revealed.append(output) }
-                    catch { failed.append(input.lastPathComponent) }
+                    do {
+                        try PDFToolkit.compress(inputURL: input, outputURL: output, quality: 0.6)
+                        revealed.append(output)
+                        log.recordSaved(Tool.compress.title, to: output, bytes: Self.fileSize(of: output))
+                    } catch {
+                        failed.append(input.lastPathComponent)
+                        log.error("\(Tool.compress.title) failed for \(input.lastPathComponent): \(error.localizedDescription)")
+                    }
                 }
                 finish(id: "pdfutils.compress", title: "Compress PDF", revealed: revealed, failed: failed)
             }
@@ -200,8 +220,10 @@ final class HelperAppDelegate: NSObject, NSApplicationDelegate, UNUserNotificati
                 let output = Self.uniqueOutput(inDirectory: inputs[0].deletingLastPathComponent(), name: "Merged")
                 do {
                     try PDFToolkit.merge(inputURLs: inputs, outputURL: output)
+                    log.recordSaved(Tool.merge.title, to: output, bytes: Self.fileSize(of: output), detail: "\(inputs.count) files")
                     finish(id: "pdfutils.merge", title: "Merge PDFs", revealed: [output], failed: [])
                 } catch {
+                    log.error("\(Tool.merge.title) failed: \(error.localizedDescription)")
                     finish(id: "pdfutils.merge", title: "Merge PDFs", revealed: [], failed: ["merge"])
                 }
             }
@@ -233,7 +255,7 @@ final class HelperAppDelegate: NSObject, NSApplicationDelegate, UNUserNotificati
 
     // MARK: - Remove password (interactive: needs a prompt, so it runs on the main actor)
 
-    private enum UnlockOutcome { case success(URL), notEncrypted, failed, cancelled }
+    private enum UnlockOutcome { case success(URL), notEncrypted, failed(String), cancelled }
 
     private func runUnlock(_ inputs: [URL]) {
         var revealed: [URL] = []
@@ -241,9 +263,13 @@ final class HelperAppDelegate: NSObject, NSApplicationDelegate, UNUserNotificati
         var failed: [String] = []
         loop: for input in inputs {
             switch unlockOne(input) {
-            case .success(let output): revealed.append(output)
+            case .success(let output):
+                revealed.append(output)
+                ActivityLog.shared.recordSaved(Tool.protect.title, to: output, bytes: Self.fileSize(of: output))
             case .notEncrypted: notProtected.append(input.lastPathComponent)
-            case .failed: failed.append(input.lastPathComponent)
+            case .failed(let reason):
+                failed.append(input.lastPathComponent)
+                ActivityLog.shared.error("\(Tool.protect.title) failed for \(input.lastPathComponent): \(reason)")
             case .cancelled: break loop // user backed out — stop prompting for the rest
             }
         }
@@ -285,12 +311,12 @@ final class HelperAppDelegate: NSObject, NSApplicationDelegate, UNUserNotificati
                 switch op {
                 case .incorrectPassword: continue        // wrong password — prompt again
                 case .notEncrypted: return .notEncrypted // nothing to remove
-                default: return .failed
+                default: return .failed(error.localizedDescription)
                 }
             }
-            return .failed
+            return .failed(error.localizedDescription)
         }
-        return .failed // exhausted attempts
+        return .failed("the password was incorrect") // exhausted attempts
     }
 
     private func promptPassword(for fileName: String, wrongPrevious: Bool) -> String? {
@@ -326,6 +352,12 @@ final class HelperAppDelegate: NSObject, NSApplicationDelegate, UNUserNotificati
             n += 1
         }
         return candidate
+    }
+
+    /// Byte size of a just-written output, for the Activity Log's `(1.2 MB)` suffix. Best-effort — a
+    /// nil size simply omits the suffix rather than failing the recording.
+    private nonisolated static func fileSize(of url: URL) -> Int? {
+        try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize
     }
 
     private nonisolated func startBody(_ count: Int) -> String {

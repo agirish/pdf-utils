@@ -18,6 +18,18 @@ extension NSItemProvider {
         return type?.conforms(to: .pdf) == true ? url : nil
     }
 
+    /// Image-flavored twin of ``resolvePDFItemURL()`` for the Images to PDF drop target.
+    func resolveImageItemURL() async -> URL? {
+        if let url = await loadItemURL(typeIdentifier: UTType.image.identifier) {
+            return url
+        }
+        guard let url = await loadItemURL(typeIdentifier: UTType.fileURL.identifier) else { return nil }
+        let type = try? url.resourceValues(forKeys: [.contentTypeKey]).contentType
+        if type?.conforms(to: .image) == true { return url }
+        // Fall back to the extension for volumes that don't report a content type.
+        return UTType(filenameExtension: url.pathExtension)?.conforms(to: .image) == true ? url : nil
+    }
+
     func loadItemURL(typeIdentifier: String) async -> URL? {
         await withCheckedContinuation { continuation in
             loadItem(forTypeIdentifier: typeIdentifier, options: nil) { item, _ in

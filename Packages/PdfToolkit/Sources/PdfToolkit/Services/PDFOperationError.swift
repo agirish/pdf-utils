@@ -24,6 +24,7 @@ public enum PDFOperationError: LocalizedError {
     case notEncrypted
     case protectionFailed
     case metadataEncrypted
+    case couldNotOpenImage(URL)
 
     public var errorDescription: String? {
         switch self {
@@ -73,6 +74,8 @@ public enum PDFOperationError: LocalizedError {
             return "Could not write the PDF. If the file is open elsewhere, close it and try again."
         case .metadataEncrypted:
             return "This PDF is password-protected, so its metadata can’t be edited. Remove the password with Password Protect first."
+        case .couldNotOpenImage(let url):
+            return "Could not read the image “\(url.lastPathComponent)”."
         }
     }
 }

@@ -50,6 +50,8 @@ public struct ToolDetailView: View {
                     ProtectToolView()
                 case .metadata:
                     MetadataToolView()
+                case .imagesToPdf:
+                    ImagesToPDFToolView()
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)

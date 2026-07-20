@@ -34,6 +34,29 @@ extension Tool {
                     "The summary line under the form tells you when the file still names an author or creator app.",
                 ]
             )
+        case .imagesToPdf:
+            return ToolHelpContent(
+                overview:
+                    "Images to PDF combines pictures into one document, a page per image, in list order. iPhone photos, screenshots, and scans all work—orientation is read from the file, so sideways shots come out upright.",
+                steps: [
+                    "Click Add Images… and pick one or more images (⌘-click for several), or drag them from Finder onto the dashed area.",
+                    "Reorder with the chevron buttons; the trash button removes a row without touching the file on disk.",
+                    "Pick a page size: Auto gives every page its image’s exact shape; A4 and US Letter are fixed paper sizes.",
+                    "On a fixed size, choose Fit (whole image visible) or Fill (edge to edge, cropped).",
+                    "Click Combine & save… and choose where the PDF goes.",
+                ],
+                controls: [
+                    ("Add Images…", "Appends chosen images to the list. Order is top to bottom in the PDF."),
+                    ("↑ / ↓", "Swaps the row with its neighbor—fix order without re-importing."),
+                    ("Page size", "Auto (match image) makes each page exactly its image’s size. A4 and US Letter flip to landscape automatically for landscape images."),
+                    ("Fit / Fill", "Fit letterboxes the whole image onto the page; Fill covers the page completely and crops the overflow."),
+                    ("Combine & save…", "Builds the PDF off the main thread, then opens the save panel."),
+                ],
+                tips: [
+                    "Big photos make big PDFs—run the result through Compress if it needs to be emailed.",
+                    "The same image can appear twice: add it twice and it becomes two pages.",
+                ]
+            )
         case .compress:
             return ToolHelpContent(
                 overview:

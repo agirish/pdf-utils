@@ -222,6 +222,7 @@ extension PDFOperationError {
         case .notEncrypted: return "notEncrypted"
         case .protectionFailed: return "protectionFailed"
         case .metadataEncrypted: return "metadataEncrypted"
+        case .couldNotOpenImage: return "couldNotOpenImage"
         }
     }
 }

@@ -13,6 +13,7 @@ public enum Tool: String, CaseIterable, Identifiable, Hashable {
     case fillSign
     case protect
     case metadata
+    case imagesToPdf
 
     public var id: String { rawValue }
 
@@ -30,6 +31,7 @@ public enum Tool: String, CaseIterable, Identifiable, Hashable {
         case .fillSign: return "Fill & Sign"
         case .protect: return "Password Protect"
         case .metadata: return "Clean Metadata"
+        case .imagesToPdf: return "Images to PDF"
         }
     }
 
@@ -59,6 +61,8 @@ public enum Tool: String, CaseIterable, Identifiable, Hashable {
             return "Encrypt a PDF, or remove its password"
         case .metadata:
             return "View, edit, or strip hidden document info"
+        case .imagesToPdf:
+            return "Turn photos and scans into one PDF"
         }
     }
 
@@ -89,6 +93,8 @@ public enum Tool: String, CaseIterable, Identifiable, Hashable {
             return "Add a password that’s required to open a PDF, or strip the password from one you can already open. Encryption is the standard PDF scheme, applied on your Mac—the password never leaves your machine."
         case .metadata:
             return "See what a PDF says about itself—title, author, keywords, the app that made it, dates—then edit any field or strip them all before sharing. Only the info fields are rewritten; the pages themselves are untouched."
+        case .imagesToPdf:
+            return "Drop in JPG, PNG, or HEIC images and get one PDF with a page per image, in the order shown. Choose a paper size—or let each page match its image exactly—and whether pictures fit inside the page or fill it edge to edge."
         }
     }
 
@@ -107,6 +113,7 @@ public enum Tool: String, CaseIterable, Identifiable, Hashable {
         case .fillSign: return "hand.draw"
         case .protect: return "lock.doc"
         case .metadata: return "tag.slash"
+        case .imagesToPdf: return "photo.on.rectangle.angled"
         }
     }
 
@@ -125,6 +132,7 @@ public enum Tool: String, CaseIterable, Identifiable, Hashable {
         case .protect: return .green
         // Periwinkle: sits between merge's purple and split's indigo without matching either.
         case .metadata: return Color(red: 0.48, green: 0.53, blue: 0.94)
+        case .imagesToPdf: return .yellow
         }
     }
 }

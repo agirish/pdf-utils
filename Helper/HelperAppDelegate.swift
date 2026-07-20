@@ -228,6 +228,30 @@ final class HelperAppDelegate: NSObject, NSApplicationDelegate, UNUserNotificati
                 }
             }
 
+        case "rotate":
+            let turns = obj["quarterTurns"] as? Int ?? 1
+            notify(id: "pdfutils.rotate", title: "Rotate PDF", body: startBody(inputs.count))
+            workQueue.async { [self] in
+                var revealed: [URL] = []
+                var failed: [String] = []
+                for input in inputs {
+                    let count = PDFToolkit.pageCount(at: input) ?? 0
+                    let output = Self.uniqueOutput(for: input, suffix: "rotated")
+                    do {
+                        try PDFToolkit.rotate(inputURL: input, outputURL: output, pageIndices: Array(0..<count), quarterTurns: turns)
+                        revealed.append(output)
+                        log.recordSaved(Tool.rotate.title, to: output, bytes: Self.fileSize(of: output))
+                    } catch {
+                        failed.append(input.lastPathComponent)
+                        log.error("\(Tool.rotate.title) failed for \(input.lastPathComponent): \(error.localizedDescription)")
+                    }
+                }
+                finish(id: "pdfutils.rotate", title: "Rotate PDF", revealed: revealed, failed: failed)
+            }
+
+        case "extract":
+            if let input = inputs.first { runExtract(input, log: log) }
+
         case "unlock":
             runUnlock(inputs)
 
@@ -330,6 +354,52 @@ final class HelperAppDelegate: NSObject, NSApplicationDelegate, UNUserNotificati
         alert.addButton(withTitle: "Cancel")
         let field = NSSecureTextField(frame: NSRect(x: 0, y: 0, width: 240, height: 24))
         field.placeholderString = "Password"
+        alert.accessoryView = field
+        alert.window.initialFirstResponder = field
+        return alert.runModal() == .alertFirstButtonReturn ? field.stringValue : nil
+    }
+
+    // MARK: - Extract pages (interactive: needs a page-range prompt)
+
+    private func runExtract(_ input: URL, log: ActivityLog) {
+        guard let count = PDFToolkit.pageCount(at: input), count > 0 else {
+            showInfo(title: "Couldn't read “\(input.lastPathComponent)”",
+                     text: "The PDF may be damaged or password-protected.")
+            return
+        }
+        guard let text = promptPageRange(for: input.lastPathComponent, pageCount: count) else { return } // cancelled
+        let indices: [Int]
+        do {
+            // Extract semantics: the whole entry is one output file, pages kept in the order typed.
+            indices = try PageRangeParser.parse(text, pageCount: count, emptyMeansAllPages: false, preserveOrder: true)
+        } catch {
+            showInfo(title: "Couldn't extract those pages",
+                     text: (error as? PDFOperationError)?.errorDescription ?? error.localizedDescription)
+            return
+        }
+        let output = Self.uniqueOutput(for: input, suffix: "pages")
+        notify(id: "pdfutils.extract", title: "Extract Pages", body: startBody(1))
+        workQueue.async { [self] in
+            do {
+                try PDFToolkit.extract(inputURL: input, outputURL: output, pageIndices: indices)
+                log.recordSaved(Tool.extract.title, to: output, bytes: Self.fileSize(of: output), detail: "\(indices.count) pages")
+                finish(id: "pdfutils.extract", title: "Extract Pages", revealed: [output], failed: [])
+            } catch {
+                log.error("\(Tool.extract.title) failed for \(input.lastPathComponent): \(error.localizedDescription)")
+                finish(id: "pdfutils.extract", title: "Extract Pages", revealed: [], failed: ["extract"])
+            }
+        }
+    }
+
+    private func promptPageRange(for fileName: String, pageCount: Int) -> String? {
+        NSApp.activate(ignoringOtherApps: true)
+        let alert = NSAlert()
+        alert.messageText = "Extract pages from “\(fileName)”"
+        alert.informativeText = "Which pages? For example 1, 3-5. This PDF has \(pageCount) pages."
+        alert.addButton(withTitle: "Extract")
+        alert.addButton(withTitle: "Cancel")
+        let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 240, height: 24))
+        field.placeholderString = "1, 3-5"
         alert.accessoryView = field
         alert.window.initialFirstResponder = field
         return alert.runModal() == .alertFirstButtonReturn ? field.stringValue : nil

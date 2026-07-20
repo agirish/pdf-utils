@@ -42,7 +42,7 @@ struct CompressionAttempt: Equatable, Sendable {
 
 public enum PDFToolkit {
     /// Quick page count for UI summaries; the URL must already be readable (e.g. under active security scope).
-    static func pageCount(at url: URL) -> Int? {
+    public static func pageCount(at url: URL) -> Int? {
         guard let doc = PDFDocument(url: url) else { return nil }
         return doc.pageCount
     }
@@ -149,7 +149,7 @@ public enum PDFToolkit {
     }
 
     /// Copies listed pages (zero-based) into a new PDF.
-    static func extract(inputURL: URL, outputURL: URL, pageIndices: [Int]) throws {
+    public static func extract(inputURL: URL, outputURL: URL, pageIndices: [Int]) throws {
         guard !pageIndices.isEmpty else { throw PDFOperationError.noPagesSelected }
         try requireDistinctOutput(outputURL, from: [inputURL])
         guard let source = PDFDocument(url: inputURL) else {
@@ -207,7 +207,7 @@ public enum PDFToolkit {
     }
 
     /// Rotates selected pages by `quarterTurns` × 90° clockwise.
-    static func rotate(inputURL: URL, outputURL: URL, pageIndices: [Int], quarterTurns: Int) throws {
+    public static func rotate(inputURL: URL, outputURL: URL, pageIndices: [Int], quarterTurns: Int) throws {
         try requireDistinctOutput(outputURL, from: [inputURL])
         guard let doc = PDFDocument(url: inputURL) else {
             throw PDFOperationError.couldNotOpen(inputURL)

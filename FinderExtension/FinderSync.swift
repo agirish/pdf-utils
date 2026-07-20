@@ -57,6 +57,24 @@ final class PdfUtilsFinderSync: FIFinderSync {
         // password-protected" when there's nothing to remove.
         menu.addItem(actionItem(n == 1 ? "Remove Password…" : "Remove Password from \(n) PDFs…",
                                 #selector(unlockPDFs(_:)), symbol: "lock.open"))
+
+        // Rotate — a submenu of directions; no dialog needed (rotates every page). Applies to all
+        // selected PDFs.
+        let rotateItem = NSMenuItem(title: n == 1 ? "Rotate PDF" : "Rotate \(n) PDFs", action: nil, keyEquivalent: "")
+        rotateItem.image = NSImage(systemSymbolName: "rotate.right", accessibilityDescription: nil)
+        let rotateSub = NSMenu(title: "Rotate")
+        rotateSub.autoenablesItems = false
+        rotateSub.addItem(actionItem("Rotate Right 90°", #selector(rotateRight(_:)), symbol: "rotate.right"))
+        rotateSub.addItem(actionItem("Rotate Left 90°", #selector(rotateLeft(_:)), symbol: "rotate.left"))
+        rotateSub.addItem(actionItem("Rotate 180°", #selector(rotate180(_:)), symbol: "arrow.uturn.down"))
+        rotateItem.submenu = rotateSub
+        menu.addItem(rotateItem)
+
+        // Extract pages — single PDF only (a page range pulled from one document).
+        if n == 1 {
+            menu.addItem(actionItem("Extract Pages…", #selector(extractPages(_:)), symbol: "doc.on.doc"))
+        }
+
         // Merge only makes sense for two or more.
         if n >= 2 {
             menu.addItem(actionItem("Merge \(n) PDFs", #selector(mergePDFs(_:)), symbol: "arrow.triangle.merge"))
@@ -100,14 +118,32 @@ final class PdfUtilsFinderSync: FIFinderSync {
         handOff(action: "merge", urls: pdfs)
     }
 
+    @objc func rotateRight(_ sender: AnyObject?) { rotate(quarterTurns: 1) } // 90° clockwise
+    @objc func rotateLeft(_ sender: AnyObject?) { rotate(quarterTurns: 3) }  // 90° counter-clockwise
+    @objc func rotate180(_ sender: AnyObject?) { rotate(quarterTurns: 2) }
+
+    private func rotate(quarterTurns: Int) {
+        let pdfs = selectedPDFs()
+        guard !pdfs.isEmpty else { return }
+        handOff(action: "rotate", urls: pdfs, extra: ["quarterTurns": quarterTurns])
+    }
+
+    @objc func extractPages(_ sender: AnyObject?) {
+        let pdfs = selectedPDFs()
+        guard pdfs.count == 1 else { return }
+        handOff(action: "extract", urls: pdfs)
+    }
+
     /// Serialize the request into this extension's container (a path the unsandboxed helper can
-    /// read) and ping the helper to carry it out.
-    private func handOff(action: String, urls: [URL]) {
-        let command: [String: Any] = [
+    /// read) and ping the helper to carry it out. `extra` carries per-action parameters (e.g. the
+    /// rotate direction).
+    private func handOff(action: String, urls: [URL], extra: [String: Any] = [:]) {
+        var command: [String: Any] = [
             "action": action,
             "paths": urls.map { $0.path },
             "ts": Date().timeIntervalSince1970,
         ]
+        command.merge(extra) { _, new in new }
         let cmdURL = URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent("command.json")
         if let data = try? JSONSerialization.data(withJSONObject: command, options: [.prettyPrinted]) {
             do { try data.write(to: cmdURL) } catch { diag("command.json write failed: \(error)") }

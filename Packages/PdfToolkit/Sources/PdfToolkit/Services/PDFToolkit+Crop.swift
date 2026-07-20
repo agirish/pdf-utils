@@ -176,17 +176,43 @@ extension PDFToolkit {
         var maxCol = -1
         var minRow = Int.max
         var maxRow = -1
-        for row in 0..<height {
-            for col in 0..<width {
-                guard let color = rep.colorAt(x: col, y: row)?.usingColorSpace(.deviceRGB) else { continue }
-                let brightness = (color.redComponent + color.greenComponent + color.blueComponent) / 3
-                // Anything meaningfully darker than paper counts as content; the thumbnail is
-                // drawn on an opaque white ground, so alpha needs no separate handling.
-                if brightness < 0.92 {
-                    minCol = min(minCol, col)
-                    maxCol = max(maxCol, col)
-                    minRow = min(minRow, row)
-                    maxRow = max(maxRow, row)
+
+        // Anything meaningfully darker than paper counts as content ((r+g+b)/765 < 0.92); the
+        // thumbnail is drawn on an opaque white ground, so alpha needs no separate handling.
+        let threshold = 704   // 0.92 × 765, rounded
+
+        if !rep.isPlanar, rep.bitsPerSample == 8, rep.samplesPerPixel >= 3, let base = rep.bitmapData {
+            // Fast path: 8-bit meshed RGB(A) — the format thumbnail TIFFs actually produce. The
+            // per-pixel colorAt + usingColorSpace alternative allocates two NSColors per pixel
+            // (~half a million per page); raw sample reads do the same threshold test for free.
+            let rowBytes = rep.bytesPerRow
+            let samples = rep.samplesPerPixel
+            let rgbOffset = rep.bitmapFormat.contains(.alphaFirst) ? 1 : 0
+            for row in 0..<height {
+                let rowPtr = base + row * rowBytes
+                for col in 0..<width {
+                    let p = rowPtr + col * samples + rgbOffset
+                    if Int(p[0]) + Int(p[1]) + Int(p[2]) < threshold {
+                        if col < minCol { minCol = col }
+                        if col > maxCol { maxCol = col }
+                        if row < minRow { minRow = row }
+                        if row > maxRow { maxRow = row }
+                    }
+                }
+            }
+        } else {
+            // Exotic formats (planar, deep color, narrow gray) fall back to the slow universal
+            // accessor rather than misreading bytes.
+            for row in 0..<height {
+                for col in 0..<width {
+                    guard let color = rep.colorAt(x: col, y: row)?.usingColorSpace(.deviceRGB) else { continue }
+                    let sum = Int((color.redComponent + color.greenComponent + color.blueComponent) * 255)
+                    if sum < threshold {
+                        minCol = min(minCol, col)
+                        maxCol = max(maxCol, col)
+                        minRow = min(minRow, row)
+                        maxRow = max(maxRow, row)
+                    }
                 }
             }
         }

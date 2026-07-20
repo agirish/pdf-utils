@@ -23,14 +23,6 @@ struct PDFMetadataFields: Equatable, Sendable {
     /// Read-only: reset by PDFKit to the save time on every save.
     var modificationDate: Date?
 
-    /// Fields whose presence identifies a person or their tools — what the tool's summary counts.
-    var identifyingFieldCount: Int {
-        var count = [author, creator, producer].filter { !$0.trimmed.isEmpty }.count
-        if creationDate != nil { count += 1 }
-        if modificationDate != nil { count += 1 }
-        return count
-    }
-
     /// True when every *editable* field is blank — the fully stripped state. Producer and dates
     /// don't count: PDFKit re-stamps them with neutral system values on save regardless.
     var isCleared: Bool {

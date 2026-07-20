@@ -44,7 +44,6 @@ import Testing
         #expect(fields.producer.contains("Quartz"))
         #expect(fields.creationDate != nil)
         #expect(fields.modificationDate != nil)
-        #expect(fields.identifyingFieldCount == 5)
         #expect(!fields.isCleared)
     }
 

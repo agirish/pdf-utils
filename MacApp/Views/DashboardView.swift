@@ -75,12 +75,14 @@ struct DashboardView: View {
     }
 
     private var header: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 10) {
             Text("Tools")
                 .font(.largeTitle.weight(.semibold))
             Text("Pick a tool to work on your PDFs. Files stay on your Mac. Use the toolbar “?” for an overview of the window controls.")
-                .font(.subheadline)
+                .font(.body)
                 .foregroundStyle(.secondary)
+                .lineSpacing(3)
+                .frame(maxWidth: 680, alignment: .leading)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
@@ -151,13 +153,13 @@ struct ToolTileView: View {
                     .shadow(color: tool.accent.opacity(hovered ? 0.35 : 0), radius: 6)
             }
 
-            VStack(alignment: .leading, spacing: 4) {
+            VStack(alignment: .leading, spacing: 5) {
                 Text(tool.title)
-                    .font(.headline)
+                    .font(.title3.weight(.semibold))
                     .foregroundStyle(.primary)
                     .multilineTextAlignment(.leading)
                 Text(tool.subtitle)
-                    .font(.caption)
+                    .font(.callout)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }

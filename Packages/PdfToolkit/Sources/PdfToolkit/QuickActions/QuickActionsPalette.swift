@@ -161,7 +161,7 @@ private struct QuickActionRow: View {
                     .font(.body)
                     .foregroundStyle(.primary)
                 Text(action.subtitle)
-                    .font(.caption)
+                    .font(.subheadline)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
             }

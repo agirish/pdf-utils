@@ -17,12 +17,13 @@ struct ToolScreenHeader: View {
             }
             .accessibilityHidden(true)
 
-            VStack(alignment: .leading, spacing: 6) {
+            VStack(alignment: .leading, spacing: 7) {
                 Text(tool.title)
                     .font(.title2.weight(.semibold))
                 Text(tool.headerDescription)
-                    .font(.subheadline)
+                    .font(.body)
                     .foregroundStyle(.secondary)
+                    .lineSpacing(3)
                     .fixedSize(horizontal: false, vertical: true)
             }
             .frame(maxWidth: .infinity, alignment: .leading)

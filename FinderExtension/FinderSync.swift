@@ -47,14 +47,30 @@ final class PdfUtilsFinderSync: FIFinderSync {
 
         let pdfs = selectedPDFs()
         guard !pdfs.isEmpty else { return menu }
+        let n = pdfs.count
 
-        let title = pdfs.count == 1 ? "Compress PDF" : "Compress \(pdfs.count) PDFs"
-        // No explicit target: the menu is serialized to Finder over XPC, so a `target` object can't
-        // cross the boundary. Finder dispatches the action selector back to this principal object.
-        let item = NSMenuItem(title: title, action: #selector(compressPDFs(_:)), keyEquivalent: "")
-        item.image = NSImage(systemSymbolName: "doc.zipper", accessibilityDescription: nil)
-        menu.addItem(item)
+        menu.addItem(actionItem(n == 1 ? "Compress PDF" : "Compress \(n) PDFs",
+                                #selector(compressPDFs(_:)), symbol: "doc.zipper"))
+        // Offered for any PDF: the sandbox blocks us from reading the file AND its Spotlight
+        // metadata (kMDItemSecurityMethod comes back nil for every file here), so we can't tell at
+        // menu-build time whether a PDF is actually encrypted. The helper reports "not
+        // password-protected" when there's nothing to remove.
+        menu.addItem(actionItem(n == 1 ? "Remove Password…" : "Remove Password from \(n) PDFs…",
+                                #selector(unlockPDFs(_:)), symbol: "lock.open"))
+        // Merge only makes sense for two or more.
+        if n >= 2 {
+            menu.addItem(actionItem("Merge \(n) PDFs", #selector(mergePDFs(_:)), symbol: "arrow.triangle.merge"))
+        }
         return menu
+    }
+
+    /// Builds a menu item with no explicit target: the menu is serialized to Finder over XPC, so a
+    /// `target` object can't cross the boundary. Finder dispatches the action selector back to this
+    /// principal object by name.
+    private func actionItem(_ title: String, _ action: Selector, symbol: String) -> NSMenuItem {
+        let item = NSMenuItem(title: title, action: action, keyEquivalent: "")
+        item.image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)
+        return item
     }
 
     private func selectedPDFs() -> [URL] {
@@ -70,6 +86,18 @@ final class PdfUtilsFinderSync: FIFinderSync {
         let pdfs = selectedPDFs()
         guard !pdfs.isEmpty else { return }
         handOff(action: "compress", urls: pdfs)
+    }
+
+    @objc func unlockPDFs(_ sender: AnyObject?) {
+        let pdfs = selectedPDFs()
+        guard !pdfs.isEmpty else { return }
+        handOff(action: "unlock", urls: pdfs)
+    }
+
+    @objc func mergePDFs(_ sender: AnyObject?) {
+        let pdfs = selectedPDFs()
+        guard pdfs.count >= 2 else { return }
+        handOff(action: "merge", urls: pdfs)
     }
 
     /// Serialize the request into this extension's container (a path the unsandboxed helper can

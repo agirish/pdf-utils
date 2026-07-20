@@ -10,7 +10,7 @@ import PdfToolkit
 /// unsandboxed (full file access) and always resident, so the work starts immediately — no
 /// cold-launching the full GUI app — and we can post progress notifications.
 @MainActor
-final class HelperAppDelegate: NSObject, NSApplicationDelegate {
+final class HelperAppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDelegate {
 
     private static let helperBundleID = "com.pdfutils.PdfUtils.Helper"
     private static let mainAppBundleID = "com.pdfutils.PdfUtils"
@@ -35,7 +35,9 @@ final class HelperAppDelegate: NSObject, NSApplicationDelegate {
             andEventID: AEEventID(kAEGetURL))
 
         setUpStatusItem()
-        UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { _, _ in }
+        let center = UNUserNotificationCenter.current()
+        center.delegate = self // so banners show even while the helper is the active app
+        center.requestAuthorization(options: [.alert, .sound]) { _, _ in }
 
         // First launch: make ourselves resident across logins (best-effort; the menu toggles it).
         enableLoginItemIfFirstRun()
@@ -152,60 +154,157 @@ final class HelperAppDelegate: NSObject, NSApplicationDelegate {
         guard let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let action = obj["action"] as? String,
               let paths = obj["paths"] as? [String], !paths.isEmpty else { return }
+        let inputs = paths.map { URL(fileURLWithPath: $0) }
 
-        notify(id: "pdfutils.\(action)", title: verb(for: action), body: bodyForStart(count: paths.count))
+        switch action {
+        case "compress":
+            notify(id: "pdfutils.compress", title: "Compress PDF", body: startBody(inputs.count))
+            workQueue.async { [self] in
+                var revealed: [URL] = []
+                var failed: [String] = []
+                for input in inputs {
+                    let output = Self.uniqueOutput(for: input, suffix: "compressed")
+                    do { try PDFToolkit.compress(inputURL: input, outputURL: output, quality: 0.6); revealed.append(output) }
+                    catch { failed.append(input.lastPathComponent) }
+                }
+                finish(id: "pdfutils.compress", title: "Compress PDF", revealed: revealed, failed: failed)
+            }
 
-        workQueue.async { [self] in
-            var ok: [URL] = []
-            var failedNames: [String] = []
-            for path in paths {
-                let input = URL(fileURLWithPath: path)
-                let base = input.deletingPathExtension().lastPathComponent
-                let output = input.deletingLastPathComponent().appendingPathComponent("\(base)-compressed.pdf")
+        case "merge":
+            notify(id: "pdfutils.merge", title: "Merge PDFs", body: startBody(inputs.count))
+            workQueue.async { [self] in
+                // Combined in Finder's selection order, into the first file's folder.
+                let output = Self.uniqueOutput(inDirectory: inputs[0].deletingLastPathComponent(), name: "Merged")
                 do {
-                    switch action {
-                    case "compress":
-                        try PDFToolkit.compress(inputURL: input, outputURL: output, quality: 0.6)
-                        ok.append(output)
-                    default:
-                        failedNames.append(input.lastPathComponent)
-                    }
+                    try PDFToolkit.merge(inputURLs: inputs, outputURL: output)
+                    finish(id: "pdfutils.merge", title: "Merge PDFs", revealed: [output], failed: [])
                 } catch {
-                    failedNames.append(input.lastPathComponent)
+                    finish(id: "pdfutils.merge", title: "Merge PDFs", revealed: [], failed: ["merge"])
                 }
             }
-            let revealed = ok
-            let failures = failedNames
-            Task { @MainActor in
-                if !revealed.isEmpty { NSWorkspace.shared.activateFileViewerSelecting(revealed) }
-                notifyResult(action: action, succeeded: revealed.count, failed: failures)
+
+        case "unlock":
+            runUnlock(inputs)
+
+        default:
+            break
+        }
+    }
+
+    /// Hops back to the main actor to reveal results in Finder and post the completion notice.
+    private nonisolated func finish(id: String, title: String, revealed: [URL], failed: [String]) {
+        Task { @MainActor in
+            if !revealed.isEmpty { NSWorkspace.shared.activateFileViewerSelecting(revealed) }
+            let body: String
+            if failed.isEmpty {
+                body = revealed.count <= 1 ? "Done — revealed in Finder." : "Done — \(revealed.count) files revealed in Finder."
+            } else if revealed.isEmpty {
+                body = "Couldn't complete. The file may be open elsewhere or damaged."
+            } else {
+                body = "\(revealed.count) done, \(failed.count) failed."
+            }
+            notify(id: id, title: title, body: body)
+        }
+    }
+
+    // MARK: - Remove password (interactive: needs a prompt, so it runs on the main actor)
+
+    private enum UnlockOutcome { case success(URL), notEncrypted, failed, cancelled }
+
+    private func runUnlock(_ inputs: [URL]) {
+        var revealed: [URL] = []
+        var notProtected: [String] = []
+        var failed: [String] = []
+        loop: for input in inputs {
+            switch unlockOne(input) {
+            case .success(let output): revealed.append(output)
+            case .notEncrypted: notProtected.append(input.lastPathComponent)
+            case .failed: failed.append(input.lastPathComponent)
+            case .cancelled: break loop // user backed out — stop prompting for the rest
             }
         }
-    }
+        if !revealed.isEmpty { NSWorkspace.shared.activateFileViewerSelecting(revealed) }
+        // Pure cancel (nothing attempted) stays silent.
+        guard !(revealed.isEmpty && notProtected.isEmpty && failed.isEmpty) else { return }
 
-    // MARK: - Notifications
-
-    private func verb(for action: String) -> String {
-        switch action {
-        case "compress": return "Compressing PDF"
-        default: return "PDF Utils"
-        }
-    }
-
-    private func bodyForStart(count: Int) -> String {
-        count == 1 ? "Working…" : "Working on \(count) files…"
-    }
-
-    private func notifyResult(action: String, succeeded: Int, failed: [String]) {
         let body: String
-        if failed.isEmpty {
-            body = succeeded == 1 ? "Done — revealed in Finder." : "Done — \(succeeded) files revealed in Finder."
-        } else if succeeded == 0 {
-            body = "Couldn't process \(failed.joined(separator: ", "))."
+        if !revealed.isEmpty && notProtected.isEmpty && failed.isEmpty {
+            body = revealed.count == 1 ? "Unlocked — revealed in Finder." : "Unlocked \(revealed.count) files — revealed in Finder."
+        } else if revealed.isEmpty && failed.isEmpty {
+            body = notProtected.count == 1 ? "“\(notProtected[0])” isn't password-protected." : "\(notProtected.count) files weren't password-protected."
         } else {
-            body = "\(succeeded) done, \(failed.count) failed."
+            var parts: [String] = []
+            if !revealed.isEmpty { parts.append("\(revealed.count) unlocked") }
+            if !notProtected.isEmpty { parts.append("\(notProtected.count) not protected") }
+            if !failed.isEmpty { parts.append("\(failed.count) failed") }
+            body = parts.joined(separator: ", ") + "."
         }
-        notify(id: "pdfutils.\(action)", title: verb(for: action), body: body)
+        notify(id: "pdfutils.unlock", title: "Remove Password", body: body)
+    }
+
+    private func unlockOne(_ input: URL) -> UnlockOutcome {
+        for attempt in 0..<3 {
+            guard let password = promptPassword(for: input.lastPathComponent, wrongPrevious: attempt > 0) else {
+                return .cancelled
+            }
+            let output = Self.uniqueOutput(for: input, suffix: "unlocked")
+            var thrown: Error?
+            // Serialize the PDFKit call with the background work queue, honoring the one-thread-at-a-time
+            // invariant even though we're driving it from the main actor for the prompt.
+            workQueue.sync {
+                do { try PDFToolkit.removePassword(inputURL: input, outputURL: output, password: password) }
+                catch { thrown = error }
+            }
+            guard let error = thrown else { return .success(output) }
+            if let op = error as? PDFOperationError {
+                switch op {
+                case .incorrectPassword: continue        // wrong password — prompt again
+                case .notEncrypted: return .notEncrypted // nothing to remove
+                default: return .failed
+                }
+            }
+            return .failed
+        }
+        return .failed // exhausted attempts
+    }
+
+    private func promptPassword(for fileName: String, wrongPrevious: Bool) -> String? {
+        NSApp.activate(ignoringOtherApps: true) // bring the agent's dialog to the front
+        let alert = NSAlert()
+        alert.messageText = "Unlock “\(fileName)”"
+        alert.informativeText = wrongPrevious
+            ? "That password didn't work. Try again."
+            : "Enter the password to remove protection from this PDF."
+        alert.addButton(withTitle: "Unlock")
+        alert.addButton(withTitle: "Cancel")
+        let field = NSSecureTextField(frame: NSRect(x: 0, y: 0, width: 240, height: 24))
+        field.placeholderString = "Password"
+        alert.accessoryView = field
+        alert.window.initialFirstResponder = field
+        return alert.runModal() == .alertFirstButtonReturn ? field.stringValue : nil
+    }
+
+    // MARK: - Output naming + notifications
+
+    /// A non-clobbering output URL: "Name.pdf", then "Name 2.pdf", "Name 3.pdf", …
+    private nonisolated static func uniqueOutput(for input: URL, suffix: String) -> URL {
+        uniqueOutput(inDirectory: input.deletingLastPathComponent(),
+                     name: "\(input.deletingPathExtension().lastPathComponent)-\(suffix)")
+    }
+
+    private nonisolated static func uniqueOutput(inDirectory dir: URL, name: String) -> URL {
+        let fm = FileManager.default
+        var candidate = dir.appendingPathComponent("\(name).pdf")
+        var n = 2
+        while fm.fileExists(atPath: candidate.path) {
+            candidate = dir.appendingPathComponent("\(name) \(n).pdf")
+            n += 1
+        }
+        return candidate
+    }
+
+    private nonisolated func startBody(_ count: Int) -> String {
+        count == 1 ? "Working…" : "Working on \(count) files…"
     }
 
     private func notify(id: String, title: String, body: String) {
@@ -214,5 +313,13 @@ final class HelperAppDelegate: NSObject, NSApplicationDelegate {
         content.body = body
         let request = UNNotificationRequest(identifier: id, content: content, trigger: nil)
         UNUserNotificationCenter.current().add(request)
+    }
+
+    /// Present banners even when the helper is the frontmost app — otherwise macOS suppresses the
+    /// notification whenever we've just activated to show the unlock prompt.
+    nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter,
+                                            willPresent notification: UNNotification,
+                                            withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void) {
+        completionHandler([.banner, .list, .sound])
     }
 }

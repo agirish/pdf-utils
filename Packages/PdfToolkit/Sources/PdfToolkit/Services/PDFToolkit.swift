@@ -71,7 +71,7 @@ public enum PDFToolkit {
     /// `PDFDocument` hangs on macOS 26 (PDFKit spins building an `NSOrderedSet` inside
     /// `insertPage:atIndex:`), which would freeze every merge; copying detaches the page first and
     /// sidesteps it.
-    static func merge(inputURLs: [URL], outputURL: URL) throws {
+    public static func merge(inputURLs: [URL], outputURL: URL) throws {
         guard !inputURLs.isEmpty else { throw PDFOperationError.noInputFiles }
         try requireDistinctOutput(outputURL, from: inputURLs)
 
@@ -257,7 +257,7 @@ public enum PDFToolkit {
     /// Writes a decrypted copy with no password. If the source is locked it is unlocked with
     /// `password` first (wrong password → `incorrectPassword`); a source that isn't encrypted at all
     /// throws `notEncrypted` so the tool can say there's nothing to remove.
-    static func removePassword(inputURL: URL, outputURL: URL, password: String) throws {
+    public static func removePassword(inputURL: URL, outputURL: URL, password: String) throws {
         try requireDistinctOutput(outputURL, from: [inputURL])
         guard let doc = PDFDocument(url: inputURL) else {
             throw PDFOperationError.couldNotOpen(inputURL)

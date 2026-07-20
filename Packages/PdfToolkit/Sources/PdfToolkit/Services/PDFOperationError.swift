@@ -1,6 +1,6 @@
 import Foundation
 
-enum PDFOperationError: LocalizedError {
+public enum PDFOperationError: LocalizedError {
     case couldNotOpen(URL)
     case couldNotWrite(URL)
     case outputMatchesInput(URL)
@@ -24,7 +24,7 @@ enum PDFOperationError: LocalizedError {
     case notEncrypted
     case protectionFailed
 
-    var errorDescription: String? {
+    public var errorDescription: String? {
         switch self {
         case .couldNotOpen(let url):
             return "Could not open PDF: \(url.lastPathComponent)"

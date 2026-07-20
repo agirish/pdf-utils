@@ -40,7 +40,7 @@ struct CompressionAttempt: Equatable, Sendable {
     let byteCount: Int
 }
 
-enum PDFToolkit {
+public enum PDFToolkit {
     /// Quick page count for UI summaries; the URL must already be readable (e.g. under active security scope).
     static func pageCount(at url: URL) -> Int? {
         guard let doc = PDFDocument(url: url) else { return nil }
@@ -292,7 +292,7 @@ enum PDFToolkit {
     }
 
     /// Rebuilds the PDF from rendered page images to reduce size. `quality` is 0...1 (JPEG-style tradeoff).
-    static func compress(inputURL: URL, outputURL: URL, quality: Double) throws {
+    public static func compress(inputURL: URL, outputURL: URL, quality: Double) throws {
         try requireDistinctOutput(outputURL, from: [inputURL])
         guard let source = PDFDocument(url: inputURL) else {
             throw PDFOperationError.couldNotOpen(inputURL)

@@ -2,6 +2,9 @@
 .swiftpm/xcode/
 DerivedData/
 
+# Hand-assembled .app output from scripts/build-app.sh
+build/
+
 # Local scratch (e.g. icon exports)
 tmp_icon/
 

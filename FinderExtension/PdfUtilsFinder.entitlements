@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- FinderSync extensions must be sandboxed or macOS refuses to load them (verified:
+	     an unsandboxed build is rejected by pluginkit and never spawns). The sandbox in
+	     turn denies the extension read/write to arbitrary user files, so the extension
+	     does no file work itself — it hands the selected paths to the main app. -->
+	<key>com.apple.security.app-sandbox</key>
+	<true/>
+</dict>
+</plist>

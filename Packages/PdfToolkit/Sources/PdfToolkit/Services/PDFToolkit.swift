@@ -57,7 +57,8 @@ public enum PDFToolkit {
     /// copy. Called before the source is ever opened, this converts that data-losing accident into a
     /// clear error while the source is still untouched. Paths are compared after resolving symlinks
     /// and `.`/`..` so `/var`↔`/private/var`-style aliases don't slip through.
-    private static func requireDistinctOutput(_ output: URL, from inputs: [URL]) throws {
+    // Internal (not private): operation extensions in sibling files (e.g. metadata) share this guard.
+    static func requireDistinctOutput(_ output: URL, from inputs: [URL]) throws {
         let target = output.resolvingSymlinksInPath().standardizedFileURL
         for input in inputs where input.resolvingSymlinksInPath().standardizedFileURL == target {
             throw PDFOperationError.outputMatchesInput(output)

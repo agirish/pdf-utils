@@ -12,6 +12,28 @@ struct ToolHelpContent {
 extension Tool {
     var helpContent: ToolHelpContent {
         switch self {
+        case .metadata:
+            return ToolHelpContent(
+                overview:
+                    "Every PDF carries an info dictionary—title, author, subject, keywords, the app that created it, and dates. This tool shows those fields, lets you edit or clear each one, and writes the result to a new file. Page content is never modified.",
+                steps: [
+                    "Choose or drop a PDF. Its info fields load into the form.",
+                    "Edit any field directly, or click Strip All Fields to blank everything at once.",
+                    "Click Clean & save… and choose where the cleaned copy goes.",
+                ],
+                controls: [
+                    ("Info fields", "Title, Author, Subject, Keywords, and Creator app as stored in the file. Blank fields are omitted from the saved copy entirely."),
+                    ("Strip All Fields", "Blanks every editable field—one click to a fully clean file."),
+                    ("Reset", "Restores the form to what the file actually contains, undoing your edits."),
+                    ("Producer / Created / Modified", "Shown for reference. macOS replaces all three when you save: the Producer becomes the system PDF writer and both dates reset to the save time, so the originals never travel with the cleaned file."),
+                    ("Clean & save…", "Writes a new PDF whose info fields are exactly what the form shows."),
+                ],
+                tips: [
+                    "Password-protected PDFs can’t be edited here—remove the password with Password Protect first.",
+                    "Some PDFs carry extra XMP metadata that macOS doesn’t expose; the standard info fields shown here are what Finder and most viewers read.",
+                    "The summary line under the form tells you when the file still names an author or creator app.",
+                ]
+            )
         case .compress:
             return ToolHelpContent(
                 overview:

@@ -12,8 +12,9 @@ import AppKit
         #expect(Set(Tool.allCases) == Set<Tool>([
             .compress, .rotate, .merge, .split, .extract,
             .reorder, .deletePages, .watermark, .redact, .fillSign, .protect,
+            .metadata,
         ]))
-        #expect(Tool.allCases.count == 11)
+        #expect(Tool.allCases.count == 12)
     }
 
     @Test func idEqualsRawValueAndIsUnique() {

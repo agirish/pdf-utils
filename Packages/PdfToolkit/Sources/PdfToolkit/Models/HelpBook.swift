@@ -110,7 +110,7 @@ enum HelpBook {
                         "Combine & split — Merge stacks PDFs into one; Split and Extract pull files or pages out.",
                         "Arrange pages — Reorder, Delete Pages, and Rotate rework the pages of a single PDF.",
                         "Compress & watermark — Compress shrinks a file; Watermark stamps text across every page.",
-                        "Secure & sign — Password Protect encrypts, Redact removes content for good, and Fill & Sign adds text and a signature.",
+                        "Secure & sign — Password Protect encrypts, Redact removes content for good, Fill & Sign adds text and a signature, and Clean Metadata strips hidden document info.",
                     ]),
                     .tip("Press ⌘K anywhere to jump straight to a tool without returning to the dashboard."),
                 ],
@@ -135,6 +135,7 @@ enum HelpBook {
             toolTopic(.protect),
             toolTopic(.redact),
             toolTopic(.fillSign),
+            toolTopic(.metadata),
         ]),
         Section(title: "Settings and more", topics: [
             Topic(id: "settings", title: "Settings", systemImage: "gearshape", article: Article(
@@ -226,6 +227,7 @@ enum HelpBook {
         case .protect: return [topicID(for: .redact), topicID(for: .fillSign), "privacy-safety"]
         case .redact: return [topicID(for: .watermark), topicID(for: .protect), "privacy-safety"]
         case .fillSign: return [topicID(for: .protect), "privacy-safety"]
+        case .metadata: return [topicID(for: .protect), topicID(for: .redact), "privacy-safety"]
         }
     }
 

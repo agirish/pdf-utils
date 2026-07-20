@@ -22,15 +22,21 @@ enum PDFExportCoordinator {
     ///   returns `.savedBeside`.
     ///
     /// Metadata stripping and the disk write both run off the main thread.
+    ///
+    /// `applyMetadataStrip` lets the Clean Metadata tool opt out of the global "Strip metadata on
+    /// export" setting: its output IS the user's deliberately chosen metadata, and the setting would
+    /// silently erase fields they just typed. Every other tool leaves it at the default.
     @MainActor
     static func route(
         data: Data,
         source: URL?,
         toolTitle: String,
         defaultStem: String,
-        suffixWord: String
+        suffixWord: String,
+        applyMetadataStrip: Bool = true
     ) async throws -> Outcome {
-        let finalized: Data = UserDefaults.standard.bool(forKey: SettingsKeys.stripMetadataOnExport)
+        let finalized: Data = applyMetadataStrip
+            && UserDefaults.standard.bool(forKey: SettingsKeys.stripMetadataOnExport)
             ? try await PDFBackgroundWork.run { stripMetadata(data) }
             : data
 

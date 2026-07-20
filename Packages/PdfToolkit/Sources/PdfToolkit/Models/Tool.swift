@@ -12,6 +12,7 @@ public enum Tool: String, CaseIterable, Identifiable, Hashable {
     case redact
     case fillSign
     case protect
+    case metadata
 
     public var id: String { rawValue }
 
@@ -28,6 +29,7 @@ public enum Tool: String, CaseIterable, Identifiable, Hashable {
         case .redact: return "Redact PDF"
         case .fillSign: return "Fill & Sign"
         case .protect: return "Password Protect"
+        case .metadata: return "Clean Metadata"
         }
     }
 
@@ -55,6 +57,8 @@ public enum Tool: String, CaseIterable, Identifiable, Hashable {
             return "Add text and a signature to a PDF"
         case .protect:
             return "Encrypt a PDF, or remove its password"
+        case .metadata:
+            return "View, edit, or strip hidden document info"
         }
     }
 
@@ -83,6 +87,8 @@ public enum Tool: String, CaseIterable, Identifiable, Hashable {
             return "Drop typed text onto a non-interactive form, then draw or type a signature and place it on the page. Text stays selectable; the signature is baked in as vector ink. Your original file is untouched until you save the new PDF."
         case .protect:
             return "Add a password that’s required to open a PDF, or strip the password from one you can already open. Encryption is the standard PDF scheme, applied on your Mac—the password never leaves your machine."
+        case .metadata:
+            return "See what a PDF says about itself—title, author, keywords, the app that made it, dates—then edit any field or strip them all before sharing. Only the info fields are rewritten; the pages themselves are untouched."
         }
     }
 
@@ -100,6 +106,7 @@ public enum Tool: String, CaseIterable, Identifiable, Hashable {
         case .redact: return "eraser.line.dashed"
         case .fillSign: return "hand.draw"
         case .protect: return "lock.doc"
+        case .metadata: return "tag.slash"
         }
     }
 
@@ -116,6 +123,8 @@ public enum Tool: String, CaseIterable, Identifiable, Hashable {
         case .redact: return Color(red: 0.78, green: 0.16, blue: 0.22)
         case .fillSign: return Color(red: 1.0, green: 0.45, blue: 0.4)
         case .protect: return .green
+        // Periwinkle: sits between merge's purple and split's indigo without matching either.
+        case .metadata: return Color(red: 0.48, green: 0.53, blue: 0.94)
         }
     }
 }

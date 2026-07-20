@@ -83,29 +83,8 @@ struct DashboardView: View {
                 .foregroundStyle(.secondary)
                 .lineSpacing(3)
                 .frame(maxWidth: 680, alignment: .leading)
-            privacyBadge
-                .padding(.top, 2)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-    }
-
-    /// The "processing stays on your Mac" reassurance, lifted out of the intro sentence into a compact
-    /// trust chip — a lock glyph and a faint green capsule read as "private/safe" at a glance.
-    private var privacyBadge: some View {
-        HStack(spacing: 6) {
-            Image(systemName: "lock.fill")
-                .font(.caption2.weight(.bold))
-                .foregroundStyle(.green)
-            Text("Files stay on your Mac — nothing is uploaded")
-                .font(.subheadline.weight(.medium))
-                .foregroundStyle(.secondary)
-        }
-        .padding(.horizontal, 11)
-        .padding(.vertical, 6)
-        .background(Capsule(style: .continuous).fill(Color.green.opacity(0.10)))
-        .overlay(Capsule(style: .continuous).strokeBorder(Color.green.opacity(0.24), lineWidth: 1))
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel("Privacy: files stay on your Mac, nothing is uploaded")
     }
 }
 

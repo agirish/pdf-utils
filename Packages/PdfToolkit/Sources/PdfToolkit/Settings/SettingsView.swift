@@ -119,6 +119,7 @@ struct SettingsSearchEntry: Identifiable {
     static let all: [SettingsSearchEntry] = [
         .init(title: "Theme", tab: .appearance, keywords: ["light", "dark", "system", "appearance", "mode"]),
         .init(title: "Accent color", tab: .appearance, keywords: ["hue", "tint", "color", "accent", "swatch"]),
+        .init(title: "Tool colors", tab: .appearance, keywords: ["tool", "colors", "accent", "multicolor", "single", "monochrome", "style"]),
         .init(title: "Glass effect", tab: .appearance, keywords: ["glass", "blur", "frost", "clear", "solid", "material", "translucent"]),
         .init(title: "Tint", tab: .appearance, keywords: ["tint", "wash", "accent", "vivid", "subtle"]),
         .init(title: "Content surface", tab: .appearance, keywords: ["surface", "cards", "unified", "shape"]),
@@ -260,6 +261,7 @@ struct AppearanceSettingsTab: View {
     @AppStorage(LiquidGlass.appearanceModeKey) private var appearanceModeRaw: String = AppearanceMode.system.rawValue
     @AppStorage(LiquidGlass.levelKey) private var glassLevelRaw: String = GlassLevel.frosted.rawValue
     @AppStorage(LiquidGlass.hueKey) private var selectedHueRaw: String = LiquidGlass.defaultHue.rawValue
+    @AppStorage(LiquidGlass.accentStyleKey) private var accentStyleRaw: String = AccentStyle.multicolor.rawValue
     @AppStorage(LiquidGlass.surfaceStyleKey) private var surfaceStyleRaw: String = SurfaceStyle.unified.rawValue
     @AppStorage(LiquidGlass.tintKey) private var surfaceTint: Double = 0
     @AppStorage(ListDensity.defaultsKey) private var listDensityRaw: String = ListDensity.comfortable.rawValue
@@ -268,6 +270,7 @@ struct AppearanceSettingsTab: View {
     private var appearanceMode: AppearanceMode { AppearanceMode(rawValue: appearanceModeRaw) ?? .system }
     private var glassLevel: GlassLevel { GlassLevel(rawValue: glassLevelRaw) ?? .frosted }
     private var selectedHue: LiquidGlassHue { LiquidGlassHue(rawValue: selectedHueRaw) ?? LiquidGlass.defaultHue }
+    private var accentStyle: AccentStyle { AccentStyle(rawValue: accentStyleRaw) ?? .multicolor }
     private var selectedSurfaceStyle: SurfaceStyle { SurfaceStyle(rawValue: surfaceStyleRaw) ?? .unified }
     private var mergeStyle: MergePreviewBackgroundStyle { MergePreviewBackgroundStyle(rawValue: mergePreviewBackgroundRaw) ?? .matchMain }
 
@@ -298,6 +301,20 @@ struct AppearanceSettingsTab: View {
                     }
                 }
                 .frame(maxWidth: .infinity)
+            }
+
+            Section {
+                Picker("Tool colors", selection: $accentStyleRaw) {
+                    ForEach(AccentStyle.allCases) { style in
+                        Text(style.displayName).tag(style.rawValue)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+            } header: {
+                Text("Tool colors")
+            } footer: {
+                Text(accentStyle.detail)
             }
 
             Section {
@@ -569,6 +586,7 @@ struct AdvancedSettingsTab: View {
             // Appearance
             LiquidGlass.appearanceModeKey,
             LiquidGlass.hueKey,
+            LiquidGlass.accentStyleKey,
             LiquidGlass.levelKey,
             LiquidGlass.surfaceStyleKey,
             LiquidGlass.tintKey,

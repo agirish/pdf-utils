@@ -32,7 +32,7 @@ struct FillSignToolView: View {
 
     @FocusState private var textFieldFocused: Bool
 
-    private let accent = Tool.fillSign.accent
+    @Environment(\.toolAccent) private var accent
 
     private var selectionPathKey: String {
         inputURL?.standardizedFileURL.path ?? ""

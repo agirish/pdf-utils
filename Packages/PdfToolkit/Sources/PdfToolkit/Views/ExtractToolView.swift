@@ -4,6 +4,7 @@ import SwiftUI
 import UniformTypeIdentifiers
 
 struct ExtractToolView: View {
+    @Environment(\.toolAccent) private var accent
     @State private var inputURL: URL?
     @State private var rangeText = "1"
     @State private var busy = false
@@ -29,7 +30,7 @@ struct ExtractToolView: View {
                 thumbnails: thumbnails,
                 isGenerating: isGeneratingPreviews,
                 thumbnailSize: $thumbnailSize,
-                accent: Tool.extract.accent,
+                accent: accent,
                 previewSubtitle: "Every page in the file; the list on the left chooses which pages go into the new PDF.",
                 emptyTitle: "No PDF selected",
                 emptySubtitle: "Drop a PDF here, choose one, or use Add PDF… to see thumbnails.",
@@ -125,7 +126,7 @@ struct ExtractToolView: View {
             HStack(alignment: .center, spacing: 12) {
                 Image(systemName: "doc.on.clipboard")
                     .symbolRenderingMode(.hierarchical)
-                    .foregroundStyle(Tool.extract.accent)
+                    .foregroundStyle(accent)
                     .font(.title)
                 Text("PDF file")
                     .font(.title3.weight(.semibold))
@@ -168,7 +169,7 @@ struct ExtractToolView: View {
             Image(systemName: "doc.on.clipboard")
                 .font(.system(size: 36, weight: .light))
                 .symbolRenderingMode(.hierarchical)
-                .foregroundStyle(Tool.extract.accent.opacity(0.85))
+                .foregroundStyle(accent.opacity(0.85))
             Text("Drop a PDF here or add a file")
                 .font(.title3.weight(.semibold))
             Text("Preview pages on the right, then type which pages to copy into a new PDF.")
@@ -188,7 +189,7 @@ struct ExtractToolView: View {
                 .strokeBorder(
                     style: StrokeStyle(lineWidth: isDropTargeted ? 2 : 1.2, dash: [7, 5])
                 )
-                .foregroundStyle(isDropTargeted ? Tool.extract.accent : Color.secondary.opacity(0.35))
+                .foregroundStyle(isDropTargeted ? accent : Color.secondary.opacity(0.35))
         }
         .animation(.easeInOut(duration: 0.18), value: isDropTargeted)
         .accessibilityElement(children: .combine)
@@ -199,11 +200,11 @@ struct ExtractToolView: View {
         HStack(alignment: .center, spacing: 12) {
             ZStack {
                 RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .fill(Tool.extract.accent.opacity(0.14))
+                    .fill(accent.opacity(0.14))
                     .frame(width: 40, height: 40)
                 Image(systemName: "doc.fill")
                     .font(.body.weight(.medium))
-                    .foregroundStyle(Tool.extract.accent)
+                    .foregroundStyle(accent)
             }
             .accessibilityHidden(true)
 

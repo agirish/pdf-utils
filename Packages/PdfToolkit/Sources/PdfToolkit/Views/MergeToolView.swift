@@ -15,6 +15,7 @@ private struct MergeResult {
 }
 
 struct MergeToolView: View {
+    @Environment(\.toolAccent) private var accent
     @State private var entries: [MergeEntry] = []
     @State private var busy = false
     @State private var alertMessage: String?
@@ -52,7 +53,7 @@ struct MergeToolView: View {
                         thumbnails: previewPages,
                         isGenerating: isGeneratingPreviews,
                         thumbnailSize: $thumbnailSize,
-                        accent: Tool.merge.accent,
+                        accent: accent,
                         previewSubtitle: "Visual order of the merged pages (matches the list on the left).",
                         emptyTitle: "No PDFs selected for merge",
                         emptySubtitle: "Add PDFs in the sidebar or drop PDFs onto the list.",
@@ -101,7 +102,7 @@ struct MergeToolView: View {
 
     private func successView(_ result: MergeResult) -> some View {
         ToolSuccessView(
-            accent: Tool.merge.accent,
+            accent: accent,
             title: "Merged successfully",
             path: result.outputURL.path,
             stats: [
@@ -167,7 +168,7 @@ struct MergeToolView: View {
             HStack(alignment: .center, spacing: 12) {
                 Image(systemName: "square.stack.3d.up.fill")
                     .symbolRenderingMode(.hierarchical)
-                    .foregroundStyle(Tool.merge.accent)
+                    .foregroundStyle(accent)
                     .font(.title)
                 Text("PDF files")
                     .font(.title3.weight(.semibold))
@@ -208,7 +209,7 @@ struct MergeToolView: View {
             Image(systemName: "arrow.down.doc")
                 .font(.system(size: 36, weight: .light))
                 .symbolRenderingMode(.hierarchical)
-                .foregroundStyle(Tool.merge.accent.opacity(0.85))
+                .foregroundStyle(accent.opacity(0.85))
             Text("Drop PDFs here or add files")
                 .font(.title3.weight(.semibold))
             Text("Files are combined top to bottom. Preview updates on the right.")
@@ -228,7 +229,7 @@ struct MergeToolView: View {
                 .strokeBorder(
                     style: StrokeStyle(lineWidth: isDropTargeted ? 2 : 1.2, dash: [7, 5])
                 )
-                .foregroundStyle(isDropTargeted ? Tool.merge.accent : Color.secondary.opacity(0.35))
+                .foregroundStyle(isDropTargeted ? accent : Color.secondary.opacity(0.35))
         }
         .animation(.easeInOut(duration: 0.18), value: isDropTargeted)
         .accessibilityElement(children: .combine)
@@ -275,7 +276,7 @@ struct MergeToolView: View {
     private func mergeRow(for entry: MergeEntry) -> some View {
         let index = entries.firstIndex(where: { $0.id == entry.id }) ?? 0
         return HStack(alignment: .center, spacing: 12) {
-            RowIndexBadge(number: index + 1, accent: Tool.merge.accent)
+            RowIndexBadge(number: index + 1, accent: accent)
 
             VStack(alignment: .leading, spacing: 4) {
                 Text(entry.url.lastPathComponent)

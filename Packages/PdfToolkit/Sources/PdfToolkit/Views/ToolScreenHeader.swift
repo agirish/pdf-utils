@@ -8,6 +8,7 @@ struct ToolScreenHeader: View {
     @State private var showPrivacy = false
     @State private var chipHovered = false
     @Environment(\.colorScheme) private var scheme
+    @Environment(\.toolAccent) private var accent
     private var dark: Bool { scheme == .dark }
 
     var body: some View {
@@ -19,8 +20,8 @@ struct ToolScreenHeader: View {
                     .fill(
                         LinearGradient(
                             colors: dark
-                                ? [tool.accent.opacity(0.55), tool.accent.opacity(0.24)]
-                                : [tool.accent.opacity(0.28), tool.accent.opacity(0.12)],
+                                ? [accent.opacity(0.55), accent.opacity(0.24)]
+                                : [accent.opacity(0.28), accent.opacity(0.12)],
                             startPoint: .topLeading,
                             endPoint: .bottomTrailing
                         )
@@ -28,12 +29,12 @@ struct ToolScreenHeader: View {
                     .frame(width: 52, height: 52)
                     .overlay {
                         RoundedRectangle(cornerRadius: 16, style: .continuous)
-                            .strokeBorder(tool.accent.opacity(dark ? 0.55 : 0.22), lineWidth: 1)
+                            .strokeBorder(accent.opacity(dark ? 0.55 : 0.22), lineWidth: 1)
                     }
                 Image(systemName: tool.symbolName)
                     .font(.system(size: 24, weight: .semibold))
                     .symbolRenderingMode(.hierarchical)
-                    .foregroundStyle(tool.accent)
+                    .foregroundStyle(accent)
             }
             .accessibilityHidden(true)
 

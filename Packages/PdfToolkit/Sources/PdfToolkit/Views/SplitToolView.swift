@@ -23,6 +23,7 @@ private struct SplitResult {
 }
 
 struct SplitToolView: View {
+    @Environment(\.toolAccent) private var accent
     @State private var inputURL: URL?
     @State private var mode: SplitMode = .everyN
     @State private var chunkSize = 1
@@ -68,7 +69,7 @@ struct SplitToolView: View {
                         thumbnails: thumbnails,
                         isGenerating: isGeneratingPreviews,
                         thumbnailSize: $thumbnailSize,
-                        accent: Tool.split.accent,
+                        accent: accent,
                         previewSubtitle: "Every page in the file; the settings on the left decide where the cuts fall.",
                         emptyTitle: "No PDF selected",
                         emptySubtitle: "Drop a PDF here or choose one to see its pages.",
@@ -151,7 +152,7 @@ struct SplitToolView: View {
             HStack(alignment: .center, spacing: 12) {
                 Image(systemName: "scissors")
                     .symbolRenderingMode(.hierarchical)
-                    .foregroundStyle(Tool.split.accent)
+                    .foregroundStyle(accent)
                     .font(.title)
                 Text("PDF file")
                     .font(.title3.weight(.semibold))
@@ -192,7 +193,7 @@ struct SplitToolView: View {
             Image(systemName: "scissors")
                 .font(.system(size: 36, weight: .light))
                 .symbolRenderingMode(.hierarchical)
-                .foregroundStyle(Tool.split.accent.opacity(0.85))
+                .foregroundStyle(accent.opacity(0.85))
             Text("Drop a PDF here or add a file")
                 .font(.title3.weight(.semibold))
             Text("Preview pages on the right, then choose how to divide the document.")
@@ -212,7 +213,7 @@ struct SplitToolView: View {
                 .strokeBorder(
                     style: StrokeStyle(lineWidth: isDropTargeted ? 2 : 1.2, dash: [7, 5])
                 )
-                .foregroundStyle(isDropTargeted ? Tool.split.accent : Color.secondary.opacity(0.35))
+                .foregroundStyle(isDropTargeted ? accent : Color.secondary.opacity(0.35))
         }
         .animation(.easeInOut(duration: 0.18), value: isDropTargeted)
         .accessibilityElement(children: .combine)
@@ -223,11 +224,11 @@ struct SplitToolView: View {
         HStack(alignment: .center, spacing: 12) {
             ZStack {
                 RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .fill(Tool.split.accent.opacity(0.14))
+                    .fill(accent.opacity(0.14))
                     .frame(width: 40, height: 40)
                 Image(systemName: "doc.fill")
                     .font(.body.weight(.medium))
-                    .foregroundStyle(Tool.split.accent)
+                    .foregroundStyle(accent)
             }
             .accessibilityHidden(true)
 
@@ -299,7 +300,7 @@ struct SplitToolView: View {
             if let parts = estimatedParts {
                 Label("Produces \(parts) file\(parts == 1 ? "" : "s")", systemImage: "doc.on.doc")
                     .font(.caption.weight(.medium))
-                    .foregroundStyle(Tool.split.accent)
+                    .foregroundStyle(accent)
             }
         }
         .padding(16)
@@ -310,7 +311,7 @@ struct SplitToolView: View {
 
     private func successView(_ result: SplitResult) -> some View {
         ToolSuccessView(
-            accent: Tool.split.accent,
+            accent: accent,
             title: "Split into \(result.files.count) file\(result.files.count == 1 ? "" : "s")",
             path: result.directory.path,
             onShowInFinder: {

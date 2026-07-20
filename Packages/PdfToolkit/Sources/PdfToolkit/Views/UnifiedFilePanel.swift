@@ -51,8 +51,9 @@ struct UnifiedFilePanel<Config: View>: View {
     @State private var thumbnailSize: CGFloat = 120
     /// The one loaded file is encrypted and can't be previewed until unlocked (Protect only).
     @State private var previewLocked = false
+    /// The tool's effective accent (per the accent-style preset), injected by ``ToolDetailView``.
+    @Environment(\.toolAccent) private var accent
 
-    private var accent: Color { tool.accent }
     private var fileCount: Int { runner.items.count }
     private var firstURL: URL? { runner.items.first?.url }
     private var currentOperation: BatchOperation? { makeOperation() }

@@ -3,6 +3,7 @@ import SwiftUI
 import UniformTypeIdentifiers
 
 struct RedactToolView: View {
+    @Environment(\.toolAccent) private var accent
     @AppStorage(SettingsKeys.redactRasterLongEdge)
     private var rasterLongEdge: Double = 4000
 
@@ -122,7 +123,7 @@ struct RedactToolView: View {
             HStack(alignment: .center, spacing: 12) {
                 Image(systemName: Tool.redact.symbolName)
                     .symbolRenderingMode(.hierarchical)
-                    .foregroundStyle(Tool.redact.accent)
+                    .foregroundStyle(accent)
                     .font(.title)
                 Text("PDF file")
                     .font(.title3.weight(.semibold))
@@ -161,7 +162,7 @@ struct RedactToolView: View {
             Image(systemName: Tool.redact.symbolName)
                 .font(.system(size: 36, weight: .light))
                 .symbolRenderingMode(.hierarchical)
-                .foregroundStyle(Tool.redact.accent.opacity(0.85))
+                .foregroundStyle(accent.opacity(0.85))
             Text("Drop a PDF here or add a file")
                 .font(.title3.weight(.semibold))
             Text("Redaction is offline on your Mac — nothing is uploaded.")
@@ -181,7 +182,7 @@ struct RedactToolView: View {
                 .strokeBorder(
                     style: StrokeStyle(lineWidth: isDropTargeted ? 2 : 1.2, dash: [7, 5])
                 )
-                .foregroundStyle(isDropTargeted ? Tool.redact.accent : Color.secondary.opacity(0.35))
+                .foregroundStyle(isDropTargeted ? accent : Color.secondary.opacity(0.35))
         }
         .animation(.easeInOut(duration: 0.18), value: isDropTargeted)
         .accessibilityElement(children: .combine)
@@ -192,11 +193,11 @@ struct RedactToolView: View {
         HStack(alignment: .center, spacing: 12) {
             ZStack {
                 RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .fill(Tool.redact.accent.opacity(0.14))
+                    .fill(accent.opacity(0.14))
                     .frame(width: 40, height: 40)
                 Image(systemName: "doc.fill")
                     .font(.body.weight(.medium))
-                    .foregroundStyle(Tool.redact.accent)
+                    .foregroundStyle(accent)
             }
             VStack(alignment: .leading, spacing: 4) {
                 Text(url.lastPathComponent)
@@ -286,7 +287,7 @@ struct RedactToolView: View {
                 }
                 .buttonStyle(.borderless)
                 .font(.subheadline.weight(.medium))
-                .foregroundStyle(Tool.redact.accent)
+                .foregroundStyle(accent)
             }
             ForEach(marks) { mark in
                 HStack {

@@ -4,6 +4,7 @@ import SwiftUI
 import UniformTypeIdentifiers
 
 struct DeletePagesToolView: View {
+    @Environment(\.toolAccent) private var accent
     @State private var inputURL: URL?
     @State private var rangeText = ""
     @State private var busy = false
@@ -34,7 +35,7 @@ struct DeletePagesToolView: View {
                 thumbnails: thumbnails,
                 isGenerating: isGeneratingPreviews,
                 thumbnailSize: $thumbnailSize,
-                accent: Tool.deletePages.accent,
+                accent: accent,
                 previewSubtitle: "Full document preview; only the page numbers you list are removed from the saved copy.",
                 emptyTitle: "No PDF selected",
                 emptySubtitle: "Drop a PDF here, choose one, or use Add PDF… to see thumbnails.",
@@ -127,7 +128,7 @@ struct DeletePagesToolView: View {
             HStack(alignment: .center, spacing: 12) {
                 Image(systemName: Tool.deletePages.symbolName)
                     .symbolRenderingMode(.hierarchical)
-                    .foregroundStyle(Tool.deletePages.accent)
+                    .foregroundStyle(accent)
                     .font(.title)
                 Text("PDF file")
                     .font(.title3.weight(.semibold))
@@ -170,7 +171,7 @@ struct DeletePagesToolView: View {
             Image(systemName: Tool.deletePages.symbolName)
                 .font(.system(size: 36, weight: .light))
                 .symbolRenderingMode(.hierarchical)
-                .foregroundStyle(Tool.deletePages.accent.opacity(0.85))
+                .foregroundStyle(accent.opacity(0.85))
             Text("Drop a PDF here or add a file")
                 .font(.title3.weight(.semibold))
             Text("See every page on the right, then enter which page numbers to remove.")
@@ -190,7 +191,7 @@ struct DeletePagesToolView: View {
                 .strokeBorder(
                     style: StrokeStyle(lineWidth: isDropTargeted ? 2 : 1.2, dash: [7, 5])
                 )
-                .foregroundStyle(isDropTargeted ? Tool.deletePages.accent : Color.secondary.opacity(0.35))
+                .foregroundStyle(isDropTargeted ? accent : Color.secondary.opacity(0.35))
         }
         .animation(.easeInOut(duration: 0.18), value: isDropTargeted)
         .accessibilityElement(children: .combine)
@@ -201,11 +202,11 @@ struct DeletePagesToolView: View {
         HStack(alignment: .center, spacing: 12) {
             ZStack {
                 RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .fill(Tool.deletePages.accent.opacity(0.14))
+                    .fill(accent.opacity(0.14))
                     .frame(width: 40, height: 40)
                 Image(systemName: "doc.fill")
                     .font(.body.weight(.medium))
-                    .foregroundStyle(Tool.deletePages.accent)
+                    .foregroundStyle(accent)
             }
             .accessibilityHidden(true)
 

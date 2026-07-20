@@ -6,6 +6,17 @@ public struct ToolDetailView: View {
     @Environment(\.openWindow) private var openWindow
     @State private var showHelp = false
 
+    @AppStorage(LiquidGlass.accentStyleKey) private var accentStyleRaw: String = AccentStyle.multicolor.rawValue
+    @AppStorage(LiquidGlass.hueKey) private var glassHueRaw: String = LiquidGlass.defaultHue.rawValue
+
+    /// The tool's effective accent under the chosen accent style — injected into `\.toolAccent` so the
+    /// header, the primary button, and every accent surface in the tool track the Settings preset.
+    private var resolvedAccent: Color {
+        let style = AccentStyle(rawValue: accentStyleRaw) ?? .multicolor
+        let hue = LiquidGlassHue(rawValue: glassHueRaw) ?? LiquidGlass.defaultHue
+        return style.accent(for: tool, hue: hue)
+    }
+
     public init(tool: Tool) {
         self.tool = tool
     }
@@ -40,9 +51,11 @@ public struct ToolDetailView: View {
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-            // Every tool view's primary RunActionButton reads this to tint itself the tool's accent.
-            .environment(\.toolAccent, tool.accent)
         }
+        // Every accent surface in the tool — the header plate, drop zones, badges, and the primary
+        // button — reads this, so the accent style preset (multicolor / single / monochrome) applies
+        // uniformly across the whole screen.
+        .environment(\.toolAccent, resolvedAccent)
         .background(DashboardBackground())
         .navigationTitle(tool.title)
         .toolbar {

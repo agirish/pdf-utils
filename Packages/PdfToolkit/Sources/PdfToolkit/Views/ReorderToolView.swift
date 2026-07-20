@@ -14,6 +14,7 @@ private struct ReorderItem: Identifiable, Equatable {
 }
 
 struct ReorderToolView: View {
+    @Environment(\.toolAccent) private var accent
     @State private var inputURL: URL?
     @State private var items: [ReorderItem] = []
     @State private var busy = false
@@ -51,7 +52,7 @@ struct ReorderToolView: View {
                 thumbnails: previewThumbnails,
                 isGenerating: isGeneratingPreviews,
                 thumbnailSize: $thumbnailSize,
-                accent: Tool.reorder.accent,
+                accent: accent,
                 previewSubtitle: "Pages in the new order (labels show each page's original number).",
                 emptyTitle: "No PDF selected",
                 emptySubtitle: "Drop a PDF here or choose one to arrange its pages.",
@@ -142,7 +143,7 @@ struct ReorderToolView: View {
             HStack(alignment: .center, spacing: 12) {
                 Image(systemName: "arrow.up.arrow.down.square")
                     .symbolRenderingMode(.hierarchical)
-                    .foregroundStyle(Tool.reorder.accent)
+                    .foregroundStyle(accent)
                     .font(.title)
                 Text("Pages")
                     .font(.title3.weight(.semibold))
@@ -192,7 +193,7 @@ struct ReorderToolView: View {
             Image(systemName: "arrow.up.arrow.down.square")
                 .font(.system(size: 36, weight: .light))
                 .symbolRenderingMode(.hierarchical)
-                .foregroundStyle(Tool.reorder.accent.opacity(0.85))
+                .foregroundStyle(accent.opacity(0.85))
             Text("Drop a PDF here or add a file")
                 .font(.title3.weight(.semibold))
             Text("Its pages appear as a list you can drag into any order.")
@@ -212,7 +213,7 @@ struct ReorderToolView: View {
                 .strokeBorder(
                     style: StrokeStyle(lineWidth: isDropTargeted ? 2 : 1.2, dash: [7, 5])
                 )
-                .foregroundStyle(isDropTargeted ? Tool.reorder.accent : Color.secondary.opacity(0.35))
+                .foregroundStyle(isDropTargeted ? accent : Color.secondary.opacity(0.35))
         }
         .animation(.easeInOut(duration: 0.18), value: isDropTargeted)
         .accessibilityElement(children: .combine)
@@ -264,7 +265,7 @@ struct ReorderToolView: View {
     private func pageRow(for item: ReorderItem) -> some View {
         let position = items.firstIndex(of: item) ?? 0
         return HStack(alignment: .center, spacing: 12) {
-            RowIndexBadge(number: position + 1, accent: Tool.reorder.accent)
+            RowIndexBadge(number: position + 1, accent: accent)
 
             Image(nsImage: item.image)
                 .resizable()

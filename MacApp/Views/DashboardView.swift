@@ -99,8 +99,14 @@ struct ToolTileView: View {
     @AppStorage(LiquidGlass.levelKey) private var glassLevelRaw: String = GlassLevel.frosted.rawValue
     @AppStorage(LiquidGlass.hueKey) private var glassHueRaw: String = LiquidGlass.defaultHue.rawValue
     @AppStorage(LiquidGlass.tintKey) private var glassTint: Double = 0
+    @AppStorage(LiquidGlass.accentStyleKey) private var accentStyleRaw: String = AccentStyle.multicolor.rawValue
     private var glassLevel: GlassLevel { GlassLevel(rawValue: glassLevelRaw) ?? .frosted }
     private var glassHue: LiquidGlassHue { LiquidGlassHue(rawValue: glassHueRaw) ?? LiquidGlass.defaultHue }
+    /// The tile's effective accent under the chosen accent-style preset (the dashboard sits outside the
+    /// tool screen's `\.toolAccent`, so it resolves here directly).
+    private var accent: Color {
+        (AccentStyle(rawValue: accentStyleRaw) ?? .multicolor).accent(for: tool, hue: glassHue)
+    }
 
     // Black shadows are near-invisible on a dark ground, so dark carries a deeper shadow — with a
     // non-zero floor even when idle/unified — to lift the tile. Light keeps the original values.
@@ -124,8 +130,8 @@ struct ToolTileView: View {
                     .fill(
                         LinearGradient(
                             colors: dark
-                                ? [tool.accent.opacity(0.64), tool.accent.opacity(0.27)]
-                                : [tool.accent.opacity(0.30), tool.accent.opacity(0.12)],
+                                ? [accent.opacity(0.64), accent.opacity(0.27)]
+                                : [accent.opacity(0.30), accent.opacity(0.12)],
                             startPoint: .topLeading,
                             endPoint: .bottomTrailing
                         )
@@ -133,7 +139,7 @@ struct ToolTileView: View {
                     .frame(height: 92)
                     .overlay {
                         RoundedRectangle(cornerRadius: 16, style: .continuous)
-                            .strokeBorder(tool.accent.opacity(dark ? 0.60 : 0.22), lineWidth: 1)
+                            .strokeBorder(accent.opacity(dark ? 0.60 : 0.22), lineWidth: 1)
                     }
                     // Dark-only inner top highlight so the plate reads as lit glass, not a flat chip.
                     .overlay {
@@ -149,8 +155,8 @@ struct ToolTileView: View {
                 Image(systemName: tool.symbolName)
                     .font(.system(size: 34, weight: .medium))
                     .symbolRenderingMode(.hierarchical)
-                    .foregroundStyle(tool.accent)
-                    .shadow(color: tool.accent.opacity(hovered ? 0.35 : 0), radius: 6)
+                    .foregroundStyle(accent)
+                    .shadow(color: accent.opacity(hovered ? 0.35 : 0), radius: 6)
             }
 
             VStack(alignment: .leading, spacing: 5) {
@@ -173,7 +179,7 @@ struct ToolTileView: View {
                 Image(systemName: "arrow.right")
             }
             .font(.caption.weight(.semibold))
-            .foregroundStyle(tool.accent)
+            .foregroundStyle(accent)
             .opacity(hovered ? 1 : 0)
             .offset(x: hovered ? 0 : -4)
         }
@@ -194,7 +200,7 @@ struct ToolTileView: View {
         .overlay {
             RoundedRectangle(cornerRadius: 22, style: .continuous)
                 .strokeBorder(
-                    hovered ? tool.accent.opacity(0.6)
+                    hovered ? accent.opacity(0.6)
                             : (dark ? Color.white.opacity(0.22) : Color.primary.opacity(0.08)),
                     lineWidth: hovered ? 1.5 : 1
                 )

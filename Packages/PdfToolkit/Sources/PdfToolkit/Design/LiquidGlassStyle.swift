@@ -217,6 +217,8 @@ public enum LiquidGlass {
     public static let surfaceStyleKey = "pdfutils.contentSurfaceStyle"
     /// Accent tint strength applied to surfaces (Double, 0...1).
     public static let tintKey = "pdfutils.contentSurfaceTint"
+    /// How per-tool accent colors are chosen (`AccentStyle` raw value): multicolor / single / monochrome.
+    public static let accentStyleKey = "pdfutils.toolAccentStyle"
 
     /// Default hue when nothing is stored (matches SyncCloud's default accent).
     public static let defaultHue = LiquidGlassHue.blue

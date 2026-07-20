@@ -14,6 +14,7 @@ public enum Tool: String, CaseIterable, Identifiable, Hashable {
     case protect
     case metadata
     case imagesToPdf
+    case crop
 
     public var id: String { rawValue }
 
@@ -32,6 +33,7 @@ public enum Tool: String, CaseIterable, Identifiable, Hashable {
         case .protect: return "Password Protect"
         case .metadata: return "Clean Metadata"
         case .imagesToPdf: return "Images to PDF"
+        case .crop: return "Crop PDF"
         }
     }
 
@@ -63,6 +65,8 @@ public enum Tool: String, CaseIterable, Identifiable, Hashable {
             return "View, edit, or strip hidden document info"
         case .imagesToPdf:
             return "Turn photos and scans into one PDF"
+        case .crop:
+            return "Trim margins by hand or automatically"
         }
     }
 
@@ -95,6 +99,8 @@ public enum Tool: String, CaseIterable, Identifiable, Hashable {
             return "See what a PDF says about itself—title, author, keywords, the app that made it, dates—then edit any field or strip them all before sharing. Only the info fields are rewritten; the pages themselves are untouched."
         case .imagesToPdf:
             return "Drop in JPG, PNG, or HEIC images and get one PDF with a page per image, in the order shown. Choose a paper size—or let each page match its image exactly—and whether pictures fit inside the page or fill it edge to edge."
+        case .crop:
+            return "Tighten every page's margins—type a trim for each edge, or let the tool find the content bounds on its own. Cropping changes what viewers display; nothing is deleted from the page, and your original file stays untouched."
         }
     }
 
@@ -114,6 +120,7 @@ public enum Tool: String, CaseIterable, Identifiable, Hashable {
         case .protect: return "lock.doc"
         case .metadata: return "tag.slash"
         case .imagesToPdf: return "photo.on.rectangle.angled"
+        case .crop: return "crop"
         }
     }
 
@@ -133,6 +140,8 @@ public enum Tool: String, CaseIterable, Identifiable, Hashable {
         // Periwinkle: sits between merge's purple and split's indigo without matching either.
         case .metadata: return Color(red: 0.48, green: 0.53, blue: 0.94)
         case .imagesToPdf: return .yellow
+        // Lime: greener than protect's system green, far from mint/teal.
+        case .crop: return Color(red: 0.64, green: 0.78, blue: 0.22)
         }
     }
 }

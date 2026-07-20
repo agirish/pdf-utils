@@ -52,6 +52,8 @@ public struct ToolDetailView: View {
                     MetadataToolView()
                 case .imagesToPdf:
                     ImagesToPDFToolView()
+                case .crop:
+                    CropToolView()
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)

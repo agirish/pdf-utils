@@ -25,6 +25,7 @@ public enum PDFOperationError: LocalizedError {
     case protectionFailed
     case metadataEncrypted
     case couldNotOpenImage(URL)
+    case cropTooSmall(pageNumber: Int)
 
     public var errorDescription: String? {
         switch self {
@@ -76,6 +77,8 @@ public enum PDFOperationError: LocalizedError {
             return "This PDF is password-protected, so its metadata can’t be edited. Remove the password with Password Protect first."
         case .couldNotOpenImage(let url):
             return "Could not read the image “\(url.lastPathComponent)”."
+        case .cropTooSmall(let page):
+            return "That trim would leave almost nothing of page \(page). Use smaller margins."
         }
     }
 }

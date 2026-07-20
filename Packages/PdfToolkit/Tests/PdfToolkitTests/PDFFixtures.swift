@@ -223,6 +223,7 @@ extension PDFOperationError {
         case .protectionFailed: return "protectionFailed"
         case .metadataEncrypted: return "metadataEncrypted"
         case .couldNotOpenImage: return "couldNotOpenImage"
+        case .cropTooSmall: return "cropTooSmall"
         }
     }
 }

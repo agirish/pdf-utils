@@ -34,6 +34,29 @@ extension Tool {
                     "The summary line under the form tells you when the file still names an author or creator app.",
                 ]
             )
+        case .crop:
+            return ToolHelpContent(
+                overview:
+                    "Crop tightens what viewers display of each page—the crop box—without deleting anything. Auto-detect renders each page and finds where the content actually is; custom margins trim fixed amounts you type. Either way a new PDF is written and the original stays put.",
+                steps: [
+                    "Choose or drop a PDF.",
+                    "Pick Auto-detect and set how much breathing room to keep around the content, or pick Custom margins and type a trim for each edge.",
+                    "With Auto-detect, decide whether every page should share one uniform crop (steady frame) or be trimmed to its own content.",
+                    "Click Crop & save… and save the new PDF.",
+                ],
+                controls: [
+                    ("Auto-detect", "Renders each page and trims to the darkest-pixel bounds of its content, plus your breathing room."),
+                    ("Breathing room", "Points of margin kept around the detected content (72 pt = 1 inch)."),
+                    ("Use the same crop on every page", "Applies the smallest per-edge trim that is safe on every page, so all pages keep one size—best for book scans."),
+                    ("Custom margins", "Trims exactly what you type from the top, left, bottom, and right of every page, measured as displayed."),
+                    ("Crop & save…", "Writes a new PDF with the tightened crop boxes."),
+                ],
+                tips: [
+                    "Cropping is non-destructive: the content outside the crop box is hidden, not deleted, and another PDF editor can crop back out.",
+                    "A trim that would leave less than about a third of an inch of page is refused rather than producing a sliver.",
+                    "Blank pages are left alone by Auto-detect—there is nothing to crop to.",
+                ]
+            )
         case .imagesToPdf:
             return ToolHelpContent(
                 overview:

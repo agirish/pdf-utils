@@ -33,10 +33,11 @@ enum PDFExportCoordinator {
         toolTitle: String,
         defaultStem: String,
         suffixWord: String,
-        applyMetadataStrip: Bool = true
+        applyMetadataStrip: Bool = true,
+        defaults: UserDefaults = .standard
     ) async throws -> Outcome {
         let finalized: Data = applyMetadataStrip
-            && UserDefaults.standard.bool(forKey: SettingsKeys.stripMetadataOnExport)
+            && defaults.bool(forKey: SettingsKeys.stripMetadataOnExport)
             ? try await PDFBackgroundWork.run { stripMetadata(data) }
             : data
 

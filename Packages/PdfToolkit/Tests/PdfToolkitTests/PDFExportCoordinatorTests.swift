@@ -46,4 +46,43 @@ import Testing
         let garbage = Data([0x00, 0x01, 0x02, 0x03])
         #expect(PDFExportCoordinator.stripMetadata(garbage) == garbage)
     }
+
+    /// Pins the Clean Metadata opt-out end to end: with the global strip setting ON, the default
+    /// route still strips, and `applyMetadataStrip: false` preserves the fields the user typed —
+    /// a finalization-order refactor that reintroduced stripping there would erase them silently.
+    @MainActor
+    @Test func routeHonorsTheApplyMetadataStripFlag() async throws {
+        // A scratch defaults suite, not .standard — the batch-runner strip test owns that key in
+        // the global domain and the suites run in parallel.
+        let suiteName = "PDFExportCoordinatorTests-\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        defaults.set(true, forKey: SettingsKeys.stripMetadataOnExport)
+
+        let base = try PDFFixtures.pdfData(markers: [PDFFixtures.marker(1)])
+        let doc = try #require(PDFDocument(data: base))
+        doc.documentAttributes = [PDFDocumentAttribute.authorAttribute: "Alice"]
+        let withMetadata = try #require(doc.dataRepresentation())
+
+        func author(of outcome: PDFExportCoordinator.Outcome) throws -> String? {
+            guard case .present(let document, _) = outcome else {
+                Issue.record("expected .present (source: nil never saves beside)")
+                return nil
+            }
+            return PDFDocument(data: document.data)?
+                .documentAttributes?[PDFDocumentAttribute.authorAttribute] as? String
+        }
+
+        let stripped = try await PDFExportCoordinator.route(
+            data: withMetadata, source: nil, toolTitle: "T", defaultStem: "t", suffixWord: "s",
+            defaults: defaults
+        )
+        #expect(try author(of: stripped) == nil)
+
+        let kept = try await PDFExportCoordinator.route(
+            data: withMetadata, source: nil, toolTitle: "T", defaultStem: "t", suffixWord: "s",
+            applyMetadataStrip: false, defaults: defaults
+        )
+        #expect(try author(of: kept) == "Alice")
+    }
 }

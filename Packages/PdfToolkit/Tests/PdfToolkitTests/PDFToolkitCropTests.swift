@@ -147,6 +147,30 @@ import Testing
         #expect(first.height < 120)
     }
 
+    @Test func autoCropHandlesRotatedPages() throws {
+        let dir = FixtureDir()
+        let src = dir.url("src.pdf")
+        // Marker text sits at media-space (72…, ~396) on a page displayed rotated 90°: detection
+        // happens in displayed space and must map back through the rotation onto the stored crop
+        // rect — the composition insetRect never sees under rotation in the other auto-crop tests.
+        try PDFFixtures.writePDF(markers: [PDFFixtures.marker(1)], rotations: [0: 90], to: src)
+        let out = dir.url("out.pdf")
+
+        try PDFToolkit.autoCrop(inputURL: src, outputURL: out, padding: 10, unified: false)
+
+        let box = try cropBox(at: out)
+        // The stored-space crop must wrap the text's media-space position…
+        #expect(box.minX <= 72)
+        #expect(box.minY <= 396)
+        #expect(box.maxY >= 396 + 17)
+        // …and be a tight wrap, not the full page (the line is ~24 pt tall, ~200 pt wide).
+        #expect(box.height < 120)
+        #expect(box.width < 400)
+        // Rotation itself survives the rebuild.
+        let doc = try #require(PDFDocument(url: out))
+        #expect(try #require(doc.page(at: 0)).rotation == 90)
+    }
+
     @Test func autoCropRefusesToWriteOverTheInput() throws {
         let dir = FixtureDir()
         let src = dir.url("src.pdf")

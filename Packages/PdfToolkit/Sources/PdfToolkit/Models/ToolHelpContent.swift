@@ -34,6 +34,27 @@ extension Tool {
                     "The summary line under the form tells you when the file still names an author or creator app.",
                 ]
             )
+        case .ocr:
+            return ToolHelpContent(
+                overview:
+                    "OCR reads the picture of each scanned page with Apple's on-device text recognition and hides real, selectable text behind it. The page image is unchanged—search, copy, and highlighting simply start working. Nothing is uploaded anywhere.",
+                steps: [
+                    "Choose or drop a scanned PDF.",
+                    "Pick Accurate (best hit rate) or Fast (long documents).",
+                    "Leave “Skip pages that already have text” on unless a page’s existing text layer is broken.",
+                    "Click Make searchable & save…—a progress bar tracks recognition page by page—then save the new PDF.",
+                ],
+                controls: [
+                    ("Accuracy", "Accurate uses the slower neural recognizer with language correction; Fast trades some accuracy for speed."),
+                    ("Skip pages that already have text", "Pages whose text already selects are copied through untouched, so mixed documents only OCR the true scans."),
+                    ("Make searchable & save…", "Runs recognition off the main thread, page by page, then opens the export sheet."),
+                ],
+                tips: [
+                    "Everything runs on this Mac—no page image or recognized text ever leaves it.",
+                    "Selection rectangles land where the recognizer saw each line, so highlights line up with the printed words.",
+                    "Recognition quality follows scan quality: a straight, 300-dpi scan reads far better than a skewed phone photo. Crop or rotate first if the page is messy.",
+                ]
+            )
         case .crop:
             return ToolHelpContent(
                 overview:

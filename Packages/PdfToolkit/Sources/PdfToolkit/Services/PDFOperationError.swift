@@ -26,6 +26,7 @@ public enum PDFOperationError: LocalizedError {
     case metadataEncrypted
     case couldNotOpenImage(URL)
     case cropTooSmall(pageNumber: Int)
+    case ocrFailed
 
     public var errorDescription: String? {
         switch self {
@@ -79,6 +80,8 @@ public enum PDFOperationError: LocalizedError {
             return "Could not read the image “\(url.lastPathComponent)”."
         case .cropTooSmall(let page):
             return "That trim would leave almost nothing of page \(page). Use smaller margins."
+        case .ocrFailed:
+            return "Text recognition failed while rebuilding the PDF."
         }
     }
 }

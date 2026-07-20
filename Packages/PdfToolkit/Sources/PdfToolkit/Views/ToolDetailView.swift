@@ -54,6 +54,8 @@ public struct ToolDetailView: View {
                     ImagesToPDFToolView()
                 case .crop:
                     CropToolView()
+                case .ocr:
+                    OCRToolView()
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)

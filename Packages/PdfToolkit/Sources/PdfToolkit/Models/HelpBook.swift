@@ -110,6 +110,7 @@ enum HelpBook {
                         "Combine & split — Merge stacks PDFs into one; Split and Extract pull files or pages out; Images to PDF turns pictures into a document.",
                         "Arrange pages — Reorder, Delete Pages, Rotate, and Crop rework the pages of a single PDF.",
                         "Compress & watermark — Compress shrinks a file; Watermark stamps text across every page.",
+                        "Scans & text — OCR PDF makes scanned pages searchable and selectable.",
                         "Secure & sign — Password Protect encrypts, Redact removes content for good, Fill & Sign adds text and a signature, and Clean Metadata strips hidden document info.",
                     ]),
                     .tip("Press ⌘K anywhere to jump straight to a tool without returning to the dashboard."),
@@ -132,6 +133,9 @@ enum HelpBook {
         Section(title: "Compress & watermark", topics: [
             toolTopic(.compress),
             toolTopic(.watermark),
+        ]),
+        Section(title: "Scans & text", topics: [
+            toolTopic(.ocr),
         ]),
         Section(title: "Secure & sign", topics: [
             toolTopic(.protect),
@@ -230,8 +234,9 @@ enum HelpBook {
         case .redact: return [topicID(for: .watermark), topicID(for: .protect), "privacy-safety"]
         case .fillSign: return [topicID(for: .protect), "privacy-safety"]
         case .metadata: return [topicID(for: .protect), topicID(for: .redact), "privacy-safety"]
-        case .imagesToPdf: return [topicID(for: .merge), topicID(for: .compress)]
+        case .imagesToPdf: return [topicID(for: .ocr), topicID(for: .merge), topicID(for: .compress)]
         case .crop: return [topicID(for: .rotate), topicID(for: .deletePages)]
+        case .ocr: return [topicID(for: .imagesToPdf), topicID(for: .compress), "privacy-safety"]
         }
     }
 

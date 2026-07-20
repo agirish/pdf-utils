@@ -15,6 +15,7 @@ public enum Tool: String, CaseIterable, Identifiable, Hashable {
     case metadata
     case imagesToPdf
     case crop
+    case ocr
 
     public var id: String { rawValue }
 
@@ -34,6 +35,7 @@ public enum Tool: String, CaseIterable, Identifiable, Hashable {
         case .metadata: return "Clean Metadata"
         case .imagesToPdf: return "Images to PDF"
         case .crop: return "Crop PDF"
+        case .ocr: return "OCR PDF"
         }
     }
 
@@ -67,6 +69,8 @@ public enum Tool: String, CaseIterable, Identifiable, Hashable {
             return "Turn photos and scans into one PDF"
         case .crop:
             return "Trim margins by hand or automatically"
+        case .ocr:
+            return "Make scanned pages searchable"
         }
     }
 
@@ -101,6 +105,8 @@ public enum Tool: String, CaseIterable, Identifiable, Hashable {
             return "Drop in JPG, PNG, or HEIC images and get one PDF with a page per image, in the order shown. Choose a paper size—or let each page match its image exactly—and whether pictures fit inside the page or fill it edge to edge."
         case .crop:
             return "Tighten every page's margins—type a trim for each edge, or let the tool find the content bounds on its own. Cropping changes what viewers display; nothing is deleted from the page, and your original file stays untouched."
+        case .ocr:
+            return "Runs Apple's text recognition over every page—entirely on your Mac—and lays an invisible, selectable text layer behind the scan. The page image is unchanged; search, copy, and highlight simply start working."
         }
     }
 
@@ -121,6 +127,7 @@ public enum Tool: String, CaseIterable, Identifiable, Hashable {
         case .metadata: return "tag.slash"
         case .imagesToPdf: return "photo.on.rectangle.angled"
         case .crop: return "crop"
+        case .ocr: return "text.viewfinder"
         }
     }
 
@@ -142,6 +149,7 @@ public enum Tool: String, CaseIterable, Identifiable, Hashable {
         case .imagesToPdf: return .yellow
         // Lime: greener than protect's system green, far from mint/teal.
         case .crop: return Color(red: 0.64, green: 0.78, blue: 0.22)
+        case .ocr: return .cyan
         }
     }
 }

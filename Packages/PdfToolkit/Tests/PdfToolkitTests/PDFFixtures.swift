@@ -224,6 +224,7 @@ extension PDFOperationError {
         case .metadataEncrypted: return "metadataEncrypted"
         case .couldNotOpenImage: return "couldNotOpenImage"
         case .cropTooSmall: return "cropTooSmall"
+        case .ocrFailed: return "ocrFailed"
         }
     }
 }

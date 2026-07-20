@@ -893,7 +893,8 @@ public enum PDFToolkit {
     /// them unless they are drawn here. The context must be in *displayed-page* space (origin at the
     /// displayed crop box's corner, rotation already upright): PDFKit's draw performs the page's
     /// display mapping internally.
-    private static func drawAnnotations(of page: PDFPage, in ctx: CGContext) {
+    // Internal (not private): the OCR extension re-draws pages the same way watermark does.
+    static func drawAnnotations(of page: PDFPage, in ctx: CGContext) {
         let visible = page.annotations.filter(\.shouldDisplay)
         guard !visible.isEmpty else { return }
         let graphics = NSGraphicsContext(cgContext: ctx, flipped: false)
@@ -946,6 +947,17 @@ public enum PDFToolkit {
 
     /// Renders the page — content plus visible annotations — upright at its displayed size via the
     /// shared raster pipeline (rotation-swapped crop box, exact scale). Compression never upscales.
+    /// Internal for the OCR extension: the page as displayed (rotation and crop applied), upscaled
+    /// when the page is small so Vision has pixels to read. Compression's `renderPage` deliberately
+    /// never upscales; recognition wants the opposite.
+    static func renderPageBitmap(_ page: PDFPage, maxPixelDimension: CGFloat) -> CGImage? {
+        guard
+            let cgPage = page.pageRef,
+            let geometry = rasterGeometry(for: page, maxPixelDimension: maxPixelDimension, allowUpscale: true)
+        else { return nil }
+        return renderBitmap(page, cgPage: cgPage, geometry: geometry, redactionFills: [])
+    }
+
     private static func renderPage(_ page: PDFPage, maxPixelDimension: CGFloat) -> NSImage? {
         guard
             let cgPage = page.pageRef,

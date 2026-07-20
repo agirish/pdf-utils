@@ -4,6 +4,7 @@ import PdfToolkit
 struct RootView: View {
     @EnvironmentObject private var settings: SettingsPresenter
     @EnvironmentObject private var quickActions: QuickActionsPresenter
+    @EnvironmentObject private var help: HelpPresenter
     @Environment(\.openWindow) private var openWindow
 
     @AppStorage(LiquidGlass.appearanceModeKey)
@@ -53,9 +54,16 @@ struct RootView: View {
             if quickActions.isPresented {
                 quickActionsOverlay
             }
+
+            // The Help book — same overlay treatment as Settings and ⌘K. Topmost so it always reads
+            // clearly; the ⌘? command and the "?" buttons close the other overlays before opening it.
+            if help.isPresented {
+                helpOverlay
+            }
         }
         .animation(.easeOut(duration: 0.15), value: settings.isPresented)
         .animation(.easeOut(duration: 0.15), value: quickActions.isPresented)
+        .animation(.easeOut(duration: 0.15), value: help.isPresented)
         .onAppear {
             if UserDefaults.standard.string(forKey: SettingsKeys.mainWindowBackground) == "accentGradient" {
                 UserDefaults.standard.set(
@@ -126,6 +134,29 @@ struct RootView: View {
         .contentSurface(hue: glassHue, tint: glassTint)
         .glassCardStyle(level: glassLevel)
         .overlayCardChrome()
+    }
+
+    /// In-window Help overlay — the exact parallel of `settingsOverlay`: a dimmed, tap-to-dismiss
+    /// backdrop behind the centered Help card. It floats over the content even in full screen.
+    private var helpOverlay: some View {
+        ZStack {
+            Rectangle()
+                .fill(Color.black.opacity(glassLevel.overlayScrimOpacity))
+                .ignoresSafeArea()
+                .onTapGesture { help.close() }
+
+            helpCard
+                // Absorb clicks on the card so they don't fall through to the dismiss backdrop.
+                .contentShape(Rectangle())
+        }
+        .transition(.opacity)
+    }
+
+    private var helpCard: some View {
+        HelpView(initialTopicID: help.initialTopicID, onClose: { help.close() })
+            .contentSurface(hue: glassHue, tint: glassTint)
+            .glassCardStyle(level: glassLevel)
+            .overlayCardChrome()
     }
 
     /// Runs a chosen Quick Action, then dismisses the palette. Navigating replaces the stack with just

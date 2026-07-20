@@ -3,8 +3,8 @@ import PdfToolkit
 
 struct DashboardView: View {
     @EnvironmentObject private var settings: SettingsPresenter
+    @EnvironmentObject private var help: HelpPresenter
     @Environment(\.openWindow) private var openWindow
-    @State private var showHelp = false
 
     @AppStorage(LiquidGlass.surfaceStyleKey)
     private var surfaceStyleRaw: String = SurfaceStyle.unified.rawValue
@@ -35,9 +35,11 @@ struct DashboardView: View {
         .background(DashboardBackground())
         .navigationTitle(AppBrand.displayName)
         .navigationDestination(for: Tool.self) { tool in
-            // Re-inject the presenter so ToolDetailView's toolbar gear can open the overlay.
+            // Re-inject the presenters so ToolDetailView's toolbar gear (Settings) and "?" (Help) can
+            // open their overlays — environment objects don't always survive the navigation boundary.
             ToolDetailView(tool: tool)
                 .environmentObject(settings)
+                .environmentObject(help)
         }
         .toolbar {
             // macOS 26's grouped toolbar no longer trails `.primaryAction` on its own, so a leading
@@ -61,16 +63,13 @@ struct DashboardView: View {
                 .help("Open Settings")
                 .accessibilityLabel("Settings")
                 Button {
-                    showHelp = true
+                    help.openHome()
                 } label: {
                     Image(systemName: "questionmark.circle")
                 }
-                .help("About \(AppBrand.displayName) and toolbar controls")
+                .help("\(AppBrand.displayName) Help")
                 .accessibilityLabel("Help")
             }
-        }
-        .sheet(isPresented: $showHelp) {
-            DashboardHelpSheet()
         }
     }
 

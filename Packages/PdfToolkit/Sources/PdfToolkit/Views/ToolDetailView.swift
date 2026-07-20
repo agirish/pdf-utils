@@ -3,8 +3,8 @@ import SwiftUI
 public struct ToolDetailView: View {
     public let tool: Tool
     @EnvironmentObject private var settings: SettingsPresenter
+    @EnvironmentObject private var help: HelpPresenter
     @Environment(\.openWindow) private var openWindow
-    @State private var showHelp = false
 
     @AppStorage(LiquidGlass.accentStyleKey) private var accentStyleRaw: String = AccentStyle.multicolor.rawValue
     @AppStorage(LiquidGlass.hueKey) private var glassHueRaw: String = LiquidGlass.defaultHue.rawValue
@@ -80,16 +80,13 @@ public struct ToolDetailView: View {
                 .help("Open Settings")
                 .accessibilityLabel("Settings")
                 Button {
-                    showHelp = true
+                    help.openTool(tool)
                 } label: {
                     Image(systemName: "questionmark.circle")
                 }
                 .help("Help for this tool")
                 .accessibilityLabel("Help")
             }
-        }
-        .sheet(isPresented: $showHelp) {
-            ToolHelpSheet(tool: tool)
         }
         // Remember the tool in view so "Reopen last tool on launch" (Files settings) can restore it.
         .onAppear {

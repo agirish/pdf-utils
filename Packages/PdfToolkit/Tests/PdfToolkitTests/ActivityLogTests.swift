@@ -56,6 +56,71 @@ struct ActivityLogTests {
         #expect(log.entries.last?.path == nil)
     }
 
+    @Test func liveTailImportsAnotherProcesssAppends() async throws {
+        // A separate FileHandle writing straight to the file stands in for the menu-bar helper. With
+        // the viewer tailing, its line should surface in `entries` without a relaunch.
+        let url = tempURL()
+        defer { try? FileManager.default.removeItem(at: url) }
+        // Seed so the tailer anchors past existing content (like a launch with prior history).
+        try "[2026-01-01 00:00:00.000] [INFO] seed\n".write(to: url, atomically: true, encoding: .utf8)
+        let log = ActivityLog(fileURL: url)
+        log.beginLiveTailing()
+
+        let external = "[2026-01-01 00:00:01.000] [INFO] Compress PDF: saved → /tmp/x.pdf (1 KB)\n"
+        let handle = try FileHandle(forWritingTo: url)
+        try handle.seekToEnd()
+        try handle.write(contentsOf: Data(external.utf8))
+        try handle.close()
+
+        for _ in 0..<300 where !log.entries.contains(where: { $0.message.hasPrefix("Compress PDF") }) {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        #expect(log.entries.contains(where: { $0.message.hasPrefix("Compress PDF") }))
+        // Tailed-from-disk entries carry no structured path (same as reloaded history).
+        #expect(log.entries.first { $0.message.hasPrefix("Compress PDF") }?.path == nil)
+    }
+
+    @Test func liveTailDoesNotDoubleThisProcesssOwnWrites() async throws {
+        // With tailing on, our own write reaches `entries` via the synchronous handoff AND lands on
+        // disk where the tailer reads it back. The ledger must make the tailer skip it, not double it.
+        let url = tempURL()
+        defer { try? FileManager.default.removeItem(at: url) }
+        let log = ActivityLog(fileURL: url)
+        log.beginLiveTailing()
+        log.info("only once")
+
+        for _ in 0..<300 where !log.entries.contains(where: { $0.message == "only once" }) {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        // Give the file tailer ample time to (wrongly) re-import it before asserting.
+        try await Task.sleep(for: .milliseconds(250))
+        #expect(log.entries.filter { $0.message == "only once" }.count == 1)
+    }
+
+    @Test func ownLineLedgerConsumesEachRegistrationOnce() {
+        let ledger = OwnLineLedger(capacity: 4)
+        ledger.register("a")
+        ledger.register("a")       // two identical lines → two skips
+        ledger.register("b")
+        #expect(ledger.consume("a") == true)
+        #expect(ledger.consume("a") == true)
+        #expect(ledger.consume("a") == false)   // only two were registered
+        #expect(ledger.consume("b") == true)
+        #expect(ledger.consume("c") == false)   // never registered
+    }
+
+    @Test func ownLineLedgerEvictsOldestBeyondCapacity() {
+        // An un-tailed process (the helper) keeps registering; the FIFO must drop the oldest so it
+        // stays bounded. Past capacity, the earliest lines are gone and no longer match.
+        let ledger = OwnLineLedger(capacity: 2)
+        ledger.register("first")
+        ledger.register("second")
+        ledger.register("third")   // evicts "first"
+        #expect(ledger.consume("first") == false)
+        #expect(ledger.consume("second") == true)
+        #expect(ledger.consume("third") == true)
+    }
+
     @Test func historyLineParsesWithoutPath() {
         // A save's structured path is deliberately absent from the on-disk line, so an entry
         // reconstructed from history carries no path (and thus offers no Reveal/Open actions).

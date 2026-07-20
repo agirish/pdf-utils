@@ -73,6 +73,9 @@ public struct ActivityLogView: View {
         }
         .frame(minWidth: 420, minHeight: 420)
         .liquidGlassAppBackground(level: glassLevel, hue: glassHue)
+        // Stream in entries written by the menu-bar helper (Finder-triggered runs) while this window
+        // is open, so it updates live instead of only on the next launch. Idempotent.
+        .onAppear { log.beginLiveTailing() }
         .onChange(of: selectedLevel) { _, _ in historyLimit = Self.historyPageSize }
         .onChange(of: searchText) { _, _ in historyLimit = Self.historyPageSize }
     }

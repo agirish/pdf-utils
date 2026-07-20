@@ -212,10 +212,31 @@ public final class ActivityLog: ObservableObject {
     /// preserves submission order, so entries land in call order.
     private let pending = LockedValue<[LogEntry]>([])
 
+    /// Byte length of the log file when this instance seeded `entries` from it. The live tailer starts
+    /// reading here, so it imports only what is appended afterward — everything up to this point is
+    /// already in `entries` (or is older history, loaded on demand).
+    private let initialFileSize: UInt64
+
+    /// The lines this process has written, recorded so the live tailer can recognize and skip them
+    /// when it reads them back off disk — they already reached `entries` through the synchronous
+    /// handoff above, so re-importing them would double every self-logged entry. See ``beginLiveTailing()``.
+    private let ownLines = OwnLineLedger(capacity: maxInMemory)
+
+    /// The live-tail watcher, created on the first ``beginLiveTailing()``. Stays nil in processes that
+    /// never display the log (the menu-bar helper) and until the viewer first opens.
+    private var tailer: ActivityLogTailer?
+
     init(fileURL: URL) {
         self.fileURL = fileURL
         self.writer = LogFileWriter(url: fileURL)
         self.entries = Self.loadRecent(from: fileURL, limit: Self.maxInMemory)
+        self.initialFileSize = Self.fileSize(of: fileURL)
+    }
+
+    /// Byte size of the file at `url`, or 0 when absent/unreadable.
+    private static func fileSize(of url: URL) -> UInt64 {
+        let attributes = try? FileManager.default.attributesOfItem(atPath: url.path)
+        return (attributes?[.size] as? NSNumber)?.uint64Value ?? 0
     }
 
     // MARK: File location
@@ -279,6 +300,10 @@ public final class ActivityLog: ObservableObject {
     private nonisolated func log(_ level: LogLevel, _ message: String, path: String? = nil) -> Bool {
         guard level.severity >= minimumLevel.severity else { return false }
         let entry = LogEntry(level: level, message: message, path: path)
+        // Register the line before it hits disk, so by the time the live tailer reads it back the
+        // ledger already knows it's ours and skips it — the entry reaches `entries` via the handoff
+        // below, and re-importing it from the file would double it.
+        ownLines.register(entry.formattedString)
         // The handoff-buffer append rides the writer queue with the disk append: both mutations
         // happen in one ordered domain, so `clearLogs`' queued purge either drops an entry from
         // both destinations or keeps it in both. Mutating `pending` here on the caller's thread
@@ -301,6 +326,36 @@ public final class ActivityLog: ObservableObject {
         }
     }
 
+    // MARK: Live tail (other processes)
+
+    /// Starts watching the log file for appends made by OTHER processes — the menu-bar helper writing
+    /// Finder-triggered runs — and streams them into `entries` so an already-open viewer updates in
+    /// real time instead of only on the next launch. Idempotent; the viewer calls it on appear.
+    ///
+    /// Only external lines are imported: this process's own writes already arrive through the
+    /// synchronous handoff and are recognized (and skipped) via `ownLines`, so nothing is doubled.
+    /// Externally-tailed entries are parsed from disk and therefore carry no structured `path`, so —
+    /// like reloaded history — they offer no Reveal/Open row actions, which is expected.
+    public func beginLiveTailing() {
+        guard tailer == nil else { return }
+        let tailer = ActivityLogTailer(url: fileURL, startOffset: initialFileSize, ledger: ownLines) { [weak self] external in
+            // The tailer delivers on the main thread.
+            MainActor.assumeIsolated { self?.appendExternal(external) }
+        }
+        self.tailer = tailer
+        tailer.start()
+    }
+
+    /// Appends entries the tailer read from another process's writes, honoring the same cap as
+    /// `drainPending`.
+    private func appendExternal(_ newEntries: [LogEntry]) {
+        guard !newEntries.isEmpty else { return }
+        entries.append(contentsOf: newEntries)
+        if entries.count > Self.maxInMemory {
+            entries.removeFirst(entries.count - Self.maxInMemory)
+        }
+    }
+
     // MARK: Clearing / flushing
 
     /// Empties the in-memory mirror and the on-disk file. The handoff buffer is dropped twice: once
@@ -310,6 +365,10 @@ public final class ActivityLog: ObservableObject {
     public func clearLogs() {
         _ = pending.take()
         entries.removeAll()
+        // Re-anchor the tailer to the (about-to-be-)truncated file so it doesn't re-import the lines
+        // the clear is wiping. The truncate is queued behind this on the writer; either way the
+        // tailer's own shrink check re-anchors it once the file actually shortens.
+        tailer?.reanchor()
         writer.clear { [pending] in
             _ = pending.take()
         }
@@ -363,6 +422,170 @@ extension LockedValue where Value: RangeReplaceableCollection {
         let current = stored
         stored = Value()
         return current
+    }
+}
+
+// MARK: - Own-line ledger
+
+/// A bounded record of the log lines THIS process has written but the live tailer may still read back
+/// off disk. The tailer consults it to skip re-importing our own entries — they already reached the
+/// viewer's `entries` through the synchronous handoff. Bounded FIFO: nothing drains it until a tailer
+/// runs (the helper writes but never tails), so it must not grow without bound. Keyed on the exact
+/// canonical line, and a multiset so two identical lines (same millisecond + message) each skip once.
+final class OwnLineLedger: @unchecked Sendable {
+    private let lock = NSLock()
+    private var counts: [String: Int] = [:]
+    private var order: [String] = []
+    private let capacity: Int
+
+    init(capacity: Int) { self.capacity = capacity }
+
+    /// Records one written line, evicting the oldest once over capacity so an un-tailed process (the
+    /// helper) stays bounded.
+    func register(_ line: String) {
+        lock.lock(); defer { lock.unlock() }
+        counts[line, default: 0] += 1
+        order.append(line)
+        if order.count > capacity {
+            let evicted = order.removeFirst()
+            if let count = counts[evicted] { counts[evicted] = count > 1 ? count - 1 : nil }
+        }
+    }
+
+    /// If `line` is one we wrote, consumes one occurrence and returns true (so the tailer skips it).
+    func consume(_ line: String) -> Bool {
+        lock.lock(); defer { lock.unlock() }
+        guard let count = counts[line], count > 0 else { return false }
+        counts[line] = count > 1 ? count - 1 : nil
+        if let index = order.firstIndex(of: line) { order.remove(at: index) }
+        return true
+    }
+}
+
+// MARK: - Live tailer
+
+/// Watches the log file for appends by OTHER processes and streams the parsed entries to `onExternal`.
+/// A single `DispatchSource` on the file wakes us on every write; we read only the bytes past our last
+/// position, skip any line this process itself wrote (via ``OwnLineLedger``), and hand the rest to the
+/// callback on the main thread. An atomic replacement — the trim's write-temp-then-rename, which swaps
+/// the inode out from under our open descriptor — is detected via the source's delete/rename events
+/// and the watch is re-established on the new file. All mutable state is confined to `queue`.
+final class ActivityLogTailer: @unchecked Sendable {
+    private let url: URL
+    private let ledger: OwnLineLedger
+    private let onExternal: @Sendable ([LogEntry]) -> Void
+    private let queue = DispatchQueue(label: "com.pdfutils.activitylog.tail", qos: .utility)
+
+    private var source: DispatchSourceFileSystemObject?
+    private var fd: Int32 = -1
+    /// File offset already consumed. Confined to `queue`.
+    private var offset: UInt64
+    /// Bytes read since the last newline — a line split across two reads is held here until complete.
+    private var partial = Data()
+
+    init(url: URL, startOffset: UInt64, ledger: OwnLineLedger, onExternal: @escaping @Sendable ([LogEntry]) -> Void) {
+        self.url = url
+        self.offset = startOffset
+        self.ledger = ledger
+        self.onExternal = onExternal
+    }
+
+    /// Opens the file, arms the watch, and reads anything appended between the viewer's load and now.
+    func start() {
+        queue.async { [self] in
+            openAndArm()
+            readNew()
+        }
+    }
+
+    /// Re-anchor to the current end of file — used when the viewer clears the log so the tailer does
+    /// not re-import the wiped lines. Runs on `queue` to stay ordered with reads.
+    func reanchor() {
+        queue.async { [self] in
+            offset = currentSize()
+            partial.removeAll()
+        }
+    }
+
+    // MARK: queue-confined internals
+
+    private func currentSize() -> UInt64 {
+        var status = stat()
+        guard fd >= 0, fstat(fd, &status) == 0 else { return 0 }
+        return UInt64(status.st_size)
+    }
+
+    /// (Re)opens the read descriptor and its watch. `O_CREAT` without `O_TRUNC` makes this race-free
+    /// against the writer still creating the file — it creates an empty file if missing (the writer's
+    /// `O_APPEND` then shares that inode) and never truncates existing content.
+    private func openAndArm() {
+        source?.cancel()
+        source = nil
+        if fd >= 0 { close(fd); fd = -1 }
+
+        let opened = open(url.path, O_RDONLY | O_CREAT, 0o644)
+        guard opened >= 0 else { return }
+        fd = opened
+
+        let source = DispatchSource.makeFileSystemObjectSource(
+            fileDescriptor: fd,
+            eventMask: [.write, .extend, .delete, .rename, .revoke],
+            queue: queue)
+        source.setEventHandler { [weak self] in
+            guard let self else { return }
+            let flags = self.source?.data ?? []
+            if flags.contains(.delete) || flags.contains(.rename) || flags.contains(.revoke) {
+                // The inode we held was unlinked/replaced (the trim's atomic rename). Re-establish on
+                // the new file and anchor at its end — its contents are already reflected in `entries`.
+                self.openAndArm()
+                self.offset = self.currentSize()
+                self.partial.removeAll()
+            } else {
+                self.readNew()
+            }
+        }
+        source.setCancelHandler { [fd] in if fd >= 0 { close(fd) } }
+        self.source = source
+        source.resume()
+    }
+
+    private func readNew() {
+        guard fd >= 0 else { return }
+        let size = currentSize()
+        if size < offset {
+            // Truncated in place (the viewer cleared the log) — re-anchor to the new, shorter end.
+            offset = size
+            partial.removeAll()
+            return
+        }
+        guard size > offset else { return }
+
+        let wanted = Int(size - offset)
+        var buffer = Data(count: wanted)
+        let read = buffer.withUnsafeMutableBytes { raw -> Int in
+            guard let base = raw.baseAddress else { return 0 }
+            return pread(fd, base, wanted, off_t(offset))
+        }
+        guard read > 0 else { return }
+        offset += UInt64(read)
+
+        var chunk = partial
+        chunk.append(read == wanted ? buffer : buffer.prefix(read))
+        guard let lastNewline = chunk.lastIndex(of: UInt8(ascii: "\n")) else {
+            partial = chunk           // no complete line yet; hold for the next event
+            return
+        }
+        let complete = chunk[...lastNewline]
+        partial = Data(chunk[chunk.index(after: lastNewline)...])
+
+        var external: [LogEntry] = []
+        for lineBytes in complete.split(separator: UInt8(ascii: "\n"), omittingEmptySubsequences: true) {
+            guard let line = String(data: Data(lineBytes), encoding: .utf8) else { continue }
+            if ledger.consume(line) { continue }        // our own write — already shown
+            if let entry = LogEntry.parse(line) { external.append(entry) }
+        }
+        guard !external.isEmpty else { return }
+        DispatchQueue.main.async { [onExternal] in onExternal(external) }
     }
 }
 

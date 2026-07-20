@@ -40,15 +40,34 @@ import Foundation
         manager.beginOperation(b)
         manager.beginOperation(a)
         #expect(manager.hasPendingOperations)
-        #expect(manager.activeOperations.contains(a))
-        #expect(manager.activeOperations.contains(b))
+        #expect(manager.activeOperations.keys.contains(a))
+        #expect(manager.activeOperations.keys.contains(b))
         // Description is sorted, so it's stable regardless of insertion order.
         let description = manager.pendingOperationsDescription
         #expect(description.contains(a))
         #expect(description.range(of: [a, b].sorted().first!) != nil)
 
         manager.endOperation(a)
-        #expect(!manager.activeOperations.contains(a))
+        #expect(!manager.activeOperations.keys.contains(a))
+    }
+
+    @MainActor
+    @Test func operationTrackerCountsSameNamedConcurrentRuns() {
+        // Two windows can run the same tool at once. A Set collapsed them: the first to finish
+        // cleared the shared entry and ⌘Q's warning went silent while the twin was still writing.
+        let manager = AppStateManager.shared
+        let name = "Op-\(UUID().uuidString)"
+
+        manager.beginOperation(name)
+        manager.beginOperation(name)
+        manager.endOperation(name)
+        #expect(manager.activeOperations.keys.contains(name)) // the second run is still going
+
+        manager.endOperation(name)
+        #expect(!manager.activeOperations.keys.contains(name))
+
+        manager.endOperation(name) // unbalanced end is a no-op, not a crash or negative count
+        #expect(!manager.activeOperations.keys.contains(name))
     }
 
     // MARK: LogLevel contract

@@ -100,47 +100,29 @@ struct MergeToolView: View {
     // MARK: - Success
 
     private func successView(_ result: MergeResult) -> some View {
-        ToolFormContainer {
-            VStack(spacing: 24) {
-                Image(systemName: "checkmark.circle.fill")
-                    .font(.system(size: 48))
-                    .foregroundStyle(.green)
-
-                VStack(spacing: 8) {
-                    Text("Merged successfully")
-                        .font(.title2.weight(.bold))
-
-                    Text(result.outputURL.path)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                        .truncationMode(.middle)
+        ToolSuccessView(
+            accent: Tool.merge.accent,
+            title: "Merged successfully",
+            path: result.outputURL.path,
+            stats: [
+                .init(value: "\(result.totalPages)", label: "pages"),
+                .init(value: "\(entries.count)", label: "files"),
+                .init(value: formatBytes(result.fileBytes), label: "size"),
+            ],
+            onShowInFinder: {
+                NSWorkspace.shared.activateFileViewerSelecting([result.outputURL])
+            },
+            onDoAnother: {
+                withAnimation {
+                    previewTask?.cancel()
+                    entries.removeAll()
+                    previewPages.removeAll()
+                    pagesByEntryID = [:]
+                    totalPages = 0
+                    mergeResult = nil
                 }
-
-                HStack(spacing: 32) {
-                    StatBox(title: "SIZE", value: formatBytes(result.fileBytes))
-                    StatBox(title: "PAGES", value: "\(result.totalPages)")
-                    StatBox(title: "FILES", value: "\(entries.count)")
-                }
-                .padding(.top, 16)
-
-                Button("Start over") {
-                    withAnimation {
-                        previewTask?.cancel()
-                        entries.removeAll()
-                        previewPages.removeAll()
-                        pagesByEntryID = [:]
-                        totalPages = 0
-                        mergeResult = nil
-                    }
-                }
-                .buttonStyle(.borderedProminent)
-                .controlSize(.large)
-                .padding(.top, 16)
             }
-            .padding(40)
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-        }
+        )
     }
 
     // MARK: - Sidebar
@@ -584,26 +566,3 @@ struct MergeToolView: View {
     }
 }
 
-// MARK: - Success stats
-
-private struct StatBox: View {
-    let title: String
-    let value: String
-
-    var body: some View {
-        VStack(spacing: 6) {
-            Text(title)
-                .font(.caption2.weight(.semibold))
-                .foregroundStyle(.secondary)
-                .textCase(.uppercase)
-            Text(value)
-                .font(.title3.weight(.medium))
-        }
-        .frame(minWidth: 80)
-        .padding(.vertical, 12)
-        .padding(.horizontal, 16)
-        .background(Color(nsColor: .windowBackgroundColor))
-        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-        .shadow(color: .black.opacity(0.05), radius: 2, y: 1)
-    }
-}

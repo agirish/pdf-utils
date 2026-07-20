@@ -309,39 +309,17 @@ struct SplitToolView: View {
     // MARK: - Success
 
     private func successView(_ result: SplitResult) -> some View {
-        ToolFormContainer {
-            VStack(spacing: 24) {
-                Image(systemName: "checkmark.circle.fill")
-                    .font(.system(size: 48))
-                    .foregroundStyle(.green)
-
-                VStack(spacing: 8) {
-                    Text("Split into \(result.files.count) file\(result.files.count == 1 ? "" : "s")")
-                        .font(.title2.weight(.bold))
-                    Text(result.directory.path)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-                }
-
-                HStack(spacing: 16) {
-                    Button("Show in Finder") {
-                        NSWorkspace.shared.activateFileViewerSelecting(result.files)
-                    }
-                    .controlSize(.large)
-
-                    Button("Split another") {
-                        withAnimation { self.result = nil }
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .controlSize(.large)
-                }
-                .padding(.top, 8)
+        ToolSuccessView(
+            accent: Tool.split.accent,
+            title: "Split into \(result.files.count) file\(result.files.count == 1 ? "" : "s")",
+            path: result.directory.path,
+            onShowInFinder: {
+                NSWorkspace.shared.activateFileViewerSelecting(result.files)
+            },
+            onDoAnother: {
+                withAnimation { self.result = nil }
             }
-            .padding(40)
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-        }
+        )
     }
 
     // MARK: - Thumbnails

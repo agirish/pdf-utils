@@ -9,9 +9,11 @@ import SwiftUI
 public enum LogLevel: String, CaseIterable, Identifiable, Sendable {
     /// Informational telemetry — the standard "operation succeeded" event.
     case info = "INFO"
-    /// Detailed diagnostics for development.
+    /// Verbose lifecycle breadcrumbs — e.g. an operation starting — kept below the routine INFO
+    /// record and surfaced only at the "Everything" level.
     case debug = "DEBUG"
-    /// A non-critical problem that did not halt the operation.
+    /// A non-critical problem that did not halt the operation, or an operation that finished
+    /// incompletely (e.g. a batch stopped partway through its queue).
     case warning = "WARN"
     /// A failed operation.
     case error = "ERROR"
@@ -182,9 +184,16 @@ public final class ActivityLog: ObservableObject {
     /// `shared.minimumLevel` from it at launch.
     public static let minimumLevelDefaultsKey = "pdfutils.logMinimumLevel"
 
-    /// The persisted minimum level, defaulting to `.debug` (log everything) when unset/unrecognized.
+    /// The level a fresh install records at: `.info`, so the log reads as a clean record of file
+    /// changes (saves) and failures out of the box. Dropping to `.debug` ("Everything" in Settings)
+    /// additionally surfaces the operation-lifecycle breadcrumbs. This is the single source of truth
+    /// for that default — shared by the launch seed, the Settings picker's initial value, and Reset
+    /// All Settings — so the three can't drift apart.
+    public static let defaultMinimumLevel: LogLevel = .info
+
+    /// The persisted minimum level, falling back to ``defaultMinimumLevel`` when unset/unrecognized.
     public static func persistedMinimumLevel(from defaults: UserDefaults = .standard) -> LogLevel {
-        defaults.string(forKey: minimumLevelDefaultsKey).flatMap(LogLevel.init(rawValue:)) ?? .debug
+        defaults.string(forKey: minimumLevelDefaultsKey).flatMap(LogLevel.init(rawValue:)) ?? defaultMinimumLevel
     }
 
     /// Entries below this severity are dropped before memory or disk. Lock-guarded because the
@@ -193,7 +202,7 @@ public final class ActivityLog: ObservableObject {
         get { minimumLevelBox.value }
         set { minimumLevelBox.value = newValue }
     }
-    private let minimumLevelBox = LockedValue<LogLevel>(.debug)
+    private let minimumLevelBox = LockedValue<LogLevel>(ActivityLog.defaultMinimumLevel)
 
     private static let maxInMemory = 1000
 

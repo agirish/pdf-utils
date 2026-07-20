@@ -509,7 +509,7 @@ struct AdvancedSettingsTab: View {
     @AppStorage(SettingsKeys.stripMetadataOnExport)
     private var stripMetadata: Bool = false
     @AppStorage(ActivityLog.minimumLevelDefaultsKey)
-    private var logLevelRaw: String = LogLevel.debug.rawValue
+    private var logLevelRaw: String = ActivityLog.defaultMinimumLevel.rawValue
 
     /// Coarser-to-finer thresholds shown in the logging picker, each paired with the `LogLevel` whose
     /// raw value is persisted. `.debug` logs everything; `.error` keeps only failures.
@@ -608,7 +608,7 @@ struct AdvancedSettingsTab: View {
         // The log gate is seeded once at launch; apply changes live so the Activity Log reflects the
         // new threshold without a relaunch.
         .onChange(of: logLevelRaw) { _, newValue in
-            ActivityLog.shared.minimumLevel = LogLevel(rawValue: newValue) ?? .debug
+            ActivityLog.shared.minimumLevel = LogLevel(rawValue: newValue) ?? ActivityLog.defaultMinimumLevel
         }
     }
 
@@ -641,7 +641,7 @@ struct AdvancedSettingsTab: View {
         // Re-seed glassLevel (its absence would trigger the legacy migration path again) and re-apply
         // the now-default (System) theme + logging gate.
         defaults.set(GlassLevel.frosted.rawValue, forKey: LiquidGlass.levelKey)
-        ActivityLog.shared.minimumLevel = .debug
+        ActivityLog.shared.minimumLevel = ActivityLog.defaultMinimumLevel
         AppAppearance.applyPersisted()
     }
 }

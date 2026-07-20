@@ -257,6 +257,16 @@ final class BatchRunner: ObservableObject {
             }
         }
 
+        // A run cancelled mid-queue breaks the loop before touching the remaining files, leaving them
+        // `.pending`. Surface that incomplete outcome as a WARN so it shows at the "Warnings and
+        // errors" level: the per-file ERRORs only account for files that were attempted and failed,
+        // never ones the cancellation skipped.
+        let notProcessed = items.filter { $0.status == .pending }.count
+        if notProcessed > 0 {
+            let noun = notProcessed == 1 ? "file" : "files"
+            ActivityLog.shared.warning("\(operation.toolTitle): batch stopped early — \(notProcessed) of \(items.count) \(noun) not processed")
+        }
+
         // One after-export action for the whole run, at the end. Per-file firing activated Finder
         // (or opened a Preview window) once per file, stealing focus for the entire run; the
         // action's own multi-file branch exists precisely to reveal a batch in one shot.

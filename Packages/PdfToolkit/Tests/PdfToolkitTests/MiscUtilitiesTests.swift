@@ -79,16 +79,17 @@ import Foundation
     // MARK: ActivityLog defaults / file location
 
     @MainActor
-    @Test func persistedMinimumLevelReadsTheKeyAndDefaultsToDebug() {
+    @Test func persistedMinimumLevelReadsTheKeyAndDefaultsToInfo() {
         let name = "pdfutils.tests.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: name)!
         defer { defaults.removePersistentDomain(forName: name) }
 
-        #expect(ActivityLog.persistedMinimumLevel(from: defaults) == .debug)     // unset → debug
+        #expect(ActivityLog.defaultMinimumLevel == .info)
+        #expect(ActivityLog.persistedMinimumLevel(from: defaults) == .info)      // unset → info
         defaults.set("WARN", forKey: ActivityLog.minimumLevelDefaultsKey)
         #expect(ActivityLog.persistedMinimumLevel(from: defaults) == .warning)
         defaults.set("nonsense", forKey: ActivityLog.minimumLevelDefaultsKey)
-        #expect(ActivityLog.persistedMinimumLevel(from: defaults) == .debug)     // unknown → debug
+        #expect(ActivityLog.persistedMinimumLevel(from: defaults) == .info)      // unknown → info
         #expect(ActivityLog.minimumLevelDefaultsKey == "pdfutils.logMinimumLevel")
     }
 

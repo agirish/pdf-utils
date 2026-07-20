@@ -18,23 +18,19 @@ struct DashboardView: View {
     ]
 
     var body: some View {
-        VStack(spacing: 0) {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 28) {
-                    header
-                    LazyVGrid(columns: columns, spacing: 20) {
-                        ForEach(Tool.allCases) { tool in
-                            NavigationLink(value: tool) {
-                                ToolTileView(tool: tool, floating: floatingTiles)
-                            }
-                            .buttonStyle(.plain)
+        ScrollView {
+            VStack(alignment: .leading, spacing: 28) {
+                header
+                LazyVGrid(columns: columns, spacing: 20) {
+                    ForEach(Tool.allCases) { tool in
+                        NavigationLink(value: tool) {
+                            ToolTileView(tool: tool, floating: floatingTiles)
                         }
+                        .buttonStyle(.plain)
                     }
                 }
-                .padding(32)
-                .frame(maxWidth: .infinity, alignment: .leading)
             }
-            dashboardFooter
+            .padding(32)
         }
         .background(DashboardBackground())
         .navigationTitle(AppBrand.displayName)
@@ -82,7 +78,7 @@ struct DashboardView: View {
         VStack(alignment: .leading, spacing: 12) {
             Text("Tools")
                 .font(.largeTitle.weight(.semibold))
-            Text("Pick a tool to work on your PDFs. Use the toolbar “?” for an overview of the window controls.")
+            Text("Pick a tool to work on your PDFs.")
                 .font(.body)
                 .foregroundStyle(.secondary)
                 .lineSpacing(3)
@@ -110,32 +106,6 @@ struct DashboardView: View {
         .overlay(Capsule(style: .continuous).strokeBorder(Color.green.opacity(0.24), lineWidth: 1))
         .accessibilityElement(children: .combine)
         .accessibilityLabel("Privacy: files stay on your Mac, nothing is uploaded")
-    }
-
-    /// A slim status bar pinned to the window's bottom edge: gives the tall dashboard visual closure
-    /// and a quiet home for the app identity and tool count.
-    private var dashboardFooter: some View {
-        HStack(spacing: 8) {
-            Text(AppBrand.displayName)
-                .fontWeight(.semibold)
-            if let version = appVersion {
-                Text("v\(version)")
-                    .foregroundStyle(.secondary)
-            }
-            Spacer(minLength: 12)
-            Text("\(Tool.allCases.count) tools")
-                .foregroundStyle(.secondary)
-        }
-        .font(.footnote)
-        .foregroundStyle(.secondary)
-        .padding(.horizontal, 32)
-        .padding(.vertical, 10)
-        .frame(maxWidth: .infinity)
-        .overlay(alignment: .top) { Divider() }
-    }
-
-    private var appVersion: String? {
-        Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String
     }
 }
 

@@ -36,8 +36,15 @@ struct LogFileWriterTests {
         // appends atomic, so no line is interleaved or lost even when they write at the same time.
         let url = tempURL()
         defer { try? FileManager.default.removeItem(at: url) }
+        // Bring the writers up one at a time: the first creates the file, the second opens that same
+        // inode. Flushing each init before the appends guarantees both O_APPEND handles are open, so
+        // the concurrent writes exercise O_APPEND atomicity — not the handle-still-opening fallback
+        // (a whole-file read+atomic-rewrite) where two in-process writers would clobber each other.
+        // (Production never hits this: each process owns exactly one writer.)
         let appWriter = LogFileWriter(url: url)
+        appWriter.flush()
         let helperWriter = LogFileWriter(url: url)
+        helperWriter.flush()
 
         let perWriter = 200
         DispatchQueue.concurrentPerform(iterations: perWriter) { i in

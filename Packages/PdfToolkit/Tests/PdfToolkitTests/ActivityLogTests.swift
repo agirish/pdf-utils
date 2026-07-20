@@ -8,6 +8,14 @@ struct ActivityLogTests {
         FileManager.default.temporaryDirectory.appendingPathComponent("pdfutils-log-\(UUID().uuidString).log")
     }
 
+    /// Appends straight to the file via a fresh handle — stands in for another process (the helper).
+    private func appendExternally(_ text: String, to url: URL) throws {
+        let handle = try FileHandle(forWritingTo: url)
+        try handle.seekToEnd()
+        try handle.write(contentsOf: Data(text.utf8))
+        try handle.close()
+    }
+
     @Test func minimumLevelDropsBelowThreshold() {
         let url = tempURL()
         defer { try? FileManager.default.removeItem(at: url) }
@@ -119,6 +127,56 @@ struct ActivityLogTests {
         #expect(ledger.consume("first") == false)
         #expect(ledger.consume("second") == true)
         #expect(ledger.consume("third") == true)
+    }
+
+    @Test func liveTailSurvivesAtomicFileReplacement() async throws {
+        // Regression for the reopen bug: the >5 MB trim rewrites the log with an atomic rename, which
+        // swaps the inode out from under the tailer's descriptor. The tailer must re-establish its
+        // watch on the new file and keep importing. (Before the fd-ownership fix, the reopen closed
+        // the new descriptor and live-tailing silently died after the first trim.)
+        let url = tempURL()
+        defer { try? FileManager.default.removeItem(at: url) }
+        try "[2026-01-01 00:00:00.000] [INFO] seed\n".write(to: url, atomically: true, encoding: .utf8)
+        let log = ActivityLog(fileURL: url)
+        log.beginLiveTailing()
+
+        try appendExternally("[2026-01-01 00:00:01.000] [INFO] Merge PDF: before → /tmp/a.pdf (1 KB)\n", to: url)
+        for _ in 0..<300 where !log.entries.contains(where: { $0.message.contains("before") }) {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        #expect(log.entries.contains(where: { $0.message.contains("before") }))
+
+        // Atomic replace = write-temp-then-rename, exactly what the trim does; fires delete/rename.
+        try Data("[2026-01-01 00:00:02.000] [INFO] trimmed-tail\n".utf8).write(to: url, options: .atomic)
+        // Let the tailer process the delete/rename and re-arm on the new inode before appending, so we
+        // test post-reopen liveness rather than the (accepted) trim-boundary skip.
+        try await Task.sleep(for: .milliseconds(300))
+
+        try appendExternally("[2026-01-01 00:00:03.000] [INFO] Compress PDF: after → /tmp/b.pdf (2 KB)\n", to: url)
+        for _ in 0..<300 where !log.entries.contains(where: { $0.message.contains("after") }) {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        #expect(log.entries.contains(where: { $0.message.contains("after") }))
+    }
+
+    @Test func liveTailAnchorsAtOpenSoManyPreWindowOwnWritesNeverDouble() async throws {
+        // Regression for the ledger-overflow doubling: log more own lines than the dedup ledger's
+        // capacity BEFORE opening the viewer. Anchoring the tailer at the file's end on open means
+        // those lines sit below the read offset and are never re-read, so none double even though most
+        // were evicted from the ledger. (Anchoring at launch would re-import the evicted ones.)
+        let url = tempURL()
+        defer { try? FileManager.default.removeItem(at: url) }
+        let log = ActivityLog(fileURL: url)
+        for i in 0..<1200 { log.info("pre-\(i)") }   // > ownLines capacity (1000)
+        log.flushToDisk()
+        for _ in 0..<400 where log.entries.count < 1000 { try await Task.sleep(for: .milliseconds(10)) }
+
+        log.beginLiveTailing()
+        try await Task.sleep(for: .milliseconds(300))   // ample time for a (wrong) re-import
+
+        let perMessage = Dictionary(grouping: log.entries, by: \.message).mapValues(\.count)
+        #expect(perMessage.values.allSatisfy { $0 == 1 })   // nothing doubled
+        #expect(log.entries.count <= 1000)                  // mirror stayed capped, no re-import flood
     }
 
     @Test func historyLineParsesWithoutPath() {

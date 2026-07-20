@@ -212,11 +212,6 @@ public final class ActivityLog: ObservableObject {
     /// preserves submission order, so entries land in call order.
     private let pending = LockedValue<[LogEntry]>([])
 
-    /// Byte length of the log file when this instance seeded `entries` from it. The live tailer starts
-    /// reading here, so it imports only what is appended afterward — everything up to this point is
-    /// already in `entries` (or is older history, loaded on demand).
-    private let initialFileSize: UInt64
-
     /// The lines this process has written, recorded so the live tailer can recognize and skip them
     /// when it reads them back off disk — they already reached `entries` through the synchronous
     /// handoff above, so re-importing them would double every self-logged entry. See ``beginLiveTailing()``.
@@ -230,7 +225,6 @@ public final class ActivityLog: ObservableObject {
         self.fileURL = fileURL
         self.writer = LogFileWriter(url: fileURL)
         self.entries = Self.loadRecent(from: fileURL, limit: Self.maxInMemory)
-        self.initialFileSize = Self.fileSize(of: fileURL)
     }
 
     /// Byte size of the file at `url`, or 0 when absent/unreadable.
@@ -336,9 +330,16 @@ public final class ActivityLog: ObservableObject {
     /// synchronous handoff and are recognized (and skipped) via `ownLines`, so nothing is doubled.
     /// Externally-tailed entries are parsed from disk and therefore carry no structured `path`, so —
     /// like reloaded history — they offer no Reveal/Open row actions, which is expected.
+    ///
+    /// The tailer anchors at the file's CURRENT end, not its size at launch. Anchoring at launch would
+    /// re-read the whole session on open, and any own line evicted from `ownLines`' bounded FIFO
+    /// before then would be re-imported as if external — doubled and mis-ordered. Anchoring at "now"
+    /// keeps every already-written line (own or from another process) strictly below the read offset,
+    /// so it is never re-read; the cost is that a *another* process's write made after launch but
+    /// before this first open isn't caught live (it still shows on relaunch / "Show older history").
     public func beginLiveTailing() {
         guard tailer == nil else { return }
-        let tailer = ActivityLogTailer(url: fileURL, startOffset: initialFileSize, ledger: ownLines) { [weak self] external in
+        let tailer = ActivityLogTailer(url: fileURL, startOffset: Self.fileSize(of: fileURL), ledger: ownLines) { [weak self] external in
             // The tailer delivers on the main thread.
             MainActor.assumeIsolated { self?.appendExternal(external) }
         }
@@ -490,6 +491,14 @@ final class ActivityLogTailer: @unchecked Sendable {
         self.onExternal = onExternal
     }
 
+    /// Cancels the source so its cancel handler closes the fd; otherwise a resumed source (retained by
+    /// libdispatch) would outlive this object and leak the descriptor. Safe here: the event handler
+    /// holds a strong `self` for its duration, so no handler is running while this deinit runs. Moot
+    /// for the process-lifetime `ActivityLog.shared`, but tidy for throwaway instances (tests).
+    deinit {
+        source?.cancel()
+    }
+
     /// Opens the file, arms the watch, and reads anything appended between the viewer's load and now.
     func start() {
         queue.async { [self] in
@@ -519,9 +528,15 @@ final class ActivityLogTailer: @unchecked Sendable {
     /// against the writer still creating the file — it creates an empty file if missing (the writer's
     /// `O_APPEND` then shares that inode) and never truncates existing content.
     private func openAndArm() {
+        // Relinquish the old fd WITHOUT closing it here: a dispatch source's fd must stay valid until
+        // its (async) cancel handler runs, and that handler is this fd's sole closer. Closing it now
+        // would both violate that contract and free the descriptor number, which `open()` below would
+        // deterministically reuse — so the old source's pending cancel handler would then close the
+        // NEW source's fd, silently killing the watch on the very reopen (trim/atomic-replace) this
+        // path exists to handle. Leaving it open forces `open()` to return a different number.
         source?.cancel()
         source = nil
-        if fd >= 0 { close(fd); fd = -1 }
+        fd = -1
 
         let opened = open(url.path, O_RDONLY | O_CREAT, 0o644)
         guard opened >= 0 else { return }

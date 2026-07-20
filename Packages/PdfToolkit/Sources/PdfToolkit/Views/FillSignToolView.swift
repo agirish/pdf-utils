@@ -151,7 +151,7 @@ struct FillSignToolView: View {
 
             Divider()
 
-            RunActionButton(title: "Fill & Sign & save…", busy: busy, canRun: canRun) {
+            RunActionButton(title: "Sign & save…", busy: busy, canRun: canRun) {
                 Task { await runFillSign() }
             }
             .padding(16)
@@ -182,7 +182,7 @@ struct FillSignToolView: View {
                         .font(.subheadline.weight(.medium))
                         .foregroundStyle(.secondary)
                     }
-                    Button("Choose PDF…") { showImporter = true }
+                    Button("Add PDF…") { showImporter = true }
                         .font(.subheadline.weight(.medium))
                 }
             }
@@ -201,9 +201,9 @@ struct FillSignToolView: View {
                 .font(.system(size: 36, weight: .light))
                 .symbolRenderingMode(.hierarchical)
                 .foregroundStyle(accent.opacity(0.85))
-            Text("Drop a PDF here")
+            Text("Drop a PDF here or add a file")
                 .font(.title3.weight(.semibold))
-            Text("Fill in a non-interactive form and sign it—everything stays on your Mac.")
+            Text("Fill in a non-interactive form and sign it — everything stays on your Mac.")
                 .font(.body)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
@@ -223,6 +223,8 @@ struct FillSignToolView: View {
                 .foregroundStyle(isDropTargeted ? accent : Color.secondary.opacity(0.35))
         }
         .animation(.easeInOut(duration: 0.18), value: isDropTargeted)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("No file selected. Drop a PDF or add a file.")
     }
 
     private func selectedFileCard(url: URL) -> some View {
@@ -245,7 +247,7 @@ struct FillSignToolView: View {
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
                 } else {
-                    Text("Loading…")
+                    Text("Loading preview…")
                         .font(.subheadline)
                         .foregroundStyle(.tertiary)
                 }

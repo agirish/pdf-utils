@@ -162,7 +162,7 @@ struct DeletePagesToolView: View {
         if inputURL == nil {
             return "Drop a PDF or add a file. List pages to remove on the left; preview on the right."
         }
-        return "An empty page list does nothing—type which pages to drop. At least one page must remain."
+        return "An empty page list does nothing — type which pages to drop. At least one page must remain."
     }
 
     private var emptyDropZone: some View {

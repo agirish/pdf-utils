@@ -314,7 +314,7 @@ struct MergeToolView: View {
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
                 } else if pageSummaryLoading {
-                    Text("Reading…")
+                    Text("Reading pages…")
                         .font(.subheadline)
                         .foregroundStyle(.tertiary)
                 }

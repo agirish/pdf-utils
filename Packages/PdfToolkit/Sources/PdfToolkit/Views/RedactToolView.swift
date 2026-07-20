@@ -138,7 +138,7 @@ struct RedactToolView: View {
                         .font(.subheadline.weight(.medium))
                         .foregroundStyle(.secondary)
                     }
-                    Button("Choose PDF…") { showImporter = true }
+                    Button("Add PDF…") { showImporter = true }
                         .font(.subheadline.weight(.medium))
                 }
             }
@@ -162,9 +162,9 @@ struct RedactToolView: View {
                 .font(.system(size: 36, weight: .light))
                 .symbolRenderingMode(.hierarchical)
                 .foregroundStyle(Tool.redact.accent.opacity(0.85))
-            Text("Drop a PDF here")
+            Text("Drop a PDF here or add a file")
                 .font(.title3.weight(.semibold))
-            Text("Redaction is offline on your Mac—nothing is uploaded.")
+            Text("Redaction is offline on your Mac — nothing is uploaded.")
                 .font(.body)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
@@ -184,6 +184,8 @@ struct RedactToolView: View {
                 .foregroundStyle(isDropTargeted ? Tool.redact.accent : Color.secondary.opacity(0.35))
         }
         .animation(.easeInOut(duration: 0.18), value: isDropTargeted)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("No file selected. Drop a PDF or add a file.")
     }
 
     private func selectedFileCard(url: URL) -> some View {
@@ -206,7 +208,7 @@ struct RedactToolView: View {
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
                 } else {
-                    Text("Loading…")
+                    Text("Loading preview…")
                         .font(.subheadline)
                         .foregroundStyle(.tertiary)
                 }
@@ -230,7 +232,7 @@ struct RedactToolView: View {
             Text("Security")
                 .font(.subheadline.weight(.semibold))
             Text(
-                "Every page you mark is rebuilt as an image with solid black over each region—the text and vectors under the marks can't be recovered, and the rest of that page becomes non-selectable. Pages you don't mark are left untouched. Processing never leaves your Mac."
+                "Every page you mark is rebuilt as an image with solid black over each region — the text and vectors under the marks can't be recovered, and the rest of that page becomes non-selectable. Pages you don't mark are left untouched. Processing never leaves your Mac."
             )
             .font(.subheadline)
             .foregroundStyle(.secondary)

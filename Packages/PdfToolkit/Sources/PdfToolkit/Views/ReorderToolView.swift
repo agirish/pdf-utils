@@ -128,7 +128,7 @@ struct ReorderToolView: View {
 
             Divider()
 
-            RunActionButton(title: "Save reordered PDF…", busy: busy, canRun: !items.isEmpty) {
+            RunActionButton(title: "Reorder & save…", busy: busy, canRun: !items.isEmpty) {
                 Task { await runReorder() }
             }
             .padding(16)
@@ -340,7 +340,7 @@ struct ReorderToolView: View {
             isGeneratingPreviews = false
             return
         }
-        // Clear the old document's rows BEFORE the await: `items` is what "Save reordered PDF…"
+        // Clear the old document's rows BEFORE the await: `items` is what "Reorder & save…"
         // applies to the current `inputURL`, so leaving them populated while the new file's
         // thumbnails render lets a click apply document A's page order (and count) to document B —
         // silently truncating it to A's page count.

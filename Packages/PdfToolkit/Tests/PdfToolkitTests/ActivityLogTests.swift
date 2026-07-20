@@ -88,6 +88,52 @@ struct ActivityLogTests {
         #expect(log.entries.first { $0.message.hasPrefix("Compress PDF") }?.path == nil)
     }
 
+    @Test func liveTailCatchesUpOnLinesWrittenBeforeTheFirstOpen() async throws {
+        // The helper can log between this process's launch and the viewer's first open. Anchoring
+        // the tailer at the current EOF stranded those lines completely: not in the seed (written
+        // after it), not tailed (below the anchor), and excluded from "Show older history" (their
+        // timestamps are ≥ sessionStart). The tailer must anchor at the seed offset and catch up.
+        let url = tempURL()
+        defer { try? FileManager.default.removeItem(at: url) }
+        try "[2026-01-01 00:00:00.000] [INFO] seed\n".write(to: url, atomically: true, encoding: .utf8)
+        let log = ActivityLog(fileURL: url)
+
+        // Written after launch (the seed load) but before beginLiveTailing — the gap window.
+        try appendExternally("[2026-01-01 00:00:01.000] [INFO] Compress PDF: pre-open → /tmp/x.pdf (1 KB)\n", to: url)
+        log.beginLiveTailing()
+
+        for _ in 0..<300 where !log.entries.contains(where: { $0.message.hasPrefix("Compress PDF") }) {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        #expect(log.entries.contains(where: { $0.message.hasPrefix("Compress PDF") }))
+        // The seed itself must not have been re-imported by the catch-up read.
+        #expect(log.entries.filter { $0.message == "seed" }.count == 1)
+    }
+
+    @Test func tailedEntriesInsertInTimestampOrder() async throws {
+        // A tailed line can be older than entries this process logged while the helper's write was
+        // in flight. Blind appending put it after newer rows — misordered, and across midnight the
+        // day-grouping then emitted duplicate section IDs. It must merge by timestamp.
+        let url = tempURL()
+        defer { try? FileManager.default.removeItem(at: url) }
+        let log = ActivityLog(fileURL: url)
+        log.beginLiveTailing()
+
+        log.info("own-newer") // stamped with the real (2026) clock
+        for _ in 0..<300 where !log.entries.contains(where: { $0.message == "own-newer" }) {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+
+        try appendExternally("[2026-01-01 00:00:00.000] [INFO] external-older\n", to: url)
+        for _ in 0..<300 where !log.entries.contains(where: { $0.message == "external-older" }) {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+
+        let older = try #require(log.entries.firstIndex { $0.message == "external-older" })
+        let newer = try #require(log.entries.firstIndex { $0.message == "own-newer" })
+        #expect(older < newer)
+    }
+
     @Test func liveTailDoesNotDoubleThisProcesssOwnWrites() async throws {
         // With tailing on, our own write reaches `entries` via the synchronous handoff AND lands on
         // disk where the tailer reads it back. The ledger must make the tailer skip it, not double it.

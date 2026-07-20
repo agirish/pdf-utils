@@ -564,6 +564,10 @@ struct ActivityLogRow: View {
 
     private static let timeFormatter: DateFormatter = {
         let formatter = DateFormatter()
+        // POSIX-pinned: with a fixed dateFormat, macOS's per-user 12/24-hour override rewrites
+        // "HH" patterns under the system locale (QA1480), rendering "10:30:45 PM"-style rows that
+        // disagree with the on-disk lines the Copy action produces.
+        formatter.locale = Locale(identifier: "en_US_POSIX")
         formatter.dateFormat = "HH:mm:ss"
         return formatter
     }()

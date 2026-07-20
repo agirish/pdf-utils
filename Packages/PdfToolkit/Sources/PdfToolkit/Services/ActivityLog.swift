@@ -221,16 +221,37 @@ public final class ActivityLog: ObservableObject {
     /// never display the log (the menu-bar helper) and until the viewer first opens.
     private var tailer: ActivityLogTailer?
 
+    /// Byte size and inode of the file exactly as the init-time seed load saw it. The first
+    /// ``beginLiveTailing()`` anchors at this offset (when safe) so lines appended between launch
+    /// and the viewer's first open aren't stranded in a gap — see the discussion there.
+    private let seededFileSize: UInt64
+    private let seededFileIdentity: UInt64?
+
+    /// Depth of in-flight ``clearLogs()`` purges. While non-zero, ``drainPending()`` leaves the
+    /// handoff buffer alone so the writer-queue purge can drop pre-truncate entries — see `clearLogs`.
+    private let clearsInFlight = LockedValue<Int>(0)
+
     init(fileURL: URL) {
         self.fileURL = fileURL
+        // Seed BEFORE creating the writer: the writer's init queues an oversize trim, and reading
+        // first keeps the seed, its byte count, and the recorded inode all describing one file state.
+        let seed = Self.loadRecentSeed(from: fileURL, limit: Self.maxInMemory)
+        self.entries = seed.entries
+        self.seededFileSize = seed.byteCount
+        self.seededFileIdentity = Self.fileIdentity(of: fileURL)
         self.writer = LogFileWriter(url: fileURL)
-        self.entries = Self.loadRecent(from: fileURL, limit: Self.maxInMemory)
     }
 
     /// Byte size of the file at `url`, or 0 when absent/unreadable.
     private static func fileSize(of url: URL) -> UInt64 {
         let attributes = try? FileManager.default.attributesOfItem(atPath: url.path)
         return (attributes?[.size] as? NSNumber)?.uint64Value ?? 0
+    }
+
+    /// Inode of the file at `url`, or nil when absent — changes when a trim/clear rewrites the log.
+    private static func fileIdentity(of url: URL) -> UInt64? {
+        let attributes = try? FileManager.default.attributesOfItem(atPath: url.path)
+        return (attributes?[.systemFileNumber] as? NSNumber)?.uint64Value
     }
 
     // MARK: File location
@@ -312,6 +333,11 @@ public final class ActivityLog: ObservableObject {
     }
 
     private func drainPending() {
+        // While a clear's truncate is in flight, leave the buffer alone: an entry sitting in
+        // `pending` right now had its bytes written BEFORE the truncate (the completion-ordered
+        // handoff guarantees that), so the writer-queue purge must be the one to take it. Draining
+        // it here surfaced a line in the freshly cleared viewer that silently vanished on relaunch.
+        guard clearsInFlight.value == 0 else { return }
         let batch = pending.take()
         guard !batch.isEmpty else { return }
         entries.append(contentsOf: batch)
@@ -331,15 +357,27 @@ public final class ActivityLog: ObservableObject {
     /// Externally-tailed entries are parsed from disk and therefore carry no structured `path`, so —
     /// like reloaded history — they offer no Reveal/Open row actions, which is expected.
     ///
-    /// The tailer anchors at the file's CURRENT end, not its size at launch. Anchoring at launch would
-    /// re-read the whole session on open, and any own line evicted from `ownLines`' bounded FIFO
-    /// before then would be re-imported as if external — doubled and mis-ordered. Anchoring at "now"
-    /// keeps every already-written line (own or from another process) strictly below the read offset,
-    /// so it is never re-read; the cost is that a *another* process's write made after launch but
-    /// before this first open isn't caught live (it still shows on relaunch / "Show older history").
+    /// The tailer anchors at the offset the init-time seed load reflected, so another process's
+    /// lines appended between launch and this first open are caught up on. Anchoring at the current
+    /// end instead stranded them completely: they were in neither the seed (written after it) nor
+    /// the tail (below the anchor) nor "Show older history" (their timestamps are ≥ `sessionStart`)
+    /// — unfindable for the whole session. Own lines in the catch-up window are recognized and
+    /// skipped via the ledger. Two cases fall back to anchoring at the current end, forgoing the
+    /// catch-up rather than risking damage: the ledger has evicted (1000+ own lines this session —
+    /// an evicted own line would re-import as external, doubled and mis-ordered), or the file was
+    /// rewritten since launch (inode changed / size shrank: a trim or clear), where the seed offset
+    /// no longer addresses the bytes it did at launch.
     public func beginLiveTailing() {
         guard tailer == nil else { return }
-        let tailer = ActivityLogTailer(url: fileURL, startOffset: Self.fileSize(of: fileURL), ledger: ownLines) { [weak self] external in
+        let size = Self.fileSize(of: fileURL)
+        let seedAnchorIsSafe = !ownLines.hasEvicted
+            && Self.fileIdentity(of: fileURL) == seededFileIdentity
+            && size >= seededFileSize
+        let tailer = ActivityLogTailer(
+            url: fileURL,
+            startOffset: seedAnchorIsSafe ? seededFileSize : size,
+            ledger: ownLines
+        ) { [weak self] external in
             // The tailer delivers on the main thread.
             MainActor.assumeIsolated { self?.appendExternal(external) }
         }
@@ -347,11 +385,20 @@ public final class ActivityLog: ObservableObject {
         tailer.start()
     }
 
-    /// Appends entries the tailer read from another process's writes, honoring the same cap as
-    /// `drainPending`.
+    /// Merges entries the tailer read from another process's writes, honoring the same cap as
+    /// `drainPending`. Inserted by timestamp rather than blindly appended: a tailed line can be
+    /// older than entries this process logged while the write was in flight, and appending it out
+    /// of order made the viewer's adjacent-day grouping emit two sections with the same day ID
+    /// (undefined `ForEach` behavior in SwiftUI) whenever the disorder straddled midnight.
     private func appendExternal(_ newEntries: [LogEntry]) {
         guard !newEntries.isEmpty else { return }
-        entries.append(contentsOf: newEntries)
+        for entry in newEntries {
+            var index = entries.endIndex
+            while index > entries.startIndex, entries[index - 1].timestamp > entry.timestamp {
+                index -= 1
+            }
+            entries.insert(entry, at: index)
+        }
         if entries.count > Self.maxInMemory {
             entries.removeFirst(entries.count - Self.maxInMemory)
         }
@@ -364,14 +411,24 @@ public final class ActivityLog: ObservableObject {
     /// the truncate lands (anything a concurrent `log()` appended to disk ahead of the truncate),
     /// so an entry the clear wiped from disk can never resurrect in the viewer.
     public func clearLogs() {
+        // Gate main-queue drains until the truncate's purge runs: an append already on the writer
+        // queue lands its bytes BEFORE the truncate, and if its main-queue drain won the race
+        // against the writer-queue purge, the entry showed in the cleared viewer but its bytes
+        // were gone — a ghost line that vanished on relaunch.
+        clearsInFlight.mutate { $0 += 1 }
         _ = pending.take()
         entries.removeAll()
         // Re-anchor the tailer to the (about-to-be-)truncated file so it doesn't re-import the lines
         // the clear is wiping. The truncate is queued behind this on the writer; either way the
         // tailer's own shrink check re-anchors it once the file actually shortens.
         tailer?.reanchor()
-        writer.clear { [pending] in
+        writer.clear { [pending, clearsInFlight, weak self] in
             _ = pending.take()
+            clearsInFlight.mutate { $0 -= 1 }
+            // Kick a drain for entries logged after the clear whose scheduled drain hit the gate.
+            DispatchQueue.main.async {
+                MainActor.assumeIsolated { self?.drainPending() }
+            }
         }
     }
 
@@ -389,11 +446,16 @@ public final class ActivityLog: ObservableObject {
     // MARK: Loading
 
     /// The newest `limit` entries already on disk, in append (oldest-first) order — so a relaunch
-    /// shows the tail of the previous run without waiting for new activity.
-    private static func loadRecent(from url: URL, limit: Int) -> [LogEntry] {
-        guard let text = try? String(contentsOf: url, encoding: .utf8) else { return [] }
+    /// shows the tail of the previous run without waiting for new activity. Returns the byte count
+    /// of exactly the data that was parsed, so the first live-tail can anchor with no gap and no
+    /// overlap between the seed and the tail.
+    private static func loadRecentSeed(from url: URL, limit: Int) -> (entries: [LogEntry], byteCount: UInt64) {
+        guard let data = try? Data(contentsOf: url), let text = String(data: data, encoding: .utf8) else {
+            return ([], 0)
+        }
         let parsed = text.split(separator: "\n", omittingEmptySubsequences: true).compactMap { LogEntry.parse(String($0)) }
-        return parsed.count > limit ? Array(parsed.suffix(limit)) : parsed
+        let recent = parsed.count > limit ? Array(parsed.suffix(limit)) : parsed
+        return (recent, UInt64(data.count))
     }
 }
 
@@ -437,9 +499,17 @@ final class OwnLineLedger: @unchecked Sendable {
     private let lock = NSLock()
     private var counts: [String: Int] = [:]
     private var order: [String] = []
+    private var evicted = false
     private let capacity: Int
 
     init(capacity: Int) { self.capacity = capacity }
+
+    /// Whether any registration has ever been evicted. Once true, "not in the ledger" no longer
+    /// implies "not ours", so the first live-tail must not catch up on the pre-open window.
+    var hasEvicted: Bool {
+        lock.lock(); defer { lock.unlock() }
+        return evicted
+    }
 
     /// Records one written line, evicting the oldest once over capacity so an un-tailed process (the
     /// helper) stays bounded.
@@ -448,8 +518,9 @@ final class OwnLineLedger: @unchecked Sendable {
         counts[line, default: 0] += 1
         order.append(line)
         if order.count > capacity {
-            let evicted = order.removeFirst()
-            if let count = counts[evicted] { counts[evicted] = count > 1 ? count - 1 : nil }
+            let dropped = order.removeFirst()
+            if let count = counts[dropped] { counts[dropped] = count > 1 ? count - 1 : nil }
+            evicted = true
         }
     }
 
@@ -550,8 +621,12 @@ final class ActivityLogTailer: @unchecked Sendable {
             guard let self else { return }
             let flags = self.source?.data ?? []
             if flags.contains(.delete) || flags.contains(.rename) || flags.contains(.revoke) {
-                // The inode we held was unlinked/replaced (the trim's atomic rename). Re-establish on
-                // the new file and anchor at its end — its contents are already reflected in `entries`.
+                // The inode we held was unlinked/replaced (the trim's atomic rename). Drain what the
+                // old inode still holds past our offset FIRST — a coalesced [.write, .rename]
+                // delivery otherwise dropped lines written just before the swap — then re-establish
+                // on the new file and anchor at its end (the trim seeded it with the old tail, which
+                // is already reflected in `entries` or was just drained above).
+                self.readNew()
                 self.openAndArm()
                 self.offset = self.currentSize()
                 self.partial.removeAll()

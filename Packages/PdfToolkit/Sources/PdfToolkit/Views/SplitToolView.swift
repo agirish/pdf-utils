@@ -63,7 +63,7 @@ struct SplitToolView: View {
             } else {
                 HSplitView {
                     sidebarColumn
-                        .frame(minWidth: 280, idealWidth: 340, maxWidth: 520)
+                        .toolSidebarWidth()
                     SinglePDFPreviewColumn(
                         thumbnails: thumbnails,
                         isGenerating: isGeneratingPreviews,

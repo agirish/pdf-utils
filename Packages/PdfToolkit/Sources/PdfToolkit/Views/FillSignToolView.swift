@@ -49,7 +49,7 @@ struct FillSignToolView: View {
     var body: some View {
         HSplitView {
             sidebarColumn
-                .frame(minWidth: 320, idealWidth: 380, maxWidth: 480)
+                .toolSidebarWidth(.compact)
             editorPane
                 .frame(minWidth: 480)
         }

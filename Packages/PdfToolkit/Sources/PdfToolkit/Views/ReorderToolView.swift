@@ -46,7 +46,7 @@ struct ReorderToolView: View {
     var body: some View {
         HSplitView {
             sidebarColumn
-                .frame(minWidth: 300, idealWidth: 360, maxWidth: 540)
+                .toolSidebarWidth()
             SinglePDFPreviewColumn(
                 thumbnails: previewThumbnails,
                 isGenerating: isGeneratingPreviews,

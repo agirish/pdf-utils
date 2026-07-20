@@ -29,7 +29,7 @@ struct DeletePagesToolView: View {
     var body: some View {
         HSplitView {
             sidebarColumn
-                .frame(minWidth: 280, idealWidth: 340, maxWidth: 520)
+                .toolSidebarWidth()
             SinglePDFPreviewColumn(
                 thumbnails: thumbnails,
                 isGenerating: isGeneratingPreviews,

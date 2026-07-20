@@ -25,7 +25,7 @@ struct RedactToolView: View {
     var body: some View {
         HSplitView {
             sidebarColumn
-                .frame(minWidth: 300, idealWidth: 360, maxWidth: 440)
+                .toolSidebarWidth(.compact)
             editorPane
                 .frame(minWidth: 480)
         }

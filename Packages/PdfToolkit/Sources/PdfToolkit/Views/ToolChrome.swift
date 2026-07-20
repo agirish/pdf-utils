@@ -23,7 +23,24 @@ struct ToolFormContainer<Content: View>: View {
     }
 }
 
+/// The two sidebar widths a tool's control column can take. `standard` fits the thumbnail/list tools;
+/// `compact` is for the editor tools (Redact, Fill & Sign) whose right pane wants more room. Named so
+/// widths stop drifting to 440/480/520/540/560 one tool at a time.
+enum ToolSidebarWidth {
+    case standard
+    case compact
+
+    var minWidth: CGFloat { self == .standard ? 280 : 300 }
+    var idealWidth: CGFloat { self == .standard ? 340 : 360 }
+    var maxWidth: CGFloat { self == .standard ? 520 : 440 }
+}
+
 extension View {
+    /// Frames a tool's sidebar column at one of the two shared widths.
+    func toolSidebarWidth(_ width: ToolSidebarWidth = .standard) -> some View {
+        frame(minWidth: width.minWidth, idealWidth: width.idealWidth, maxWidth: width.maxWidth)
+    }
+
     /// The surface behind a tool's control card. Uses the same glass material as the Settings card so
     /// tool panes read as liquid glass — tracking the Glass effect level and accent tint — rather than
     /// the near-opaque panel they used to draw, which hid the window's glass background everywhere but

@@ -47,7 +47,7 @@ struct MergeToolView: View {
                 // HSplitView avoids NavigationSplitView nested inside NavigationStack (broken columns, hidden controls).
                 HSplitView {
                     sidebarColumn
-                        .frame(minWidth: 280, idealWidth: 340, maxWidth: 520)
+                        .toolSidebarWidth()
                     SinglePDFPreviewColumn(
                         thumbnails: previewPages,
                         isGenerating: isGeneratingPreviews,

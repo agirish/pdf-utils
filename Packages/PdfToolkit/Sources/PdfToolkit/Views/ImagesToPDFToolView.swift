@@ -22,6 +22,10 @@ struct ImagesToPDFToolView: View {
     @State private var suggestedName = "images.pdf"
     @State private var isDropTargeted = false
     @State private var thumbnails: [PDFPageThumbnail] = []
+    /// Displayed pixel dimensions per file path, resolved on the background queue alongside the
+    /// thumbnails — the rows must never do ImageIO reads inside `body` (once per row per re-render,
+    /// on the main thread, was a real hitch with a long queue).
+    @State private var pixelSizes: [String: CGSize] = [:]
     @State private var isGeneratingPreviews = false
     @State private var thumbnailSize: CGFloat = 120
 
@@ -216,7 +220,7 @@ struct ImagesToPDFToolView: View {
                             .font(.callout.weight(.medium))
                             .lineLimit(1)
                             .truncationMode(.middle)
-                        if let size = PDFToolkit.imagePixelSize(at: item.url) {
+                        if let size = pixelSizes[item.url.path] {
                             Text("\(Int(size.width)) × \(Int(size.height))")
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
@@ -305,6 +309,7 @@ struct ImagesToPDFToolView: View {
     private func loadThumbnails() async {
         guard !items.isEmpty else {
             thumbnails = []
+            pixelSizes = [:]
             isGeneratingPreviews = false
             return
         }
@@ -312,20 +317,23 @@ struct ImagesToPDFToolView: View {
         thumbnails = []
         isGeneratingPreviews = true
         do {
-            let loaded = try await PDFBackgroundWork.run { isCancelled -> [PDFPageThumbnail] in
+            let loaded = try await PDFBackgroundWork.run { isCancelled -> ([PDFPageThumbnail], [String: CGSize]) in
                 var out: [PDFPageThumbnail] = []
+                var sizes: [String: CGSize] = [:]
                 for (i, url) in urls.enumerated() {
                     if isCancelled() { throw CancellationError() }
-                    let image = (try? url.withSecurityScopedAccess {
-                        PDFToolkit.imageThumbnail(at: url)
-                    }) ?? nil
-                    guard let image else { continue }
+                    let loaded = (try? url.withSecurityScopedAccess {
+                        (PDFToolkit.imageThumbnail(at: url), PDFToolkit.imagePixelSize(at: url))
+                    }) ?? (nil, nil)
+                    if let size = loaded.1 { sizes[url.path] = size }
+                    guard let image = loaded.0 else { continue }
                     out.append(PDFPageThumbnail(pageNumber: i + 1, image: image))
                 }
-                return out
+                return (out, sizes)
             }
             guard !Task.isCancelled else { return }
-            thumbnails = loaded
+            thumbnails = loaded.0
+            pixelSizes = loaded.1
             isGeneratingPreviews = false
         } catch is CancellationError {
             // Superseded mid-render; the newer load owns the state.

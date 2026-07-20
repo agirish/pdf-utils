@@ -60,7 +60,12 @@ extension PDFToolkit {
         for i in 0..<source.pageCount {
             progress?(i + 1, source.pageCount)
             if isCancelled?() == true { throw CancellationError() }
-            guard let page = source.page(at: i), let cgPage = page.pageRef else { continue }
+            // Throw, never skip: silently dropping an unreadable page would ship an output with
+            // fewer pages than the input — data loss dressed up as success. (Locked docs, whose
+            // pages all lack a pageRef, are already refused by openUnlockedDocument.)
+            guard let page = source.page(at: i), let cgPage = page.pageRef else {
+                throw PDFOperationError.couldNotOpen(inputURL)
+            }
 
             let cropBox = page.bounds(for: .cropBox)
             let rotation = ((page.rotation % 360) + 360) % 360

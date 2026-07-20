@@ -18,7 +18,6 @@ private enum ProtectMode: String, CaseIterable, Identifiable {
 }
 
 struct ProtectToolView: View {
-    @State private var inputURL: URL?
     @State private var mode: ProtectMode = .protect
     @State private var newPassword = ""
     @State private var confirmPassword = ""
@@ -26,30 +25,18 @@ struct ProtectToolView: View {
 
     @State private var busy = false
     @State private var alertMessage: String?
-    @State private var showImporter = false
     @State private var showExporter = false
     @State private var exportDoc: PDFFileDocument?
     @State private var suggestedName = "protected.pdf"
-    @State private var isDropTargeted = false
 
-    // Multiple-files mode: the same encrypt / remove-password sub-mode runs across a queue of PDFs.
-    @State private var fileMode: ToolFileMode = .single
-    @StateObject private var batchRunner = BatchRunner()
+    @StateObject private var runner = BatchRunner()
 
     private var passwordsMatch: Bool {
         !newPassword.isEmpty && newPassword == confirmPassword
     }
 
-    private var canRun: Bool {
-        guard inputURL != nil else { return false }
-        switch mode {
-        case .protect: return passwordsMatch
-        case .remove: return !currentPassword.isEmpty
-        }
-    }
-
     /// The current sub-mode + password as a batch operation, mirroring `run()`. Nil until the
-    /// passwords are valid (matching for Add, non-empty for Remove).
+    /// passwords are valid (matching for Add, non-empty for Remove) — which also gates the action.
     private var currentBatchOperation: BatchOperation? {
         switch mode {
         case .protect:
@@ -59,59 +46,24 @@ struct ProtectToolView: View {
         }
     }
 
-    var body: some View {
-        if fileMode == .multiple {
-            MultiFileBatchPanel(
-                runner: batchRunner,
-                tool: .protect,
-                mode: $fileMode,
-                makeOperation: { currentBatchOperation },
-                fallbackSuffix: mode == .protect ? "protected" : "unlocked"
-            ) {
-                VStack(alignment: .leading, spacing: 14) {
-                    modeCard
-                    passwordCard
-                }
-            }
-        } else {
-            singleFileBody
-        }
+    private var runTitle: String {
+        mode == .protect ? "Protect & save…" : "Remove password & save…"
     }
 
-    private var singleFileBody: some View {
-        VStack(spacing: 0) {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 18) {
-                    fileCard
-                    modeCard
-                    passwordCard
-                }
-                .frame(maxWidth: 560)
-                .frame(maxWidth: .infinity)
-                .padding(24)
-            }
-
-            Divider()
-
-            RunActionButton(title: runTitle, busy: busy, canRun: canRun) {
-                Task { await run() }
-            }
-            .padding(16)
-            .frame(maxWidth: 560)
-            .frame(maxWidth: .infinity)
-            .toolActionBar()
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .overlay {
-            if busy { Color.black.opacity(0.08).ignoresSafeArea() }
-        }
-        .fileImporter(isPresented: $showImporter, allowedContentTypes: [.pdf], allowsMultipleSelection: false) { result in
-            switch result {
-            case .success(let urls):
-                inputURL = urls.first
-            case .failure(let err):
-                alertMessage = err.localizedDescription
-            }
+    var body: some View {
+        UnifiedFilePanel(
+            runner: runner,
+            tool: .protect,
+            singleActionTitle: runTitle,
+            busy: $busy,
+            makeOperation: { currentBatchOperation },
+            fallbackSuffix: mode == .protect ? "protected" : "unlocked",
+            previewSubtitle: "The pages of the PDF you’re about to protect or unlock.",
+            previewLocksWhenEncrypted: true,
+            runSingle: { url in await run(url) }
+        ) {
+            modeCard
+            passwordCard
         }
         .fileExporter(
             isPresented: $showExporter,
@@ -139,120 +91,6 @@ struct ProtectToolView: View {
         } message: {
             Text(alertMessage ?? "")
         }
-    }
-
-    private var runTitle: String {
-        mode == .protect ? "Protect & save…" : "Remove password & save…"
-    }
-
-    // MARK: - File
-
-    private var fileCard: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            ToolFileModePicker(mode: $fileMode)
-
-            HStack(alignment: .center, spacing: 12) {
-                Image(systemName: "lock.doc")
-                    .symbolRenderingMode(.hierarchical)
-                    .foregroundStyle(Tool.protect.accent)
-                    .font(.title)
-                Text("PDF file")
-                    .font(.title3.weight(.semibold))
-                Spacer(minLength: 8)
-                HStack(spacing: 10) {
-                    if inputURL != nil {
-                        Button("Clear") { inputURL = nil }
-                            .buttonStyle(.borderless)
-                            .font(.subheadline.weight(.medium))
-                            .foregroundStyle(.secondary)
-                            .lineLimit(1)
-                            .fixedSize(horizontal: true, vertical: false)
-                    }
-                    Button("Add PDF…") { showImporter = true }
-                        .font(.subheadline.weight(.medium))
-                        .lineLimit(1)
-                        .fixedSize(horizontal: true, vertical: false)
-                }
-            }
-
-            Group {
-                if inputURL == nil {
-                    emptyDropZone
-                } else if let url = inputURL {
-                    selectedFileRow(url: url)
-                }
-            }
-            .onDrop(of: [.pdf, .fileURL], isTargeted: $isDropTargeted) { providers in
-                consumeDroppedProviders(providers)
-                return true
-            }
-        }
-        .padding(18)
-        .formCard()
-    }
-
-    private var emptyDropZone: some View {
-        VStack(spacing: 14) {
-            Image(systemName: "lock.doc")
-                .font(.system(size: 36, weight: .light))
-                .symbolRenderingMode(.hierarchical)
-                .foregroundStyle(Tool.protect.accent.opacity(0.85))
-            Text("Drop a PDF here or add a file")
-                .font(.title3.weight(.semibold))
-            Text("Add a password to lock a PDF, or remove one you can already open.")
-                .font(.body)
-                .foregroundStyle(.secondary)
-                .multilineTextAlignment(.center)
-                .frame(maxWidth: 400)
-            Button("Choose PDF…") { showImporter = true }
-                .buttonStyle(.borderedProminent)
-                .controlSize(.large)
-        }
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, 28)
-        .padding(.horizontal, 16)
-        .background {
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .strokeBorder(
-                    style: StrokeStyle(lineWidth: isDropTargeted ? 2 : 1.2, dash: [7, 5])
-                )
-                .foregroundStyle(isDropTargeted ? Tool.protect.accent : Color.secondary.opacity(0.35))
-        }
-        .animation(.easeInOut(duration: 0.18), value: isDropTargeted)
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel("No file selected. Drop a PDF or choose PDF.")
-    }
-
-    private func selectedFileRow(url: URL) -> some View {
-        HStack(alignment: .center, spacing: 12) {
-            ZStack {
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .fill(Tool.protect.accent.opacity(0.14))
-                    .frame(width: 40, height: 40)
-                Image(systemName: "doc.fill")
-                    .font(.body.weight(.medium))
-                    .foregroundStyle(Tool.protect.accent)
-            }
-            .accessibilityHidden(true)
-
-            Text(url.lastPathComponent)
-                .lineLimit(1)
-                .truncationMode(.middle)
-                .font(.callout.weight(.medium))
-                .frame(maxWidth: .infinity, alignment: .leading)
-        }
-        .padding(.vertical, 10)
-        .padding(.horizontal, 12)
-        .background {
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .fill(Color.primary.opacity(0.025))
-        }
-        .overlay {
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .strokeBorder(Color.primary.opacity(0.06), lineWidth: 1)
-        }
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel("Selected file \(url.lastPathComponent)")
     }
 
     // MARK: - Mode
@@ -317,34 +155,16 @@ struct ProtectToolView: View {
         }
     }
 
-    // MARK: - Drop
-
-    private func consumeDroppedProviders(_ providers: [NSItemProvider]) {
-        Task { @MainActor in
-            for p in providers {
-                if let url = await p.resolvePDFItemURL() {
-                    inputURL = url
-                    return
-                }
-            }
-        }
-    }
-
     private func clearPasswords() {
         newPassword = ""
         confirmPassword = ""
         currentPassword = ""
     }
 
-    // MARK: - Run
+    // MARK: - Single-file run
 
     @MainActor
-    private func run() async {
-        guard let fileURL = inputURL else {
-            alertMessage = PDFOperationError.noInputFiles.localizedDescription
-            return
-        }
-
+    private func run(_ fileURL: URL) async {
         busy = true
         AppStateManager.shared.beginOperation(Tool.protect.title)
         defer {

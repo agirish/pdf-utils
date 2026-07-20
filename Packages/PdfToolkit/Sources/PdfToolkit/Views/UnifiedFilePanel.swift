@@ -32,6 +32,9 @@ struct UnifiedFilePanel<Config: View>: View {
     var fallbackSuffix: String
     /// Preview-column subtitle for the one-file case.
     var previewSubtitle: String
+    /// When true, an encrypted (locked) one-file input shows a "Locked PDF" placeholder instead of a
+    /// thumbnail preview it can't render — Protect's remove-password inputs are locked until unlocked.
+    var previewLocksWhenEncrypted: Bool = false
     /// Runs the host's single-file save for the one loaded file. The host reads its own controls,
     /// produces the data, routes it through `PDFExportCoordinator`, and shows its save dialog on
     /// `.present`.
@@ -46,6 +49,8 @@ struct UnifiedFilePanel<Config: View>: View {
     @State private var thumbnails: [PDFPageThumbnail] = []
     @State private var isGeneratingPreviews = false
     @State private var thumbnailSize: CGFloat = 120
+    /// The one loaded file is encrypted and can't be previewed until unlocked (Protect only).
+    @State private var previewLocked = false
 
     private var accent: Color { tool.accent }
     private var fileCount: Int { runner.items.count }
@@ -376,6 +381,15 @@ struct UnifiedFilePanel<Config: View>: View {
                 )
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .background(ToolPreviewPaneBackground())
+            } else if fileCount == 1, previewLocked {
+                EmptyStateView(
+                    icon: "lock.fill",
+                    tint: accent,
+                    title: "Locked PDF",
+                    message: "This PDF is password-protected. Enter its password on the left, then remove it to preview and unlock the file."
+                )
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .background(ToolPreviewPaneBackground())
             } else if fileCount == 1 {
                 SinglePDFPreviewColumn(
                     thumbnails: thumbnails,
@@ -554,9 +568,24 @@ struct UnifiedFilePanel<Config: View>: View {
         guard fileCount == 1, let url = firstURL else {
             thumbnails = []
             isGeneratingPreviews = false
+            previewLocked = false
             return
         }
         thumbnails = []
+        // An encrypted input can't be rendered until unlocked; show the locked placeholder instead of
+        // a futile thumbnail load. The check runs on the serial PDF queue like every other PDFKit call.
+        if previewLocksWhenEncrypted {
+            let locked = (try? await PDFBackgroundWork.run {
+                (try? url.withSecurityScopedAccess { PDFDocument(url: url)?.isLocked ?? false }) ?? false
+            }) ?? false
+            guard !Task.isCancelled else { return }
+            if locked {
+                previewLocked = true
+                isGeneratingPreviews = false
+                return
+            }
+        }
+        previewLocked = false
         isGeneratingPreviews = true
         do {
             let loaded = try await PDFPageThumbnailLoader.loadAllPages(from: url)

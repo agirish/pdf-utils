@@ -32,9 +32,7 @@ extension PDFToolkit {
     /// "the top you see" of a rotation-90 page moves the stored box's minX edge, not maxY.
     static func crop(inputURL: URL, outputURL: URL, insets: CropInsets) throws {
         try requireDistinctOutput(outputURL, from: [inputURL])
-        guard let source = PDFDocument(url: inputURL) else {
-            throw PDFOperationError.couldNotOpen(inputURL)
-        }
+        let source = try openUnlockedDocument(at: inputURL)
         guard source.pageCount > 0 else { throw PDFOperationError.emptyPDF }
 
         let output = PDFDocument()
@@ -66,9 +64,7 @@ extension PDFToolkit {
     /// its original crop rather than failing the whole run.
     static func autoCrop(inputURL: URL, outputURL: URL, padding: CGFloat, unified: Bool) throws {
         try requireDistinctOutput(outputURL, from: [inputURL])
-        guard let source = PDFDocument(url: inputURL) else {
-            throw PDFOperationError.couldNotOpen(inputURL)
-        }
+        let source = try openUnlockedDocument(at: inputURL)
         guard source.pageCount > 0 else { throw PDFOperationError.emptyPDF }
 
         var perPage: [CropInsets?] = []

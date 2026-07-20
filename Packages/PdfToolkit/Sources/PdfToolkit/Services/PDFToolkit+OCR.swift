@@ -44,9 +44,7 @@ extension PDFToolkit {
         isCancelled: (@Sendable () -> Bool)? = nil
     ) throws -> OCRRunSummary {
         try requireDistinctOutput(outputURL, from: [inputURL])
-        guard let source = PDFDocument(url: inputURL) else {
-            throw PDFOperationError.couldNotOpen(inputURL)
-        }
+        let source = try openUnlockedDocument(at: inputURL)
         guard source.pageCount > 0 else { throw PDFOperationError.emptyPDF }
 
         let pdfData = NSMutableData()

@@ -56,8 +56,9 @@ public enum PDFToolkit {
     /// mutated document just returns false (rotate/delete reported "could not save"). Refusing up
     /// front turns silent data loss and misleading failures into one clear, actionable error.
     /// Encrypted-but-not-locked documents (empty user password) pass through: PDFKit unlocks them
-    /// implicitly and their pages are fully accessible.
-    private static func openUnlockedDocument(at url: URL) throws -> PDFDocument {
+    /// implicitly and their pages are fully accessible. Internal so the per-tool extensions
+    /// (Crop, OCR, …) open through the same guard.
+    static func openUnlockedDocument(at url: URL) throws -> PDFDocument {
         guard let doc = PDFDocument(url: url) else {
             throw PDFOperationError.couldNotOpen(url)
         }

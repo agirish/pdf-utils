@@ -131,6 +131,34 @@ import PDFKit
         }
     }
 
+    @Test func cropRefusesALockedInput() throws {
+        // Crop copies pages (`page.copy()`) — the silent-blank-pages failure mode.
+        let dir = FixtureDir()
+        let (_, locked) = try makeLocked(dir)
+        expectEncryptedInput {
+            try PDFToolkit.crop(
+                inputURL: locked, outputURL: dir.url("out.pdf"),
+                insets: CropInsets(top: 10, left: 10, bottom: 10, right: 10)
+            )
+        }
+    }
+
+    @Test func autoCropRefusesALockedInput() throws {
+        let dir = FixtureDir()
+        let (_, locked) = try makeLocked(dir)
+        expectEncryptedInput {
+            try PDFToolkit.autoCrop(inputURL: locked, outputURL: dir.url("out.pdf"), padding: 8, unified: false)
+        }
+    }
+
+    @Test func ocrRefusesALockedInput() throws {
+        let dir = FixtureDir()
+        let (_, locked) = try makeLocked(dir)
+        expectEncryptedInput {
+            _ = try PDFToolkit.ocr(inputURL: locked, outputURL: dir.url("out.pdf"), options: OCROptions())
+        }
+    }
+
     // MARK: Paths that must keep working
 
     @Test func removePasswordStillUnlocksALockedInput() throws {

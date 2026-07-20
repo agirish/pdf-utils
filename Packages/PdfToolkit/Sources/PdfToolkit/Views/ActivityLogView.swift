@@ -87,6 +87,16 @@ public struct ActivityLogView: View {
             Spacer()
 
             Button {
+                listDensityRaw = (density == .compact ? ListDensity.comfortable : .compact).rawValue
+            } label: {
+                Image(systemName: density == .compact ? "rectangle.expand.vertical" : "rectangle.compress.vertical")
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+            .help(density == .compact ? "Use comfortable rows" : "Use compact rows")
+            .accessibilityLabel(density == .compact ? "Switch to comfortable rows" : "Switch to compact rows")
+
+            Button {
                 copyToPasteboard(filtered)
             } label: {
                 Image(systemName: "doc.on.doc")

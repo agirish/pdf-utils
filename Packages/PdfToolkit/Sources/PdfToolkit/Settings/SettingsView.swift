@@ -123,7 +123,6 @@ struct SettingsSearchEntry: Identifiable {
         .init(title: "Glass effect", tab: .appearance, keywords: ["glass", "blur", "frost", "clear", "solid", "material", "translucent"]),
         .init(title: "Tint", tab: .appearance, keywords: ["tint", "wash", "accent", "vivid", "subtle"]),
         .init(title: "Content surface", tab: .appearance, keywords: ["surface", "cards", "unified", "shape"]),
-        .init(title: "List density", tab: .appearance, keywords: ["density", "compact", "comfortable", "rows", "spacing"]),
         .init(title: "Tool preview panes", tab: .appearance, keywords: ["preview", "pane", "background", "thumbnail", "merge"]),
         .init(title: "After exporting", tab: .files, keywords: ["export", "save", "reveal", "finder", "open", "after"]),
         .init(title: "Save location", tab: .files, keywords: ["save", "location", "folder", "beside", "original", "destination", "dialog"]),
@@ -264,7 +263,6 @@ struct AppearanceSettingsTab: View {
     @AppStorage(LiquidGlass.accentStyleKey) private var accentStyleRaw: String = AccentStyle.multicolor.rawValue
     @AppStorage(LiquidGlass.surfaceStyleKey) private var surfaceStyleRaw: String = SurfaceStyle.unified.rawValue
     @AppStorage(LiquidGlass.tintKey) private var surfaceTint: Double = 0
-    @AppStorage(ListDensity.defaultsKey) private var listDensityRaw: String = ListDensity.comfortable.rawValue
     @AppStorage(SettingsKeys.mergePreviewBackground) private var mergePreviewBackgroundRaw: String = MergePreviewBackgroundStyle.matchMain.rawValue
 
     private var appearanceMode: AppearanceMode { AppearanceMode(rawValue: appearanceModeRaw) ?? .system }
@@ -386,20 +384,6 @@ struct AppearanceSettingsTab: View {
                 Text("Tool preview panes")
             } footer: {
                 Text(mergeStyle.detail)
-            }
-
-            Section {
-                Picker("List density", selection: $listDensityRaw) {
-                    ForEach(ListDensity.allCases) { density in
-                        Text(density.displayName).tag(density.rawValue)
-                    }
-                }
-                .pickerStyle(.segmented)
-                .labelsHidden()
-            } header: {
-                Text("List density")
-            } footer: {
-                Text("Comfortable keeps the standard spacing. Compact tightens rows in the Merge and Reorder lists so more fits on screen.")
             }
         }
         .formStyle(.grouped)

@@ -53,8 +53,6 @@ import Foundation
         #expect(ListDensity.allCases == [.comfortable, .compact])
         #expect(ListDensity.comfortable.rowVerticalPadding == 4)
         #expect(ListDensity.compact.rowVerticalPadding == 1)
-        #expect(ListDensity.comfortable.rowInsetVertical == 6)
-        #expect(ListDensity.compact.rowInsetVertical == 2)
         for density in ListDensity.allCases {
             #expect(density.id == density.rawValue)
             #expect(!density.displayName.isEmpty)

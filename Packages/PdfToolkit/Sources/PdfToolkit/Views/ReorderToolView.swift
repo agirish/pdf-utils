@@ -28,9 +28,6 @@ struct ReorderToolView: View {
     @State private var thumbnailSize: CGFloat = 120
     @State private var selectedItemID: Int?
 
-    @AppStorage(ListDensity.defaultsKey) private var listDensityRaw: String = ListDensity.comfortable.rawValue
-    private var density: ListDensity { ListDensity(rawValue: listDensityRaw) ?? .comfortable }
-
     private var selectionPathKey: String {
         inputURL?.standardizedFileURL.path ?? ""
     }
@@ -239,7 +236,7 @@ struct ReorderToolView: View {
                 List(selection: $selectedItemID) {
                     ForEach(items) { item in
                         pageRow(for: item)
-                            .listRowInsets(EdgeInsets(top: density.rowInsetVertical, leading: 12, bottom: density.rowInsetVertical, trailing: 8))
+                            .listRowInsets(EdgeInsets(top: 6, leading: 12, bottom: 6, trailing: 8))
                             .listRowBackground(rowBackground)
                             .tag(item.id)
                     }

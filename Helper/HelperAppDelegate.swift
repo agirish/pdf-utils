@@ -24,6 +24,7 @@ final class HelperAppDelegate: NSObject, NSApplicationDelegate, UNUserNotificati
     private let workQueue = DispatchQueue(label: "org.pdfutils.helper.work", qos: .userInitiated)
 
     private var statusItem: NSStatusItem?
+    private var flashReset: DispatchWorkItem?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         // Receive pdfutils-helper:// URLs (the extension's ping) whether we're cold-launched or
@@ -38,9 +39,6 @@ final class HelperAppDelegate: NSObject, NSApplicationDelegate, UNUserNotificati
         let center = UNUserNotificationCenter.current()
         center.delegate = self // so banners show even while the helper is the active app
         center.requestAuthorization(options: [.alert, .sound]) { _, _ in }
-
-        // First launch: make ourselves resident across logins (best-effort; the menu toggles it).
-        enableLoginItemIfFirstRun()
 
         // A ping may have launched us specifically to handle a request already on disk.
         processCommand()
@@ -82,6 +80,21 @@ final class HelperAppDelegate: NSObject, NSApplicationDelegate, UNUserNotificati
         return image
     }
 
+    /// Permission-free feedback: briefly swap the menu-bar icon to a status glyph, then restore the
+    /// PDF wordmark. Reliable where notifications aren't (an ad-hoc-signed helper doesn't get a
+    /// persistent notification registration).
+    private func flashStatusIcon(success: Bool) {
+        guard let button = statusItem?.button else { return }
+        let glyph = NSImage(systemSymbolName: success ? "checkmark.circle.fill" : "exclamationmark.triangle.fill",
+                            accessibilityDescription: success ? "Done" : "Failed")
+        glyph?.isTemplate = true
+        button.image = glyph
+        flashReset?.cancel()
+        let reset = DispatchWorkItem { [weak self] in self?.statusItem?.button?.image = Self.makeMenuBarIcon() }
+        flashReset = reset
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.8, execute: reset)
+    }
+
     private func buildMenu() -> NSMenu {
         let menu = NSMenu()
         let header = NSMenuItem(title: "PDF Utils", action: nil, keyEquivalent: "")
@@ -90,7 +103,7 @@ final class HelperAppDelegate: NSObject, NSApplicationDelegate, UNUserNotificati
         menu.addItem(.separator())
         menu.addItem(item(title: "Open PDF Utils", action: #selector(openMainApp)))
         let login = item(title: "Start at Login", action: #selector(toggleLoginItem))
-        login.state = (loginItemStatus == .enabled) ? .on : .off
+        login.state = (loginAgent.status == .enabled) ? .on : .off
         menu.addItem(login)
         menu.addItem(.separator())
         menu.addItem(item(title: "Quit PDF Utils Helper", action: #selector(quit)))
@@ -114,29 +127,39 @@ final class HelperAppDelegate: NSObject, NSApplicationDelegate, UNUserNotificati
 
     // MARK: - Login item
 
-    private var loginItemStatus: SMAppService.Status {
-        SMAppService.loginItem(identifier: Self.helperBundleID).status
-    }
+    /// Launch-at-login is done through a bundled LaunchAgent the helper registers for itself
+    /// (`SMAppService.loginItem` can't self-register — it looks inside the *calling* app's bundle
+    /// and returns notFound).
+    private var loginAgent: SMAppService { SMAppService.agent(plistName: "\(Self.helperBundleID).plist") }
 
     @objc private func toggleLoginItem() {
-        let service = SMAppService.loginItem(identifier: Self.helperBundleID)
+        let service = loginAgent
+        let turningOn = service.status != .enabled
         do {
-            if service.status == .enabled {
-                try service.unregister()
-            } else {
-                try service.register()
-            }
+            if turningOn { try service.register() } else { try service.unregister() }
         } catch {
-            NSLog("[Helper] login-item toggle failed: \(error)")
+            showInfo(title: "Couldn't change “Start at Login”", text: error.localizedDescription)
+            statusItem?.menu = buildMenu()
+            return
         }
-        statusItem?.menu = buildMenu() // reflect new state
+        statusItem?.menu = buildMenu()
+        // SMAppService can register but leave the item awaiting the user's approval in Login Items.
+        if turningOn, loginAgent.status == .requiresApproval {
+            SMAppService.openSystemSettingsLoginItems()
+            showInfo(title: "Approve “PDF Utils Helper”",
+                     text: "Login Items just opened — turn on “PDF Utils Helper” under “Allow in the Background” to finish enabling launch at login.")
+        } else if turningOn {
+            showInfo(title: "PDF Utils Helper", text: "It’ll now start automatically at login.")
+        }
     }
 
-    private func enableLoginItemIfFirstRun() {
-        let service = SMAppService.loginItem(identifier: Self.helperBundleID)
-        guard service.status == .notRegistered else { return }
-        do { try service.register() } catch { NSLog("[Helper] initial login-item registration failed: \(error)") }
-        statusItem?.menu = buildMenu()
+    private func showInfo(title: String, text: String) {
+        NSApp.activate(ignoringOtherApps: true)
+        let alert = NSAlert()
+        alert.messageText = title
+        alert.informativeText = text
+        alert.addButton(withTitle: "OK")
+        alert.runModal()
     }
 
     // MARK: - URL ping
@@ -195,6 +218,7 @@ final class HelperAppDelegate: NSObject, NSApplicationDelegate, UNUserNotificati
     private nonisolated func finish(id: String, title: String, revealed: [URL], failed: [String]) {
         Task { @MainActor in
             if !revealed.isEmpty { NSWorkspace.shared.activateFileViewerSelecting(revealed) }
+            flashStatusIcon(success: failed.isEmpty)
             let body: String
             if failed.isEmpty {
                 body = revealed.count <= 1 ? "Done — revealed in Finder." : "Done — \(revealed.count) files revealed in Finder."
@@ -226,6 +250,7 @@ final class HelperAppDelegate: NSObject, NSApplicationDelegate, UNUserNotificati
         if !revealed.isEmpty { NSWorkspace.shared.activateFileViewerSelecting(revealed) }
         // Pure cancel (nothing attempted) stays silent.
         guard !(revealed.isEmpty && notProtected.isEmpty && failed.isEmpty) else { return }
+        flashStatusIcon(success: failed.isEmpty)
 
         let body: String
         if !revealed.isEmpty && notProtected.isEmpty && failed.isEmpty {

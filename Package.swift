@@ -62,7 +62,7 @@ let package = Package(
                 .product(name: "PdfToolkit", package: "PdfToolkit"),
             ],
             path: "Helper",
-            exclude: ["Info.plist"]
+            exclude: ["Info.plist", "LaunchAgents"]
         ),
     ]
 )

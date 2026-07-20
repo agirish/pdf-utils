@@ -47,9 +47,11 @@ cp .build/release/PdfUtilsFinder "$EXT/Contents/MacOS/PdfUtilsFinder"
 cp FinderExtension/Info.plist "$EXT/Contents/Info.plist"
 
 echo "==> Assembling menu-bar helper at $HELPER"
-mkdir -p "$HELPER/Contents/Resources"
+mkdir -p "$HELPER/Contents/Resources" "$HELPER/Contents/Library/LaunchAgents"
 cp .build/release/PdfUtilsHelper "$HELPER/Contents/MacOS/PdfUtilsHelper"
 cp Helper/Info.plist "$HELPER/Contents/Info.plist"
+# LaunchAgent the helper registers for itself (launch at login).
+cp Helper/LaunchAgents/com.pdfutils.PdfUtils.Helper.plist "$HELPER/Contents/Library/LaunchAgents/"
 # Give the helper the app's icon so its notifications and its Login Items row aren't blank.
 if [ -f "$APP/Contents/Resources/AppIcon.icns" ]; then
   cp "$APP/Contents/Resources/AppIcon.icns" "$HELPER/Contents/Resources/AppIcon.icns"

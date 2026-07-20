@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- Registered by the helper itself through SMAppService.agent(plistName:). A login item
+	     can't register itself via SMAppService.loginItem (the API looks inside the *calling*
+	     app's bundle and returns notFound), but a bundled LaunchAgent can. launchd starts the
+	     helper at login; BundleProgram is resolved relative to this bundle (the helper). -->
+	<key>Label</key>
+	<string>com.pdfutils.PdfUtils.Helper</string>
+	<key>BundleProgram</key>
+	<string>Contents/MacOS/PdfUtilsHelper</string>
+	<key>RunAtLoad</key>
+	<true/>
+	<key>AssociatedBundleIdentifiers</key>
+	<array>
+		<string>com.pdfutils.PdfUtils.Helper</string>
+	</array>
+</dict>
+</plist>

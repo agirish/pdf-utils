@@ -460,14 +460,9 @@ struct MergeToolView: View {
                                 if isCancelled() { throw CancellationError() }
                                 guard let page = doc.page(at: i) else { continue }
 
-                                let size = page.bounds(for: .mediaBox).size
-                                let longest = max(size.width, size.height)
-                                let scale = min(1.0, 400.0 / longest)
-                                let thumbSize = NSSize(
-                                    width: max(1, size.width * scale),
-                                    height: max(1, size.height * scale)
-                                )
-
+                                // Shared sizing authority — this inline copy once diverged from the
+                                // loader's rotation fix and kept rendering rotated pages soft.
+                                let thumbSize = PDFPageThumbnailLoader.thumbnailBox(for: page)
                                 let image = page.thumbnail(of: thumbSize, for: .mediaBox)
                                 bgPreviews.append(PDFPageThumbnail(pageNumber: globalPageNum, image: image))
                                 globalPageNum += 1

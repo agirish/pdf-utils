@@ -265,8 +265,11 @@ struct DeletePagesToolView: View {
             return
         }
         // Drop the previous document's pages before the await so nobody picks page numbers
-        // against thumbnails of a file that is no longer loaded.
+        // against thumbnails of a file that is no longer loaded — and the typed spec with them
+        // (same rationale as Extract/Split): "2, 4-6" typed for document A silently deleted those
+        // pages from a swapped-in document B with one click.
         thumbnails = []
+        rangeText = ""
         isGeneratingPreviews = true
         do {
             let loaded = try await PDFPageThumbnailLoader.loadAllPages(from: url)

@@ -22,7 +22,15 @@ enum PDFPageThumbnailLoader {
                     // the caller's cancellation and stop a superseded sweep early.
                     if isCancelled() { throw CancellationError() }
                     guard let page = doc.page(at: i) else { continue }
-                    let size = page.bounds(for: .mediaBox).size
+                    // The size box must use the DISPLAYED orientation: `thumbnail(of:for:)` renders
+                    // with /Rotate applied and aspect-fits into the box, so sizing from the raw
+                    // media box constrained a rotated page to the box's short side (~309 pt instead
+                    // of 400 for a /Rotate 90 US Letter) — visibly softer thumbnails.
+                    let raw = page.bounds(for: .mediaBox).size
+                    let rotation = ((page.rotation % 360) + 360) % 360
+                    let size = (rotation == 90 || rotation == 270)
+                        ? CGSize(width: raw.height, height: raw.width)
+                        : raw
                     let longest = max(size.width, size.height)
                     let scale = min(1.0, 400.0 / longest)
                     let thumbSize = NSSize(

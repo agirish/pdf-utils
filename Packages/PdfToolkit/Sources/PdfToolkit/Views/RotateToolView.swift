@@ -40,6 +40,12 @@ struct RotateToolView: View {
         ) {
             rotateConfig
         }
+        .onChange(of: runner.items.first?.url) { _, _ in
+            // A different document invalidates a typed page range (same rationale as
+            // Extract/Delete clearing on file switch): "1, 3-5" meant the old file's pages, and
+            // against the new one it either errors or silently rotates the wrong set.
+            rangeText = ""
+        }
         .fileExporter(
             isPresented: $showExporter,
             document: exportDoc,

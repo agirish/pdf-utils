@@ -76,7 +76,6 @@ struct FillSignPDFEditor: NSViewRepresentable {
 
         overlay.items = items
         overlay.selectedID = selectedID
-        overlay.scaleFactor = pdfView.scaleFactor
         return container
     }
 
@@ -88,7 +87,6 @@ struct FillSignPDFEditor: NSViewRepresentable {
         context.coordinator.overlay?.items = items
         context.coordinator.overlay?.selectedID = selectedID
         context.coordinator.overlay?.accent = NSColor(accent)
-        context.coordinator.overlay?.scaleFactor = context.coordinator.pdfView?.scaleFactor ?? 1
         context.coordinator.overlay?.needsDisplay = true
     }
 
@@ -182,8 +180,17 @@ struct FillSignPDFEditor: NSViewRepresentable {
                 dragMode = hit.mode
                 lastPagePoint = pdfView.convert(loc, to: page)
                 if hit.mode == .resize {
-                    // Anchor the opposite (visual top-left) corner = page-space (minX, maxY).
-                    resizeAnchor = CGPoint(x: item.rect.minX, y: item.rect.maxY)
+                    // The handle sits at the VISUAL bottom-right corner, so the anchor is the
+                    // visual top-left — converted through the view, which applies the page's
+                    // /Rotate. Hard-coding page-space (minX, maxY) was right only for unrotated
+                    // pages: on a /Rotate 90 scan that corner shares maxY with the grabbed one,
+                    // so the first drag collapsed the box to the minimum height and then tracked
+                    // the wrong corner.
+                    if let vr = viewRect(for: item) {
+                        resizeAnchor = pdfView.convert(CGPoint(x: vr.minX, y: vr.maxY), to: page)
+                    } else {
+                        resizeAnchor = CGPoint(x: item.rect.minX, y: item.rect.maxY)
+                    }
                 }
                 overlay?.selectedID = hit.id
                 overlay?.needsDisplay = true
@@ -230,14 +237,16 @@ fileprivate final class FillSignOverlayView: PDFViewSyncedOverlay {
     var items: [FillSignItem] = []
     var selectedID: UUID?
     var accent: NSColor = .systemPink
-    /// PDFView zoom, so page-point sizes (font size, pen width) preview at the right on-screen scale.
-    var scaleFactor: CGFloat = 1
 
     override func hitTest(_ point: NSPoint) -> NSView? { nil }
     override var isFlipped: Bool { false }
 
     override func draw(_ dirtyRect: NSRect) {
         guard let pdfView, let doc = pdfView.document else { return }
+        // Read the zoom LIVE at draw time: a pinch (or autoScales reacting to a pane resize)
+        // changes it without any SwiftUI update, and a value cached at the last updateNSView left
+        // the previewed text at a stale point size while its frame tracked the page.
+        let scaleFactor = pdfView.scaleFactor
 
         for item in items {
             guard let page = doc.page(at: item.pageIndex) else { continue }
@@ -246,7 +255,7 @@ fileprivate final class FillSignOverlayView: PDFViewSyncedOverlay {
 
             switch item.content {
             case .text(let text):
-                drawText(text, in: vr)
+                drawText(text, in: vr, scaleFactor: scaleFactor)
             case .signature(let signature):
                 drawSignature(signature, item: item, in: vr, page: page)
             }
@@ -269,7 +278,7 @@ fileprivate final class FillSignOverlayView: PDFViewSyncedOverlay {
         }
     }
 
-    private func drawText(_ text: FillSignText, in rect: CGRect) {
+    private func drawText(_ text: FillSignText, in rect: CGRect, scaleFactor: CGFloat) {
         guard text.hasInk else { return }
         let color = NSColor(srgbRed: text.red, green: text.green, blue: text.blue, alpha: 1)
         let paragraph = NSMutableParagraphStyle()

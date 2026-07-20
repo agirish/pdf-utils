@@ -340,7 +340,27 @@ public final class ActivityLog: ObservableObject {
         guard clearsInFlight.value == 0 else { return }
         let batch = pending.take()
         guard !batch.isEmpty else { return }
-        entries.append(contentsOf: batch)
+        insertOrdered(batch)
+    }
+
+    /// Merges entries into the mirror keeping timestamp order (from the end — the common case is
+    /// an in-order append), then applies the memory cap. Every mirror mutation funnels through
+    /// here so `entries` is ALWAYS timestamp-sorted: the viewer's day-grouping merges adjacent
+    /// same-day runs and emits its `yyyy-MM-dd` key as a `ForEach` ID, so any out-of-order pair
+    /// straddling midnight — own lines stamped on racing threads, tailed helper lines, a skewed
+    /// seed — would produce duplicate section IDs (undefined SwiftUI behavior).
+    ///
+    /// At the cap, the oldest entries are dropped — including, deliberately, an incoming entry
+    /// older than everything already shown: a 1000-entry-deep mirror's tail is the coherent
+    /// "newest window", and re-surfacing an ancient stray in the middle of it would be noise.
+    private func insertOrdered(_ newEntries: [LogEntry]) {
+        for entry in newEntries {
+            var index = entries.endIndex
+            while index > entries.startIndex, entries[index - 1].timestamp > entry.timestamp {
+                index -= 1
+            }
+            entries.insert(entry, at: index)
+        }
         if entries.count > Self.maxInMemory {
             entries.removeFirst(entries.count - Self.maxInMemory)
         }
@@ -370,13 +390,27 @@ public final class ActivityLog: ObservableObject {
     public func beginLiveTailing() {
         guard tailer == nil else { return }
         let size = Self.fileSize(of: fileURL)
-        let seedAnchorIsSafe = !ownLines.hasEvicted
-            && Self.fileIdentity(of: fileURL) == seededFileIdentity
+        // A nil seeded identity means the file did not exist at init — the writer created it just
+        // after the (empty) seed, so offset 0 is exactly the seed boundary and the current inode is
+        // irrelevant. Requiring identity equality here compared some-inode != nil, always failed,
+        // and silently re-stranded the launch-to-open window on every fresh install.
+        let identityCompatible = seededFileIdentity == nil
+            ? seededFileSize == 0
+            : Self.fileIdentity(of: fileURL) == seededFileIdentity
+        // Checked-and-suspended in one locked step: a plain hasEvicted read raced registrations
+        // landing between this decision and the tailer's catch-up consumes — with the ledger near
+        // capacity, a burst could evict lines the catch-up hadn't reached yet and re-import them as
+        // external. While suspended, register() never evicts (the ledger may briefly exceed
+        // capacity — bounded by the milliseconds until the first read completes); the tailer
+        // resumes eviction, trimming back to capacity, right after that read.
+        let seedAnchorIsSafe = identityCompatible
             && size >= seededFileSize
+            && ownLines.suspendEvictionIfCleanSoFar()
         let tailer = ActivityLogTailer(
             url: fileURL,
             startOffset: seedAnchorIsSafe ? seededFileSize : size,
-            ledger: ownLines
+            ledger: ownLines,
+            resumesEvictionAfterFirstRead: seedAnchorIsSafe
         ) { [weak self] external in
             // The tailer delivers on the main thread.
             MainActor.assumeIsolated { self?.appendExternal(external) }
@@ -385,23 +419,11 @@ public final class ActivityLog: ObservableObject {
         tailer.start()
     }
 
-    /// Merges entries the tailer read from another process's writes, honoring the same cap as
-    /// `drainPending`. Inserted by timestamp rather than blindly appended: a tailed line can be
-    /// older than entries this process logged while the write was in flight, and appending it out
-    /// of order made the viewer's adjacent-day grouping emit two sections with the same day ID
-    /// (undefined `ForEach` behavior in SwiftUI) whenever the disorder straddled midnight.
+    /// Merges entries the tailer read from another process's writes into the mirror, via the same
+    /// ordered insert as `drainPending` — see `insertOrdered` for why order is an invariant.
     private func appendExternal(_ newEntries: [LogEntry]) {
         guard !newEntries.isEmpty else { return }
-        for entry in newEntries {
-            var index = entries.endIndex
-            while index > entries.startIndex, entries[index - 1].timestamp > entry.timestamp {
-                index -= 1
-            }
-            entries.insert(entry, at: index)
-        }
-        if entries.count > Self.maxInMemory {
-            entries.removeFirst(entries.count - Self.maxInMemory)
-        }
+        insertOrdered(newEntries)
     }
 
     // MARK: Clearing / flushing
@@ -455,7 +477,15 @@ public final class ActivityLog: ObservableObject {
         }
         let parsed = text.split(separator: "\n", omittingEmptySubsequences: true).compactMap { LogEntry.parse(String($0)) }
         let recent = parsed.count > limit ? Array(parsed.suffix(limit)) : parsed
-        return (recent, UInt64(data.count))
+        // The newest window is picked by FILE order (append order — true recency), but the kept
+        // entries are then stably sorted by timestamp: two processes share this file, and helper
+        // clock skew can leave file order ≠ timestamp order, which would break the mirror's
+        // sorted-order invariant (see `insertOrdered`) right from the seed. The index tiebreak
+        // keeps same-millisecond lines in file order (Swift's sort is not guaranteed stable).
+        let sorted = recent.enumerated()
+            .sorted { ($0.element.timestamp, $0.offset) < ($1.element.timestamp, $1.offset) }
+            .map(\.element)
+        return (sorted, UInt64(data.count))
     }
 }
 
@@ -500,6 +530,7 @@ final class OwnLineLedger: @unchecked Sendable {
     private var counts: [String: Int] = [:]
     private var order: [String] = []
     private var evicted = false
+    private var evictionSuspended = false
     private let capacity: Int
 
     init(capacity: Int) { self.capacity = capacity }
@@ -511,13 +542,40 @@ final class OwnLineLedger: @unchecked Sendable {
         return evicted
     }
 
+    /// One locked step for the catch-up decision: if nothing has ever been evicted, suspends
+    /// eviction and returns true; otherwise leaves the ledger untouched and returns false. The
+    /// atomicity closes the gap where an eviction between a plain `hasEvicted` read and the
+    /// catch-up's consumes could drop a line the read hadn't reached yet.
+    func suspendEvictionIfCleanSoFar() -> Bool {
+        lock.lock(); defer { lock.unlock() }
+        guard !evicted else { return false }
+        evictionSuspended = true
+        return true
+    }
+
+    /// Ends the catch-up window: trims back down to capacity (marking `evicted` if anything goes)
+    /// and re-enables normal eviction.
+    func resumeEviction() {
+        lock.lock(); defer { lock.unlock() }
+        evictionSuspended = false
+        trimToCapacityLocked()
+    }
+
     /// Records one written line, evicting the oldest once over capacity so an un-tailed process (the
-    /// helper) stays bounded.
+    /// helper) stays bounded. While suspended (a live-tail catch-up is consuming), the ledger grows
+    /// past capacity instead — bounded by the catch-up's duration — so no consumable line vanishes
+    /// mid-read.
     func register(_ line: String) {
         lock.lock(); defer { lock.unlock() }
         counts[line, default: 0] += 1
         order.append(line)
-        if order.count > capacity {
+        if !evictionSuspended {
+            trimToCapacityLocked()
+        }
+    }
+
+    private func trimToCapacityLocked() {
+        while order.count > capacity {
             let dropped = order.removeFirst()
             if let count = counts[dropped] { counts[dropped] = count > 1 ? count - 1 : nil }
             evicted = true
@@ -555,10 +613,22 @@ final class ActivityLogTailer: @unchecked Sendable {
     /// Bytes read since the last newline — a line split across two reads is held here until complete.
     private var partial = Data()
 
-    init(url: URL, startOffset: UInt64, ledger: OwnLineLedger, onExternal: @escaping @Sendable ([LogEntry]) -> Void) {
+    /// When true, the initial read is a seed-anchored catch-up running with ledger eviction
+    /// suspended (see `OwnLineLedger.suspendEvictionIfCleanSoFar`); the tailer resumes eviction as
+    /// soon as that read completes — including when the open fails, so suspension can't leak.
+    private let resumesEvictionAfterFirstRead: Bool
+
+    init(
+        url: URL,
+        startOffset: UInt64,
+        ledger: OwnLineLedger,
+        resumesEvictionAfterFirstRead: Bool = false,
+        onExternal: @escaping @Sendable ([LogEntry]) -> Void
+    ) {
         self.url = url
         self.offset = startOffset
         self.ledger = ledger
+        self.resumesEvictionAfterFirstRead = resumesEvictionAfterFirstRead
         self.onExternal = onExternal
     }
 
@@ -575,6 +645,9 @@ final class ActivityLogTailer: @unchecked Sendable {
         queue.async { [self] in
             openAndArm()
             readNew()
+            if resumesEvictionAfterFirstRead {
+                ledger.resumeEviction()
+            }
         }
     }
 

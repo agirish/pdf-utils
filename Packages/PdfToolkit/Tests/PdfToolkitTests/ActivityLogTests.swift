@@ -110,6 +110,106 @@ struct ActivityLogTests {
         #expect(log.entries.filter { $0.message == "seed" }.count == 1)
     }
 
+    @Test func liveTailCatchesUpWhenTheLogFileDidNotExistAtLaunch() async throws {
+        // Fresh-install case: no file at init, so the seeded identity is nil and the writer creates
+        // the file afterward. The identity check must treat "nil + empty seed" as safe and anchor
+        // at 0 — comparing the new inode against nil always failed, silently re-stranding the
+        // launch-to-open window on exactly the machines that just installed the app.
+        let url = tempURL()   // deliberately never pre-created
+        defer { try? FileManager.default.removeItem(at: url) }
+        let log = ActivityLog(fileURL: url)
+        log.flushToDisk()     // writer has created the (empty) file
+
+        try appendExternally("[2026-01-01 00:00:01.000] [INFO] Compress PDF: fresh-install → /tmp/x.pdf (1 KB)\n", to: url)
+        log.beginLiveTailing()
+
+        for _ in 0..<300 where !log.entries.contains(where: { $0.message.hasPrefix("Compress PDF") }) {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        #expect(log.entries.contains(where: { $0.message.hasPrefix("Compress PDF") }))
+    }
+
+    @Test func seedSortsSkewedFileOrderByTimestamp() throws {
+        // Two processes share the file; helper clock skew can leave file order ≠ timestamp order.
+        // The seed must deliver a timestamp-sorted mirror or the day-grouping's sorted-order
+        // invariant is broken from the first frame.
+        let url = tempURL()
+        defer { try? FileManager.default.removeItem(at: url) }
+        try [
+            "[2026-01-02 00:00:00.000] [INFO] second",
+            "[2026-01-01 23:59:59.000] [INFO] first",   // older, but later in the file
+            "",
+        ].joined(separator: "\n").write(to: url, atomically: true, encoding: .utf8)
+
+        let log = ActivityLog(fileURL: url)
+        #expect(log.entries.map(\.message) == ["first", "second"])
+    }
+
+    @Test func liveTailKeepsALineAppendedRightBeforeAnAtomicReplacement() async throws {
+        // The coalesced [.write, .rename] case: a line lands on the old inode and the file is
+        // atomically replaced immediately after, with no time for a separate write event. The
+        // rename branch must drain the old inode past its offset BEFORE re-arming, or that line
+        // is lost to the live view.
+        let url = tempURL()
+        defer { try? FileManager.default.removeItem(at: url) }
+        try "[2026-01-01 00:00:00.000] [INFO] seed\n".write(to: url, atomically: true, encoding: .utf8)
+        let log = ActivityLog(fileURL: url)
+        log.beginLiveTailing()
+        // Ensure the watch is armed before the append+replace pair, so the pair races only itself.
+        try appendExternally("[2026-01-01 00:00:01.000] [INFO] armed\n", to: url)
+        for _ in 0..<300 where !log.entries.contains(where: { $0.message == "armed" }) {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+
+        try appendExternally("[2026-01-01 00:00:02.000] [INFO] last-before-swap\n", to: url)
+        try Data("[2026-01-01 00:00:03.000] [INFO] new-file\n".utf8).write(to: url, options: .atomic)
+
+        for _ in 0..<300 where !log.entries.contains(where: { $0.message == "last-before-swap" }) {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        #expect(log.entries.contains(where: { $0.message == "last-before-swap" }))
+    }
+
+    @Test func byteIdenticalHelperLineStillImportsAlongsideOurOwn() async throws {
+        // The ledger is a multiset keyed on the exact canonical line. If the helper writes a line
+        // byte-identical to one we logged (same millisecond, same message), the tailer may consume
+        // our registration for the helper's copy — but the counts must still deliver exactly two
+        // rows for two events, never one or three.
+        let url = tempURL()
+        defer { try? FileManager.default.removeItem(at: url) }
+        let log = ActivityLog(fileURL: url)
+        log.beginLiveTailing()
+
+        log.info("twin")
+        for _ in 0..<300 where !log.entries.contains(where: { $0.message == "twin" }) {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        let canonical = try #require(log.entries.first { $0.message == "twin" }?.formattedString)
+        try appendExternally(canonical + "\n", to: url)
+
+        for _ in 0..<300 where log.entries.filter({ $0.message == "twin" }).count < 2 {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        try await Task.sleep(for: .milliseconds(150))   // room for a wrong third import
+        #expect(log.entries.filter { $0.message == "twin" }.count == 2)
+    }
+
+    @Test func ownLineLedgerSuspensionBlocksEvictionUntilResumed() {
+        // The catch-up window: with eviction suspended the ledger grows past capacity so every
+        // consumable line stays findable; resume trims back down and marks the eviction.
+        let ledger = OwnLineLedger(capacity: 2)
+        #expect(ledger.suspendEvictionIfCleanSoFar())
+        ledger.register("a"); ledger.register("b"); ledger.register("c"); ledger.register("d")
+        #expect(ledger.consume("a"))    // would have been evicted without suspension
+        #expect(ledger.consume("b"))
+        #expect(!ledger.hasEvicted)
+        ledger.resumeEviction()         // "c","d" remain — exactly at capacity, nothing to trim
+        #expect(!ledger.hasEvicted)
+        ledger.register("e")            // now over: "c" goes
+        #expect(ledger.hasEvicted)
+        #expect(!ledger.suspendEvictionIfCleanSoFar())  // dirty ledger refuses a catch-up window
+    }
+
     @Test func tailedEntriesInsertInTimestampOrder() async throws {
         // A tailed line can be older than entries this process logged while the helper's write was
         // in flight. Blind appending put it after newer rows — misordered, and across midnight the

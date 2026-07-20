@@ -9,11 +9,12 @@ import Foundation
 extension BatchOperation {
 
     /// Compress: the quality slider maps straight through; target-size converts megabytes → bytes and
-    /// is `nil` when the field is cleared (there is no size to aim for). Mirrors `CompressToolView`.
+    /// is `nil` when the field is cleared (there is no size to aim for). Mirrors `CompressToolView`,
+    /// including its decimal-MB (1,000,000) unit so the "MB" field matches the shown source size.
     static func compressConfig(usesTargetSize: Bool, quality: Double, targetMegabytes: Double) -> BatchOperation? {
         if usesTargetSize {
             guard targetMegabytes > 0 else { return nil }
-            return .compressTarget(targetBytes: max(1, Int((targetMegabytes * 1_048_576).rounded())))
+            return .compressTarget(targetBytes: max(1, Int((targetMegabytes * 1_000_000).rounded())))
         }
         return .compressQuality(quality: quality)
     }

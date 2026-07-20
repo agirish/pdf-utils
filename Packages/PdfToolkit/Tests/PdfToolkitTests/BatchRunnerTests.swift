@@ -54,6 +54,27 @@ import PDFKit
         #expect(BatchOperation.removePassword(password: "x").outputFilename(forInputNamed: "A.pdf") == "A-unlocked.pdf")
     }
 
+    @Test func outputFilenameHonorsTheSuffixSetting() {
+        // With "Add a suffix to output names" off, a batch names files exactly like the single-file
+        // tools — a bare stem, no `-compressed`. Injected via a scratch suite so `.standard` is untouched.
+        let offSuite = "pdfutils.tests.\(UUID().uuidString)"
+        let off = UserDefaults(suiteName: offSuite)!
+        off.removePersistentDomain(forName: offSuite)
+        off.set(false, forKey: SettingsKeys.appendFilenameSuffix)
+        defer { off.removePersistentDomain(forName: offSuite) }
+
+        let op = BatchOperation.compressQuality(quality: 0.7)
+        #expect(op.outputFilename(forInputNamed: "Report.pdf", defaults: off) == "Report.pdf")
+        #expect(op.outputFilename(forInputNamed: "no-extension", defaults: off) == "no-extension.pdf")
+
+        // Unset defaults keep suffixing (the app's default), so the prior behavior is preserved.
+        let unsetSuite = "pdfutils.tests.\(UUID().uuidString)"
+        let unset = UserDefaults(suiteName: unsetSuite)!
+        unset.removePersistentDomain(forName: unsetSuite)
+        defer { unset.removePersistentDomain(forName: unsetSuite) }
+        #expect(op.outputFilename(forInputNamed: "Report.pdf", defaults: unset) == "Report-compressed.pdf")
+    }
+
     // MARK: - apply() dispatch
 
     @Test func applyCompressQualityWritesASmallerFile() throws {

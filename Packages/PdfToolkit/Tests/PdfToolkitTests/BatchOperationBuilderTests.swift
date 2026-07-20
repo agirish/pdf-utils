@@ -22,7 +22,7 @@ import Foundation
         guard case .compressTarget(let bytes) = op else {
             Issue.record("expected .compressTarget, got \(String(describing: op))"); return
         }
-        #expect(bytes == 2 * 1_048_576) // 2 MiB, matching the field's MB unit
+        #expect(bytes == 2 * 1_000_000) // 2 decimal MB, matching the field's "MB" label and size hint
     }
 
     @Test func compressTargetModeIsNilWhenTheTargetIsCleared() {

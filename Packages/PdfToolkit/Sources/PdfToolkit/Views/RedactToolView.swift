@@ -230,7 +230,7 @@ struct RedactToolView: View {
             Text("Security")
                 .font(.subheadline.weight(.semibold))
             Text(
-                "Marked areas are rasterized with solid black pixels—the original text and vectors there are not recoverable from the exported PDF. Processing never leaves your Mac."
+                "Every page you mark is rebuilt as an image with solid black over each region—the text and vectors under the marks can't be recovered, and the rest of that page becomes non-selectable. Pages you don't mark are left untouched. Processing never leaves your Mac."
             )
             .font(.caption)
             .foregroundStyle(.secondary)

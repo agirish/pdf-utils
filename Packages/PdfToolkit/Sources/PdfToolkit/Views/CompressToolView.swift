@@ -423,7 +423,9 @@ struct CompressToolView: View {
         suggestedName = fileURL.deletingPathExtension().lastPathComponent + "-compressed.pdf"
         let qualityValue = quality
         let selectedMode = mode
-        let targetBytes = max(1, Int((targetMB * 1_048_576).rounded()))
+        // Decimal MB (1,000,000) so the field's "MB" label and the "Now …" source-size hint — which
+        // ByteCountFormatter(.file) renders in decimal MB — refer to the same unit the target aims at.
+        let targetBytes = max(1, Int((targetMB * 1_000_000).rounded()))
 
         do {
             let data = try await PDFBackgroundWork.run {

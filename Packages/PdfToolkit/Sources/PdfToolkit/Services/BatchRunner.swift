@@ -40,14 +40,17 @@ enum BatchOperation: Sendable {
         }
     }
 
-    /// The pure output filename for one input: `Report.pdf` → `Report-compressed.pdf`. Uniqueness
-    /// against files already in the destination is applied separately (see ``BatchRunner`` via
-    /// ``PDFExportCoordinator/uniqueURL(inDirectory:filename:fileManager:)``) so this stays testable
-    /// with no filesystem.
-    func outputFilename(forInputNamed inputName: String) -> String {
+    /// The pure output filename for one input: `Report.pdf` → `Report-compressed.pdf`, or `Report.pdf`
+    /// when the "Add a suffix to output names" setting is off. Routed through
+    /// ``PDFExportCoordinator/suggestedFilename(stem:suffixWord:defaults:)`` so a batch names its files
+    /// exactly like the single-file tools (which honor the same setting) instead of always suffixing.
+    /// Uniqueness against files already in the destination is applied separately (see ``BatchRunner``
+    /// via ``PDFExportCoordinator/uniqueURL(inDirectory:filename:fileManager:)``); this stays testable
+    /// with no filesystem (the toggle is injectable via `defaults`).
+    func outputFilename(forInputNamed inputName: String, defaults: UserDefaults = .standard) -> String {
         let stem = (inputName as NSString).deletingPathExtension
         let safeStem = stem.isEmpty ? "document" : stem
-        return "\(safeStem)-\(suffixWord).pdf"
+        return PDFExportCoordinator.suggestedFilename(stem: safeStem, suffixWord: suffixWord, defaults: defaults)
     }
 
     /// Dispatches to the matching `PDFToolkit` call. The single place the operation → toolkit mapping

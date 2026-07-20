@@ -73,7 +73,7 @@ struct MergeToolView: View {
         ) { result in
             switch result {
             case .success(let urls):
-                appendUnique(urls)
+                addEntries(urls)
             case .failure(let err):
                 alertMessage = err.localizedDescription
             }
@@ -371,10 +371,12 @@ struct MergeToolView: View {
 
     // MARK: - Actions
 
-    private func appendUnique(_ urls: [URL]) {
-        let existing = Set(entries.map { $0.url.standardizedFileURL })
-        let fresh = urls.filter { !existing.contains($0.standardizedFileURL) }
-        entries.append(contentsOf: fresh.map { MergeEntry(url: $0) })
+    private func addEntries(_ urls: [URL]) {
+        // The same file may be added more than once: the engine merges duplicates faithfully (there
+        // is a test for merge([a, a])) and the Help promises "the same file can appear twice if you
+        // add it twice." A single picker selection or Finder drag never carries internal duplicates,
+        // so appending as-is never silently doubles a file the user chose only once.
+        entries.append(contentsOf: urls.map { MergeEntry(url: $0) })
     }
 
     private func consumeDroppedProviders(_ providers: [NSItemProvider]) {
@@ -386,7 +388,7 @@ struct MergeToolView: View {
                 }
             }
             guard !urls.isEmpty else { return }
-            appendUnique(urls)
+            addEntries(urls)
         }
     }
 
@@ -546,6 +548,7 @@ struct MergeToolView: View {
         }
 
         let urlsSnapshot = entries.map(\.url)
+        let stripMetadata = UserDefaults.standard.bool(forKey: SettingsKeys.stripMetadataOnExport)
 
         do {
             // Materialize the merged bytes in a temp file first, then land them atomically: writing
@@ -558,7 +561,10 @@ struct MergeToolView: View {
                         try PDFToolkit.merge(inputURLs: urlsSnapshot, outputURL: tempURL)
                     }
                 }
-                try merged.write(to: outputURL, options: .atomic)
+                // Honor the Files-tab "Strip metadata on export" setting, exactly like the
+                // single-file tools do via PDFExportCoordinator.route.
+                let finalized = stripMetadata ? PDFExportCoordinator.stripMetadata(merged) : merged
+                try finalized.write(to: outputURL, options: .atomic)
             }
 
             let attrs = try FileManager.default.attributesOfItem(atPath: outputURL.path)

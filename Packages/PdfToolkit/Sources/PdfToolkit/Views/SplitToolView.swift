@@ -460,6 +460,7 @@ struct SplitToolView: View {
         let modeSnapshot = mode
         let chunkSnapshot = max(1, chunkSize)
         let rangeSnapshot = rangeText
+        let stripMetadata = UserDefaults.standard.bool(forKey: SettingsKeys.stripMetadataOnExport)
 
         do {
             let files = try await PDFBackgroundWork.run {
@@ -478,12 +479,23 @@ struct SplitToolView: View {
                         segments = try PageRangeParser.parseSegments(rangeSnapshot, pageCount: count)
                     }
 
-                    return try PDFToolkit.split(
+                    let parts = try PDFToolkit.split(
                         inputURL: fileURL,
                         into: directory,
                         baseName: baseName,
                         segments: segments
                     )
+                    if stripMetadata {
+                        // Honor the Files-tab "Strip metadata on export" setting, like the single-file
+                        // tools. Best-effort per part: each file is already a valid split output, so a
+                        // strip hiccup must never fail an otherwise-successful run.
+                        for part in parts {
+                            guard let raw = try? Data(contentsOf: part) else { continue }
+                            let cleaned = PDFExportCoordinator.stripMetadata(raw)
+                            try? cleaned.write(to: part, options: .atomic)
+                        }
+                    }
+                    return parts
                 }
             }
             withAnimation {

@@ -10,14 +10,21 @@ import PdfToolkit
 /// unsandboxed (full file access) and always resident, so the work starts immediately — no
 /// cold-launching the full GUI app — and we can post progress notifications.
 @MainActor
-final class HelperAppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDelegate {
+final class HelperAppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDelegate, NSMenuDelegate {
 
     private static let helperBundleID = "com.pdfutils.PdfUtils.Helper"
     private static let mainAppBundleID = "com.pdfutils.PdfUtils"
 
-    /// The extension drops its request here (its own sandbox container, which we can read).
-    private let commandURL = FileManager.default.homeDirectoryForCurrentUser
-        .appendingPathComponent("Library/Containers/com.pdfutils.PdfUtils.FinderSync/Data/command.json")
+    /// The extension drops its requests here (its own sandbox container, which we can read) — one
+    /// `command-<millis>-<uuid>.json` per request. The bare `command.json` name is the pre-queue
+    /// format, still drained so an older extension instance Finder hasn't reloaded keeps working.
+    private let commandDirectory = FileManager.default.homeDirectoryForCurrentUser
+        .appendingPathComponent("Library/Containers/com.pdfutils.PdfUtils.FinderSync/Data")
+
+    /// Requests older than this are dropped (still deleted). A stale file means the helper died
+    /// between the extension's write and processing; executing it at the next login — hours or days
+    /// later, with no user action — is worse than losing it. A live ping arrives within seconds.
+    private static let commandMaxAge: TimeInterval = 5 * 60
 
     /// Serial so Finder-triggered PDF work never runs PDFKit on two threads at once — the same
     /// invariant the in-app tools honor via `PDFBackgroundWork`.
@@ -106,6 +113,16 @@ final class HelperAppDelegate: NSObject, NSApplicationDelegate, UNUserNotificati
 
     private func buildMenu() -> NSMenu {
         let menu = NSMenu()
+        menu.delegate = self
+        populate(menu)
+        return menu
+    }
+
+    /// Rebuilt on every open (see `menuNeedsUpdate`): the "Start at Login" state reflects
+    /// `SMAppService` status the user can flip in System Settings ▸ Login Items at any time, so a
+    /// build-once menu showed a stale checkmark until the next in-menu toggle or relaunch.
+    private func populate(_ menu: NSMenu) {
+        menu.removeAllItems()
         let header = NSMenuItem(title: "PDF Utils", action: nil, keyEquivalent: "")
         header.isEnabled = false
         menu.addItem(header)
@@ -116,7 +133,10 @@ final class HelperAppDelegate: NSObject, NSApplicationDelegate, UNUserNotificati
         menu.addItem(login)
         menu.addItem(.separator())
         menu.addItem(item(title: "Quit PDF Utils Helper", action: #selector(quit)))
-        return menu
+    }
+
+    func menuNeedsUpdate(_ menu: NSMenu) {
+        populate(menu)
     }
 
     private func item(title: String, action: Selector) -> NSMenuItem {
@@ -148,10 +168,9 @@ final class HelperAppDelegate: NSObject, NSApplicationDelegate, UNUserNotificati
             if turningOn { try service.register() } else { try service.unregister() }
         } catch {
             showInfo(title: "Couldn't change “Start at Login”", text: error.localizedDescription)
-            statusItem?.menu = buildMenu()
             return
         }
-        statusItem?.menu = buildMenu()
+        // No menu rebuild needed here: `menuNeedsUpdate` re-reads the state on every open.
         // SMAppService can register but leave the item awaiting the user's approval in Login Items.
         if turningOn, loginAgent.status == .requiresApproval {
             SMAppService.openSystemSettingsLoginItems()
@@ -181,11 +200,48 @@ final class HelperAppDelegate: NSObject, NSApplicationDelegate, UNUserNotificati
     // MARK: - Command processing
 
     private func processCommand() {
-        guard let data = try? Data(contentsOf: commandURL) else { return }
-        try? FileManager.default.removeItem(at: commandURL) // consume so we never reprocess
+        // Refresh the level gate on every drain: the helper is resident for weeks, and the user
+        // can change Settings ▸ Activity logging level in the app at any time — a launch-time-only
+        // read left this process logging at a long-stale level.
+        if let appDefaults = UserDefaults(suiteName: Self.mainAppBundleID) {
+            ActivityLog.shared.minimumLevel = ActivityLog.persistedMinimumLevel(from: appDefaults)
+        }
+        for url in pendingCommandURLs() {
+            processOneCommand(at: url)
+        }
+    }
+
+    /// Every queued request, oldest first: the legacy shared `command.json` (if an old extension
+    /// instance is still loaded), then the per-request files — whose millisecond-prefixed names
+    /// sort chronologically.
+    private func pendingCommandURLs() -> [URL] {
+        let names = (try? FileManager.default.contentsOfDirectory(atPath: commandDirectory.path)) ?? []
+        let queued = names
+            .filter { $0.hasPrefix("command-") && $0.hasSuffix(".json") }
+            .sorted()
+        let legacy = names.contains("command.json") ? ["command.json"] : []
+        return (legacy + queued).map { commandDirectory.appendingPathComponent($0) }
+    }
+
+    private func processOneCommand(at url: URL) {
+        guard let data = try? Data(contentsOf: url) else { return }
+        try? FileManager.default.removeItem(at: url) // consume so we never reprocess
         guard let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let action = obj["action"] as? String,
-              let paths = obj["paths"] as? [String], !paths.isEmpty else { return }
+              let paths = obj["paths"] as? [String], !paths.isEmpty else {
+            // A request the user made but we can't honor must not vanish without a trace.
+            ActivityLog.shared.warning("Finder request dropped: could not parse \(url.lastPathComponent)")
+            flashStatusIcon(success: false)
+            return
+        }
+        if let ts = obj["ts"] as? TimeInterval {
+            let age = Date().timeIntervalSince1970 - ts
+            if age > Self.commandMaxAge {
+                ActivityLog.shared.warning(
+                    "Finder request dropped: \(action) request was \(Int(age))s old — likely orphaned by a helper exit, not re-run")
+                return
+            }
+        }
         let inputs = paths.map { URL(fileURLWithPath: $0) }
         // Captured on the main actor so the background work queue can record into the shared log
         // without touching the main-actor-isolated `.shared` accessor off-thread (the logging methods
@@ -253,7 +309,7 @@ final class HelperAppDelegate: NSObject, NSApplicationDelegate, UNUserNotificati
             if let input = inputs.first { runExtract(input, log: log) }
 
         case "unlock":
-            runUnlock(inputs)
+            Task { await runUnlock(inputs) }
 
         default:
             break
@@ -281,12 +337,12 @@ final class HelperAppDelegate: NSObject, NSApplicationDelegate, UNUserNotificati
 
     private enum UnlockOutcome { case success(URL), notEncrypted, failed(String), cancelled }
 
-    private func runUnlock(_ inputs: [URL]) {
+    private func runUnlock(_ inputs: [URL]) async {
         var revealed: [URL] = []
         var notProtected: [String] = []
         var failed: [String] = []
         loop: for input in inputs {
-            switch unlockOne(input) {
+            switch await unlockOne(input) {
             case .success(let output):
                 revealed.append(output)
                 ActivityLog.shared.recordSaved(Tool.protect.title, to: output, bytes: Self.fileSize(of: output))
@@ -317,28 +373,40 @@ final class HelperAppDelegate: NSObject, NSApplicationDelegate, UNUserNotificati
         notify(id: "pdfutils.unlock", title: "Remove Password", body: body)
     }
 
-    private func unlockOne(_ input: URL) -> UnlockOutcome {
+    private func unlockOne(_ input: URL) async -> UnlockOutcome {
         for attempt in 0..<3 {
             guard let password = promptPassword(for: input.lastPathComponent, wrongPrevious: attempt > 0) else {
                 return .cancelled
             }
-            let output = Self.uniqueOutput(for: input, suffix: "unlocked")
-            var thrown: Error?
-            // Serialize the PDFKit call with the background work queue, honoring the one-thread-at-a-time
-            // invariant even though we're driving it from the main actor for the prompt.
-            workQueue.sync {
-                do { try PDFToolkit.removePassword(inputURL: input, outputURL: output, password: password) }
-                catch { thrown = error }
-            }
-            guard let error = thrown else { return .success(output) }
-            if let op = error as? PDFOperationError {
-                switch op {
-                case .incorrectPassword: continue        // wrong password — prompt again
-                case .notEncrypted: return .notEncrypted // nothing to remove
-                default: return .failed(error.localizedDescription)
+            // The PDFKit call runs on the work queue (the one-thread-at-a-time invariant), reached
+            // by awaiting rather than the old `workQueue.sync`: syncing from the main actor stalled
+            // the menu bar, prompts, and notifications behind every previously queued job — a
+            // minutes-long beachball when a big Finder batch was ahead of the unlock. The output is
+            // also named at write time now, so it can't collide with queued work's pending output.
+            let outcome: Result<URL, Error> = await withCheckedContinuation { continuation in
+                workQueue.async {
+                    let output = Self.uniqueOutput(for: input, suffix: "unlocked")
+                    do {
+                        try PDFToolkit.removePassword(inputURL: input, outputURL: output, password: password)
+                        continuation.resume(returning: .success(output))
+                    } catch {
+                        continuation.resume(returning: .failure(error))
+                    }
                 }
             }
-            return .failed(error.localizedDescription)
+            switch outcome {
+            case .success(let output):
+                return .success(output)
+            case .failure(let error):
+                if let op = error as? PDFOperationError {
+                    switch op {
+                    case .incorrectPassword: continue        // wrong password — prompt again
+                    case .notEncrypted: return .notEncrypted // nothing to remove
+                    default: return .failed(error.localizedDescription)
+                    }
+                }
+                return .failed(error.localizedDescription)
+            }
         }
         return .failed("the password was incorrect") // exhausted attempts
     }
@@ -362,7 +430,19 @@ final class HelperAppDelegate: NSObject, NSApplicationDelegate, UNUserNotificati
     // MARK: - Extract pages (interactive: needs a page-range prompt)
 
     private func runExtract(_ input: URL, log: ActivityLog) {
-        guard let count = PDFToolkit.pageCount(at: input), count > 0 else {
+        // The page count needs PDFKit, and the work queue may be mid-operation on another document —
+        // reading it here on the main actor put two threads inside PDFKit at once, the exact crash
+        // class the serial queue exists to prevent. Count on the queue, then prompt back on main.
+        workQueue.async { [self] in
+            let count = PDFToolkit.pageCount(at: input) ?? 0
+            Task { @MainActor in
+                promptAndRunExtract(input, pageCount: count, log: log)
+            }
+        }
+    }
+
+    private func promptAndRunExtract(_ input: URL, pageCount count: Int, log: ActivityLog) {
+        guard count > 0 else {
             showInfo(title: "Couldn't read “\(input.lastPathComponent)”",
                      text: "The PDF may be damaged or password-protected.")
             return
@@ -377,9 +457,12 @@ final class HelperAppDelegate: NSObject, NSApplicationDelegate, UNUserNotificati
                      text: (error as? PDFOperationError)?.errorDescription ?? error.localizedDescription)
             return
         }
-        let output = Self.uniqueOutput(for: input, suffix: "pages")
         notify(id: "pdfutils.extract", title: "Extract Pages", body: startBody(1))
         workQueue.async { [self] in
+            // Named at write time like compress/rotate/merge, not at prompt time: a name probed
+            // while earlier queued work was still running could collide with the output that work
+            // was about to write, and the later write clobbered the earlier file.
+            let output = Self.uniqueOutput(for: input, suffix: "pages")
             do {
                 try PDFToolkit.extract(inputURL: input, outputURL: output, pageIndices: indices)
                 log.recordSaved(Tool.extract.title, to: output, bytes: Self.fileSize(of: output), detail: "\(indices.count) pages")

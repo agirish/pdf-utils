@@ -144,9 +144,16 @@ final class PdfUtilsFinderSync: FIFinderSync {
             "ts": Date().timeIntervalSince1970,
         ]
         command.merge(extra) { _, new in new }
-        let cmdURL = URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent("command.json")
+        // One file per request, written atomically. The old single shared `command.json` was a
+        // last-writer-wins mailbox: a second right-click while the helper was busy (cold-launching,
+        // or blocked in its password/page-range prompt) overwrote the first request and one of the
+        // two operations silently vanished — and the non-atomic in-place write could even be read
+        // torn by a racing ping. Unique names make requests queue up; the millisecond prefix keeps
+        // them draining in the order they were made.
+        let name = "command-\(UInt64(Date().timeIntervalSince1970 * 1000))-\(UUID().uuidString).json"
+        let cmdURL = URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent(name)
         if let data = try? JSONSerialization.data(withJSONObject: command, options: [.prettyPrinted]) {
-            do { try data.write(to: cmdURL) } catch { diag("command.json write failed: \(error)") }
+            do { try data.write(to: cmdURL, options: .atomic) } catch { diag("\(name) write failed: \(error)") }
         }
         // Ping the resident menu-bar helper via its URL scheme. LaunchServices delivers this to the
         // already-running helper (reliable — no dependence on "became active") or launches it if it

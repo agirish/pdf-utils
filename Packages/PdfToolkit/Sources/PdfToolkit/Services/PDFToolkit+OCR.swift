@@ -22,8 +22,10 @@ struct OCRRunSummary: Sendable {
 }
 
 extension PDFToolkit {
-    /// Long-edge render size for recognition: ~300 dpi on US Letter, upscaled for small pages.
-    private static let ocrPixelDimension: CGFloat = 3300
+    /// Long-edge render sizes for recognition: ~300 dpi on US Letter for the accurate recognizer,
+    /// half that for Fast — the mode users pick for speed shouldn't pay full rasterization cost.
+    private static let accurateOCRPixelDimension: CGFloat = 3300
+    private static let fastOCRPixelDimension: CGFloat = 1650
 
     /// One recognized line: the text and its normalized (0…1, lower-left origin) image rectangle.
     private typealias RecognizedLine = (string: String, normalizedRect: CGRect)
@@ -77,7 +79,8 @@ extension PDFToolkit {
 
             var lines: [RecognizedLine] = []
             if needsRecognition {
-                guard let bitmap = renderPageBitmap(page, maxPixelDimension: ocrPixelDimension) else {
+                let renderSize = options.accurate ? accurateOCRPixelDimension : fastOCRPixelDimension
+                guard let bitmap = renderPageBitmap(page, maxPixelDimension: renderSize) else {
                     throw PDFOperationError.ocrFailed
                 }
                 lines = try recognizeText(in: bitmap, accurate: options.accurate)
@@ -150,9 +153,12 @@ extension PDFToolkit {
         )
     }
 
-    /// Draws one line of text in invisible mode (PDF text-rendering mode 3), horizontally scaled so
-    /// its glyph run spans the detected rectangle — selections then highlight the printed words at
-    /// the right place and width. The text is real vector text: searchable, selectable, copyable.
+    /// Draws one line of text in invisible mode (PDF text-rendering mode 3), sized to the detected
+    /// rectangle in BOTH dimensions: the font is fit to the rect's height (so selection highlights
+    /// stay on this line instead of towering over it when Vision's box is wide relative to the
+    /// glyph run — letter-spaced headings), then the glyph run is stretched horizontally via the
+    /// text matrix to span the rect's width. The text is real vector text: searchable, selectable,
+    /// copyable.
     private static func drawInvisibleLine(_ string: String, at rect: CGRect, in ctx: CGContext) {
         guard rect.width > 0.5, rect.height > 0.5 else { return }
 
@@ -164,18 +170,21 @@ extension PDFToolkit {
         var descent: CGFloat = 0
         var leading: CGFloat = 0
         let probeWidth = CGFloat(CTLineGetTypographicBounds(probeLine, &ascent, &descent, &leading))
-        guard probeWidth > 0 else { return }
+        guard probeWidth > 0, ascent + descent > 0 else { return }
 
-        let fontSize = probeSize * rect.width / probeWidth
+        let heightScale = rect.height / (ascent + descent)
+        let fontSize = probeSize * heightScale
+        let naturalWidth = probeWidth * heightScale
+        let stretch = naturalWidth > 0 ? rect.width / naturalWidth : 1
         let line = CTLineCreateWithAttributedString(
             NSAttributedString(string: string, attributes: [.font: NSFont.systemFont(ofSize: fontSize)])
         )
-        let scale = fontSize / probeSize
 
         ctx.saveGState()
         ctx.setTextDrawingMode(.invisible)
-        ctx.textMatrix = .identity
-        ctx.textPosition = CGPoint(x: rect.minX, y: rect.minY + descent * scale)
+        // Scale first: textPosition writes only the matrix's translation, so the stretch survives.
+        ctx.textMatrix = CGAffineTransform(scaleX: stretch, y: 1)
+        ctx.textPosition = CGPoint(x: rect.minX, y: rect.minY + descent * heightScale)
         CTLineDraw(line, ctx)
         ctx.restoreGState()
     }

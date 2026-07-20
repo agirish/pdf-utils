@@ -336,10 +336,11 @@ struct OCRToolView: View {
         let options = OCROptions(accurate: accurate, skipPagesWithText: skipPagesWithText)
 
         do {
-            let data = try await PDFBackgroundWork.run { isCancelled in
+            let outcome: (data: Data, summary: OCRRunSummary) = try await PDFBackgroundWork.run { isCancelled in
                 try fileURL.withSecurityScopedAccess {
-                    try PDFExportSupport.data { out in
-                        _ = try PDFToolkit.ocr(
+                    var summary = OCRRunSummary()
+                    let data = try PDFExportSupport.data { out in
+                        summary = try PDFToolkit.ocr(
                             inputURL: fileURL,
                             outputURL: out,
                             options: options,
@@ -352,8 +353,17 @@ struct OCRToolView: View {
                             isCancelled: isCancelled
                         )
                     }
+                    return (data, summary)
                 }
             }
+            // All pages skipped means the output would be a pointless rebuilt copy — say so and
+            // save nothing instead of shipping a file that changed no behavior.
+            if outcome.summary.recognizedPages == 0 {
+                let pages = outcome.summary.skippedPages
+                alertMessage = "All \(pages) page\(pages == 1 ? " already has" : "s already have") selectable text, so nothing needed recognition and no file was saved. Turn off “Skip pages that already have text” to recognize them anyway."
+                return
+            }
+            let data = outcome.data
             switch try await PDFExportCoordinator.route(
                 data: data,
                 source: fileURL,

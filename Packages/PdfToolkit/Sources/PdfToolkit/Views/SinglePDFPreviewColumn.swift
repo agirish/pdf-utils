@@ -103,19 +103,11 @@ struct SinglePDFPreviewColumn: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .background(ToolPreviewPaneBackground())
             } else {
-                VStack(spacing: 16) {
-                    Image(systemName: emptySystemImage)
-                        .font(.system(size: 56))
-                        .foregroundStyle(.tertiary)
-                    Text(emptyTitle)
-                        .font(.title2)
-                        .foregroundStyle(.secondary)
-                    Text(emptySubtitle)
-                        .font(.subheadline)
-                        .foregroundStyle(.tertiary)
-                        .multilineTextAlignment(.center)
-                        .frame(maxWidth: 320)
-                }
+                EmptyStateView(
+                    icon: emptySystemImage,
+                    title: emptyTitle,
+                    message: emptySubtitle
+                )
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .background(ToolPreviewPaneBackground())
             }

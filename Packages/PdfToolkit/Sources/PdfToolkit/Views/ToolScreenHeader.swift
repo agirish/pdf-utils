@@ -7,13 +7,29 @@ struct ToolScreenHeader: View {
     let tool: Tool
     @State private var showPrivacy = false
     @State private var chipHovered = false
+    @Environment(\.colorScheme) private var scheme
+    private var dark: Bool { scheme == .dark }
 
     var body: some View {
         HStack(alignment: .top, spacing: 16) {
+            // The icon plate echoes the dashboard tile's gradient plate (radius 16, accent gradient,
+            // accent hairline) so opening a tool reads as that tile expanding, not a flatter chip.
             ZStack {
-                RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .fill(tool.accent.opacity(0.18))
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .fill(
+                        LinearGradient(
+                            colors: dark
+                                ? [tool.accent.opacity(0.55), tool.accent.opacity(0.24)]
+                                : [tool.accent.opacity(0.28), tool.accent.opacity(0.12)],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
                     .frame(width: 52, height: 52)
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 16, style: .continuous)
+                            .strokeBorder(tool.accent.opacity(dark ? 0.55 : 0.22), lineWidth: 1)
+                    }
                 Image(systemName: tool.symbolName)
                     .font(.system(size: 24, weight: .semibold))
                     .symbolRenderingMode(.hierarchical)

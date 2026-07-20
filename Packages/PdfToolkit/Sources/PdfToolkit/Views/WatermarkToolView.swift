@@ -3,23 +3,6 @@ import PDFKit
 import SwiftUI
 import UniformTypeIdentifiers
 
-private struct WatermarkColor: Identifiable, Hashable {
-    let id: String
-    let name: String
-    let red: Double
-    let green: Double
-    let blue: Double
-
-    var color: Color { Color(red: red, green: green, blue: blue) }
-
-    static let palette: [WatermarkColor] = [
-        WatermarkColor(id: "gray", name: "Gray", red: 0.5, green: 0.5, blue: 0.5),
-        WatermarkColor(id: "black", name: "Black", red: 0.1, green: 0.1, blue: 0.1),
-        WatermarkColor(id: "red", name: "Red", red: 0.8, green: 0.12, blue: 0.12),
-        WatermarkColor(id: "blue", name: "Blue", red: 0.15, green: 0.32, blue: 0.82),
-    ]
-}
-
 struct WatermarkToolView: View {
     @State private var inputURL: URL?
     @State private var text = "DRAFT"
@@ -29,7 +12,7 @@ struct WatermarkToolView: View {
     @State private var tiled = false
     // Holds the actual chosen color (not just a palette id) so the ColorPicker can reach any color;
     // the quick swatches simply set this. RGB for the export is pulled from it at run time.
-    @State private var chosenColor: Color = WatermarkColor.palette[0].color
+    @State private var chosenColor: Color = InkColor.with(id: "gray").color
 
     @State private var busy = false
     @State private var alertMessage: String?
@@ -75,7 +58,7 @@ struct WatermarkToolView: View {
 
     /// Whether a quick swatch matches the chosen color, so it can show a selection ring. Compared on
     /// RGB (with a small tolerance) since the color may have arrived from the ColorPicker.
-    private func swatchIsSelected(_ swatch: WatermarkColor) -> Bool {
+    private func swatchIsSelected(_ swatch: InkColor) -> Bool {
         let c = chosenRGB
         return abs(c.red - swatch.red) < 0.02
             && abs(c.green - swatch.green) < 0.02
@@ -339,13 +322,13 @@ struct WatermarkToolView: View {
                 Text("Color")
                     .font(.subheadline.weight(.semibold))
                 HStack(spacing: 12) {
-                    ForEach(WatermarkColor.palette) { swatch in
+                    ForEach(InkColor.palette) { swatch in
                         Button {
                             chosenColor = swatch.color
                         } label: {
                             Circle()
                                 .fill(swatch.color)
-                                .frame(width: 26, height: 26)
+                                .frame(width: InkColor.swatchDiameter, height: InkColor.swatchDiameter)
                                 .overlay {
                                     Circle().strokeBorder(
                                         swatchIsSelected(swatch) ? Color.primary.opacity(0.5) : .clear,

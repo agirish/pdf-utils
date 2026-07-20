@@ -2,24 +2,6 @@ import PDFKit
 import SwiftUI
 import UniformTypeIdentifiers
 
-/// One selectable ink color for placed text and signatures. RGB components (not `NSColor`) so a placed
-/// item stays `Sendable` for the background export queue.
-private struct FillInk: Identifiable, Hashable {
-    let id: String
-    let name: String
-    let red: CGFloat
-    let green: CGFloat
-    let blue: CGFloat
-
-    var color: Color { Color(red: red, green: green, blue: blue) }
-
-    static let palette: [FillInk] = [
-        FillInk(id: "black", name: "Black", red: 0.1, green: 0.1, blue: 0.12),
-        FillInk(id: "blue", name: "Ink Blue", red: 0.12, green: 0.22, blue: 0.62),
-        FillInk(id: "red", name: "Red", red: 0.72, green: 0.12, blue: 0.14),
-    ]
-}
-
 private enum SignatureMode: Hashable {
     case draw
     case type
@@ -56,8 +38,8 @@ struct FillSignToolView: View {
         inputURL?.standardizedFileURL.path ?? ""
     }
 
-    private var selectedInk: FillInk {
-        FillInk.palette.first { $0.id == inkID } ?? FillInk.palette[0]
+    private var selectedInk: InkColor {
+        InkColor.with(id: inkID)
     }
 
     private var canRun: Bool {
@@ -304,16 +286,15 @@ struct FillSignToolView: View {
     private var inkPalette: some View {
         VStack(alignment: .leading, spacing: 8) {
             Text("Ink color")
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(.secondary)
+                .font(.subheadline.weight(.semibold))
             HStack(spacing: 12) {
-                ForEach(FillInk.palette) { ink in
+                ForEach(InkColor.palette) { ink in
                     Button {
                         inkID = ink.id
                     } label: {
                         Circle()
                             .fill(ink.color)
-                            .frame(width: 24, height: 24)
+                            .frame(width: InkColor.swatchDiameter, height: InkColor.swatchDiameter)
                             .overlay {
                                 Circle().strokeBorder(
                                     inkID == ink.id ? Color.primary.opacity(0.5) : .clear,
@@ -519,18 +500,11 @@ struct FillSignToolView: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .background(Color(nsColor: .underPageBackgroundColor))
             } else {
-                VStack(spacing: 12) {
-                    Image(systemName: "hand.draw")
-                        .font(.system(size: 40, weight: .light))
-                        .foregroundStyle(.tertiary)
-                    Text("Preview")
-                        .font(.title3.weight(.semibold))
-                    Text("Choose a file, then add text and a signature onto the page.")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                        .multilineTextAlignment(.center)
-                        .frame(maxWidth: 360)
-                }
+                EmptyStateView(
+                    icon: "hand.draw",
+                    title: "No PDF selected",
+                    message: "Choose a file, then add text and a signature onto the page."
+                )
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .background(Color(nsColor: .underPageBackgroundColor))
             }

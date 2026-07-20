@@ -264,16 +264,7 @@ struct ReorderToolView: View {
     private func pageRow(for item: ReorderItem) -> some View {
         let position = items.firstIndex(of: item) ?? 0
         return HStack(alignment: .center, spacing: 12) {
-            ZStack {
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .fill(Tool.reorder.accent.opacity(0.14))
-                    .frame(width: 30, height: 30)
-                Text("\(position + 1)")
-                    .font(.subheadline.weight(.bold))
-                    .monospacedDigit()
-                    .foregroundStyle(Tool.reorder.accent)
-            }
-            .accessibilityHidden(true)
+            RowIndexBadge(number: position + 1, accent: Tool.reorder.accent)
 
             Image(nsImage: item.image)
                 .resizable()

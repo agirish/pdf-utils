@@ -161,7 +161,9 @@ struct ToolTileView: View {
                 Text(tool.subtitle)
                     .font(.callout)
                     .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
+                    // Reserve two lines even for a one-line subtitle so every tile in a row shares a
+                    // baseline — titles and the hover "Open" affordance line up across the grid.
+                    .lineLimit(2, reservesSpace: true)
             }
 
             Spacer(minLength: 0)

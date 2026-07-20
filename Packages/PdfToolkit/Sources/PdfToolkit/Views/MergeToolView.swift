@@ -293,16 +293,7 @@ struct MergeToolView: View {
     private func mergeRow(for entry: MergeEntry) -> some View {
         let index = entries.firstIndex(where: { $0.id == entry.id }) ?? 0
         return HStack(alignment: .center, spacing: 12) {
-            ZStack {
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .fill(Tool.merge.accent.opacity(0.14))
-                    .frame(width: 40, height: 40)
-                Text("\(index + 1)")
-                    .font(.body.weight(.bold))
-                    .monospacedDigit()
-                    .foregroundStyle(Tool.merge.accent)
-            }
-            .accessibilityHidden(true)
+            RowIndexBadge(number: index + 1, accent: Tool.merge.accent)
 
             VStack(alignment: .leading, spacing: 4) {
                 Text(entry.url.lastPathComponent)

@@ -86,6 +86,26 @@ extension EnvironmentValues {
     }
 }
 
+/// A numbered index badge for a list row — Merge's file order and Reorder's page order. One shared
+/// size (30×30, radius 8) so the two lists' badges match instead of drifting to 40 vs 30.
+struct RowIndexBadge: View {
+    let number: Int
+    let accent: Color
+
+    var body: some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(accent.opacity(0.14))
+                .frame(width: 30, height: 30)
+            Text("\(number)")
+                .font(.subheadline.weight(.bold))
+                .monospacedDigit()
+                .foregroundStyle(accent)
+        }
+        .accessibilityHidden(true)
+    }
+}
+
 struct RunActionButton: View {
     let title: String
     var busy: Bool = false

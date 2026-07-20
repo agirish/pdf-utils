@@ -327,18 +327,11 @@ struct RedactToolView: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .background(Color(nsColor: .underPageBackgroundColor))
             } else {
-                VStack(spacing: 12) {
-                    Image(systemName: "viewfinder.rectangular")
-                        .font(.system(size: 40, weight: .light))
-                        .foregroundStyle(.tertiary)
-                    Text("Preview")
-                        .font(.title3.weight(.semibold))
-                    Text("Choose a file to mark sensitive areas with ⇧ Shift-drag.")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                        .multilineTextAlignment(.center)
-                        .frame(maxWidth: 360)
-                }
+                EmptyStateView(
+                    icon: "viewfinder.rectangular",
+                    title: "No PDF selected",
+                    message: "Choose a file to mark sensitive areas with ⇧ Shift-drag."
+                )
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .background(Color(nsColor: .underPageBackgroundColor))
             }

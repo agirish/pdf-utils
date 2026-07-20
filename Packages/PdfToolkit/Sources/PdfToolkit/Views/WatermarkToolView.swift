@@ -4,7 +4,6 @@ import SwiftUI
 import UniformTypeIdentifiers
 
 struct WatermarkToolView: View {
-    @State private var inputURL: URL?
     @State private var text = "DRAFT"
     @State private var fontSize: CGFloat = 48
     @State private var opacity: CGFloat = 0.25
@@ -16,22 +15,11 @@ struct WatermarkToolView: View {
 
     @State private var busy = false
     @State private var alertMessage: String?
-    @State private var showImporter = false
     @State private var showExporter = false
     @State private var exportDoc: PDFFileDocument?
     @State private var suggestedName = "watermarked.pdf"
-    @State private var isDropTargeted = false
-    @State private var thumbnails: [PDFPageThumbnail] = []
-    @State private var isGeneratingPreviews = false
-    @State private var thumbnailSize: CGFloat = 120
 
-    // Multiple-files mode: the same watermark options are stamped onto every queued PDF.
-    @State private var fileMode: ToolFileMode = .single
-    @StateObject private var batchRunner = BatchRunner()
-
-    private var selectionPathKey: String {
-        inputURL?.standardizedFileURL.path ?? ""
-    }
+    @StateObject private var runner = BatchRunner()
 
     /// The current watermark options as a batch operation, mirroring `runWatermark`. Nil when the
     /// text field is empty (there is nothing to stamp).
@@ -67,53 +55,18 @@ struct WatermarkToolView: View {
 
     private let textPresets = ["CONFIDENTIAL", "DRAFT", "COPY"]
 
-    private var canRun: Bool {
-        inputURL != nil && !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-    }
-
     var body: some View {
-        if fileMode == .multiple {
-            MultiFileBatchPanel(
-                runner: batchRunner,
-                tool: .watermark,
-                mode: $fileMode,
-                makeOperation: { currentBatchOperation },
-                fallbackSuffix: "watermarked"
-            ) {
-                watermarkOptions
-            }
-        } else {
-            singleFileBody
-        }
-    }
-
-    private var singleFileBody: some View {
-        HSplitView {
-            sidebarColumn
-                .frame(minWidth: 320, idealWidth: 380, maxWidth: 560)
-            SinglePDFPreviewColumn(
-                thumbnails: thumbnails,
-                isGenerating: isGeneratingPreviews,
-                thumbnailSize: $thumbnailSize,
-                accent: Tool.watermark.accent,
-                previewSubtitle: "The original pages. Your watermark is stamped on every page when you save.",
-                emptyTitle: "No PDF selected",
-                emptySubtitle: "Drop a PDF here or choose one to watermark.",
-                emptySystemImage: "signature"
-            )
-            .frame(minWidth: 360)
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .overlay {
-            if busy { Color.black.opacity(0.08).ignoresSafeArea() }
-        }
-        .fileImporter(isPresented: $showImporter, allowedContentTypes: [.pdf], allowsMultipleSelection: false) { result in
-            switch result {
-            case .success(let urls):
-                inputURL = urls.first
-            case .failure(let err):
-                alertMessage = err.localizedDescription
-            }
+        UnifiedFilePanel(
+            runner: runner,
+            tool: .watermark,
+            singleActionTitle: "Watermark & save…",
+            busy: $busy,
+            makeOperation: { currentBatchOperation },
+            fallbackSuffix: "watermarked",
+            previewSubtitle: "The original pages. Your watermark is stamped on every page when you save.",
+            runSingle: { url in await runWatermark(url) }
+        ) {
+            watermarkOptions
         }
         .fileExporter(
             isPresented: $showExporter,
@@ -140,163 +93,9 @@ struct WatermarkToolView: View {
         } message: {
             Text(alertMessage ?? "")
         }
-        .task(id: selectionPathKey) {
-            await loadThumbnails()
-        }
     }
 
-    // MARK: - Sidebar
-
-    private var sidebarColumn: some View {
-        VStack(spacing: 0) {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 14) {
-                    ToolFileModePicker(mode: $fileMode)
-
-                    headerRow
-
-                    Group {
-                        if inputURL == nil {
-                            emptyDropZone
-                        } else if let url = inputURL {
-                            selectedFileCard(url: url)
-                        }
-                    }
-                    .onDrop(of: [.pdf, .fileURL], isTargeted: $isDropTargeted) { providers in
-                        consumeDroppedProviders(providers)
-                        return true
-                    }
-
-                    if inputURL != nil {
-                        watermarkOptions
-                    }
-                }
-                .padding(18)
-                .formCard()
-                .padding(12)
-            }
-
-            Divider()
-
-            RunActionButton(title: "Watermark & save…", busy: busy, canRun: canRun) {
-                Task { await runWatermark() }
-            }
-            .padding(16)
-            .toolActionBar()
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-    }
-
-    private var headerRow: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(alignment: .center, spacing: 12) {
-                Image(systemName: "signature")
-                    .symbolRenderingMode(.hierarchical)
-                    .foregroundStyle(Tool.watermark.accent)
-                    .font(.title)
-                Text("PDF file")
-                    .font(.title3.weight(.semibold))
-                Spacer(minLength: 8)
-                HStack(spacing: 10) {
-                    if inputURL != nil {
-                        Button("Clear") { inputURL = nil }
-                            .buttonStyle(.borderless)
-                            .font(.subheadline.weight(.medium))
-                            .foregroundStyle(.secondary)
-                            .lineLimit(1)
-                            .fixedSize(horizontal: true, vertical: false)
-                            .help("Remove the selected file")
-                    }
-                    Button("Add PDF…") { showImporter = true }
-                        .font(.subheadline.weight(.medium))
-                        .lineLimit(1)
-                        .fixedSize(horizontal: true, vertical: false)
-                }
-            }
-            Text(inputURL == nil
-                 ? "Drop a PDF or add a file, then set your watermark text and style."
-                 : "The watermark is baked into a new PDF. The original file is not changed.")
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .fixedSize(horizontal: false, vertical: true)
-        }
-    }
-
-    private var emptyDropZone: some View {
-        VStack(spacing: 14) {
-            Image(systemName: "signature")
-                .font(.system(size: 36, weight: .light))
-                .symbolRenderingMode(.hierarchical)
-                .foregroundStyle(Tool.watermark.accent.opacity(0.85))
-            Text("Drop a PDF here or add a file")
-                .font(.title3.weight(.semibold))
-            Text("Preview pages on the right, then stamp text across every page.")
-                .font(.body)
-                .foregroundStyle(.secondary)
-                .multilineTextAlignment(.center)
-                .frame(maxWidth: 400)
-            Button("Choose PDF…") { showImporter = true }
-                .buttonStyle(.borderedProminent)
-                .controlSize(.large)
-        }
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, 28)
-        .padding(.horizontal, 16)
-        .background {
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .strokeBorder(
-                    style: StrokeStyle(lineWidth: isDropTargeted ? 2 : 1.2, dash: [7, 5])
-                )
-                .foregroundStyle(isDropTargeted ? Tool.watermark.accent : Color.secondary.opacity(0.35))
-        }
-        .animation(.easeInOut(duration: 0.18), value: isDropTargeted)
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel("No file selected. Drop a PDF or choose PDF.")
-    }
-
-    private func selectedFileCard(url: URL) -> some View {
-        HStack(alignment: .center, spacing: 12) {
-            ZStack {
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .fill(Tool.watermark.accent.opacity(0.14))
-                    .frame(width: 40, height: 40)
-                Image(systemName: "doc.fill")
-                    .font(.body.weight(.medium))
-                    .foregroundStyle(Tool.watermark.accent)
-            }
-            .accessibilityHidden(true)
-
-            VStack(alignment: .leading, spacing: 4) {
-                Text(url.lastPathComponent)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-                    .font(.callout.weight(.medium))
-                if isGeneratingPreviews {
-                    Text("Loading preview…")
-                        .font(.subheadline)
-                        .foregroundStyle(.tertiary)
-                } else if !thumbnails.isEmpty {
-                    Text("\(thumbnails.count) page\(thumbnails.count == 1 ? "" : "s")")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                }
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-        }
-        .padding(.vertical, 10)
-        .padding(.horizontal, 12)
-        .background {
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .fill(Color.primary.opacity(0.025))
-        }
-        .overlay {
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .strokeBorder(Color.primary.opacity(0.06), lineWidth: 1)
-        }
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel("Selected file \(url.lastPathComponent)")
-    }
+    // MARK: - Options
 
     private var watermarkOptions: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -411,53 +210,10 @@ struct WatermarkToolView: View {
         )
     }
 
-    // MARK: - Thumbnails
-
-    private func loadThumbnails() async {
-        guard let url = inputURL else {
-            thumbnails = []
-            isGeneratingPreviews = false
-            return
-        }
-        // Drop the previous document's pages before the await so nobody picks page numbers
-        // against thumbnails of a file that is no longer loaded.
-        thumbnails = []
-        isGeneratingPreviews = true
-        do {
-            let loaded = try await PDFPageThumbnailLoader.loadAllPages(from: url)
-            // `.task(id:)` cancelled this load if the file changed again; a superseded load must
-            // neither install its stale result nor clear the spinner the newer load now owns.
-            guard !Task.isCancelled else { return }
-            thumbnails = loaded
-            isGeneratingPreviews = false
-        } catch is CancellationError {
-            // Superseded mid-render; the newer load owns the state.
-        } catch {
-            guard !Task.isCancelled else { return }
-            thumbnails = []
-            isGeneratingPreviews = false
-        }
-    }
-
-    private func consumeDroppedProviders(_ providers: [NSItemProvider]) {
-        Task { @MainActor in
-            for p in providers {
-                if let url = await p.resolvePDFItemURL() {
-                    inputURL = url
-                    return
-                }
-            }
-        }
-    }
-
-    // MARK: - Export
+    // MARK: - Single-file run
 
     @MainActor
-    private func runWatermark() async {
-        guard let fileURL = inputURL else {
-            alertMessage = PDFOperationError.noInputFiles.localizedDescription
-            return
-        }
+    private func runWatermark(_ fileURL: URL) async {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else {
             alertMessage = PDFOperationError.watermarkTextRequired.localizedDescription

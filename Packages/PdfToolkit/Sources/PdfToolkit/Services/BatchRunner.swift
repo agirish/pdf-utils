@@ -165,12 +165,28 @@ final class BatchRunner: ObservableObject {
 
     // MARK: - Run / cancel
 
-    /// Resets every item to pending and processes the queue with `operation`, writing each result
-    /// into `directory`. Returns immediately; progress is published as it goes. A second call is
-    /// ignored while a run is in flight.
+    /// Where a run writes each output. `folder` puts every result in one directory (the "Ask each time"
+    /// path prompts for it once); `besideEachSource` writes each result next to its own input, honoring
+    /// the "Save beside original" setting for a many-file run just as the single-file coordinator does.
+    enum Destination: Equatable {
+        case folder(URL)
+        case besideEachSource
+    }
+
+    /// Resets every item to pending and processes the queue with `operation`, writing each result into
+    /// `directory`. Kept for the existing "one output folder" callers (and tests).
     func run(operation: BatchOperation, into directory: URL) {
+        run(operation: operation, destination: .folder(directory))
+    }
+
+    /// Resets every item to pending and processes the queue with `operation`, writing each result per
+    /// `destination`. Returns immediately; progress is published as it goes. A second call is ignored
+    /// while a run is in flight.
+    func run(operation: BatchOperation, destination: Destination) {
         guard !isRunning, !items.isEmpty else { return }
-        outputDirectory = directory
+        // A single output folder is a meaningful "reveal target"; beside-each-source has none, so the
+        // queue reveals the produced files directly instead.
+        outputDirectory = { if case .folder(let dir) = destination { return dir } else { return nil } }()
         for index in items.indices {
             items[index].status = .pending
         }
@@ -183,7 +199,7 @@ final class BatchRunner: ObservableObject {
 
         runTask = Task { [weak self] in
             guard let self else { return }
-            await self.process(operation: operation, into: directory)
+            await self.process(operation: operation, destination: destination)
             self.isRunning = false
             self.runTask = nil
             AppStateManager.shared.endOperation(operationName)
@@ -196,7 +212,7 @@ final class BatchRunner: ObservableObject {
         runTask?.cancel()
     }
 
-    private func process(operation: BatchOperation, into directory: URL) async {
+    private func process(operation: BatchOperation, destination: Destination) async {
         // Read once on the main actor; each file's finalize honors the same Files-tab setting the
         // single-file coordinator applies. Skipping this made "Strip metadata on export" silently
         // ignored for exactly the runs that touch the most files.
@@ -209,6 +225,13 @@ final class BatchRunner: ObservableObject {
 
             let filename = operation.outputFilename(forInputNamed: item.url.lastPathComponent)
             let inputURL = item.url
+            // Beside-each-source lands each result in its own input's folder; a single folder lands
+            // them all together. Uniqueness (see below) is still per destination directory.
+            let directory: URL
+            switch destination {
+            case .folder(let dir): directory = dir
+            case .besideEachSource: directory = inputURL.deletingLastPathComponent()
+            }
 
             do {
                 let result: (url: URL, bytes: Int64) = try await PDFBackgroundWork.run {

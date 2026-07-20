@@ -237,4 +237,42 @@ import PDFKit
         #expect(author == nil)
         #expect(try PDFFixtures.pageRotations(at: outputURL) == [90])
     }
+
+    @MainActor
+    @Test func runnerBesideEachSourceWritesNextToItsOwnInput() async throws {
+        // "Save beside original" for a many-file run lands each result in its own input's folder —
+        // not one shared output directory — so the count-driven panel needs no folder prompt.
+        let dir = FixtureDir()
+        let firstSrc = dir.url("first/a.pdf")
+        let secondSrc = dir.url("second/b.pdf")
+        try FileManager.default.createDirectory(at: firstSrc.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: secondSrc.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try PDFFixtures.writePDF(pageCount: 1, to: firstSrc)
+        try PDFFixtures.writePDF(pageCount: 2, to: secondSrc)
+
+        let defaults = UserDefaults.standard
+        let previousAction = defaults.object(forKey: SettingsKeys.afterExportAction)
+        defaults.set(AfterExportAction.doNothing.rawValue, forKey: SettingsKeys.afterExportAction)
+        defer {
+            if let previousAction { defaults.set(previousAction, forKey: SettingsKeys.afterExportAction) }
+            else { defaults.removeObject(forKey: SettingsKeys.afterExportAction) }
+        }
+
+        let runner = BatchRunner()
+        runner.addURLs([firstSrc, secondSrc])
+        runner.run(operation: .rotate(quarterTurns: 1), destination: .besideEachSource)
+        for _ in 0..<250 where runner.isRunning {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        #expect(!runner.isRunning)
+        #expect(runner.doneCount == 2)
+
+        // Each result sits beside its own source, suffix-named like the single-file tool.
+        let firstOut = firstSrc.deletingLastPathComponent().appendingPathComponent("a-rotated.pdf")
+        let secondOut = secondSrc.deletingLastPathComponent().appendingPathComponent("b-rotated.pdf")
+        #expect(FileManager.default.fileExists(atPath: firstOut.path))
+        #expect(FileManager.default.fileExists(atPath: secondOut.path))
+        // No single shared folder was used, so the queue reveals the produced files directly.
+        #expect(runner.outputDirectory == nil)
+    }
 }

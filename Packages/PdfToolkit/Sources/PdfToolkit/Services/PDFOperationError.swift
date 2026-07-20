@@ -27,6 +27,7 @@ public enum PDFOperationError: LocalizedError {
     case couldNotOpenImage(URL)
     case cropTooSmall(pageNumber: Int)
     case ocrFailed
+    case encryptedInput(URL)
 
     public var errorDescription: String? {
         switch self {
@@ -82,6 +83,8 @@ public enum PDFOperationError: LocalizedError {
             return "That trim would leave almost nothing of page \(page). Use smaller margins."
         case .ocrFailed:
             return "Text recognition failed while rebuilding the PDF."
+        case .encryptedInput(let url):
+            return "“\(url.lastPathComponent)” is password-protected. Remove its password first (Protect → Remove password), then try again."
         }
     }
 }

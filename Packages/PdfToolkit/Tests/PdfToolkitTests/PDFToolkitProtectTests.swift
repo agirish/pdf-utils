@@ -39,13 +39,15 @@ import PDFKit
         }?.kind == "passwordRequired")
     }
 
-    @Test func encryptingAnAlreadyLockedFileThrowsIncorrectPassword() throws {
+    @Test func encryptingAnAlreadyLockedFileThrowsEncryptedInput() throws {
         // The engine refuses to double-encrypt a locked input (it can't read the pages to re-seal).
+        // `encryptedInput`, not `incorrectPassword`: no password was entered on this path, so the
+        // old "check it and try again" message pointed at a field that doesn't exist.
         let dir = FixtureDir()
         let (_, locked) = try makeLocked(dir, password: "secret")
         #expect(#expect(throws: PDFOperationError.self) {
             try PDFToolkit.encrypt(inputURL: locked, outputURL: dir.url("out.pdf"), password: "again")
-        }?.kind == "incorrectPassword")
+        }?.kind == "encryptedInput")
     }
 
     @Test func encryptUnreadableSourceThrowsCouldNotOpen() throws {

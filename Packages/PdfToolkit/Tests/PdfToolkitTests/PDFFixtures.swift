@@ -225,6 +225,7 @@ extension PDFOperationError {
         case .couldNotOpenImage: return "couldNotOpenImage"
         case .cropTooSmall: return "cropTooSmall"
         case .ocrFailed: return "ocrFailed"
+        case .encryptedInput: return "encryptedInput"
         }
     }
 }

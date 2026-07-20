@@ -47,6 +47,26 @@ public enum PDFToolkit {
         return doc.pageCount
     }
 
+    /// Opens a PDF for a content operation, refusing password-locked documents.
+    ///
+    /// A locked `PDFDocument` opens "successfully" and even reports its real page count, but its
+    /// pages are inaccessible placeholders: `page.copy()` yields blank US-Letter pages (verified
+    /// empirically — merge/extract/split/reorder silently emitted contentless output), `pageRef`
+    /// is nil (compress/watermark/fill-sign fail with generic errors), and `write(to:)` on the
+    /// mutated document just returns false (rotate/delete reported "could not save"). Refusing up
+    /// front turns silent data loss and misleading failures into one clear, actionable error.
+    /// Encrypted-but-not-locked documents (empty user password) pass through: PDFKit unlocks them
+    /// implicitly and their pages are fully accessible.
+    private static func openUnlockedDocument(at url: URL) throws -> PDFDocument {
+        guard let doc = PDFDocument(url: url) else {
+            throw PDFOperationError.couldNotOpen(url)
+        }
+        guard !doc.isLocked else {
+            throw PDFOperationError.encryptedInput(url)
+        }
+        return doc
+    }
+
     /// Refuses to write an operation's result on top of one of its own inputs.
     ///
     /// Every write path here targets a *fresh* file, so this only fires on caller misuse — but the
@@ -78,9 +98,7 @@ public enum PDFToolkit {
 
         let merged = PDFDocument()
         for url in inputURLs {
-            guard let doc = PDFDocument(url: url) else {
-                throw PDFOperationError.couldNotOpen(url)
-            }
+            let doc = try openUnlockedDocument(at: url)
             for i in 0..<doc.pageCount {
                 guard let copy = doc.page(at: i)?.copy() as? PDFPage else {
                     throw PDFOperationError.couldNotOpen(url)
@@ -102,9 +120,7 @@ public enum PDFToolkit {
     /// upholding the same promise the Files settings make for every single-file tool.
     static func split(inputURL: URL, into directory: URL, baseName: String, segments: [[Int]]) throws -> [URL] {
         guard !segments.isEmpty else { throw PDFOperationError.noPagesSelected }
-        guard let source = PDFDocument(url: inputURL) else {
-            throw PDFOperationError.couldNotOpen(inputURL)
-        }
+        let source = try openUnlockedDocument(at: inputURL)
         guard source.pageCount > 0 else { throw PDFOperationError.emptyPDF }
 
         let width = max(2, String(segments.count).count)
@@ -153,9 +169,7 @@ public enum PDFToolkit {
     public static func extract(inputURL: URL, outputURL: URL, pageIndices: [Int]) throws {
         guard !pageIndices.isEmpty else { throw PDFOperationError.noPagesSelected }
         try requireDistinctOutput(outputURL, from: [inputURL])
-        guard let source = PDFDocument(url: inputURL) else {
-            throw PDFOperationError.couldNotOpen(inputURL)
-        }
+        let source = try openUnlockedDocument(at: inputURL)
 
         let out = PDFDocument()
         var insertAt = 0
@@ -186,9 +200,7 @@ public enum PDFToolkit {
     static func deletePages(inputURL: URL, outputURL: URL, pageIndices: [Int]) throws {
         guard !pageIndices.isEmpty else { throw PDFOperationError.noPagesSelected }
         try requireDistinctOutput(outputURL, from: [inputURL])
-        guard let doc = PDFDocument(url: inputURL) else {
-            throw PDFOperationError.couldNotOpen(inputURL)
-        }
+        let doc = try openUnlockedDocument(at: inputURL)
 
         let unique = Set(pageIndices)
         guard unique.count < doc.pageCount else {
@@ -210,9 +222,7 @@ public enum PDFToolkit {
     /// Rotates selected pages by `quarterTurns` × 90° clockwise.
     public static func rotate(inputURL: URL, outputURL: URL, pageIndices: [Int], quarterTurns: Int) throws {
         try requireDistinctOutput(outputURL, from: [inputURL])
-        guard let doc = PDFDocument(url: inputURL) else {
-            throw PDFOperationError.couldNotOpen(inputURL)
-        }
+        let doc = try openUnlockedDocument(at: inputURL)
         let turns = ((quarterTurns % 4) + 4) % 4
         guard turns != 0 else {
             guard doc.write(to: outputURL) else { throw PDFOperationError.couldNotWrite(outputURL) }
@@ -240,10 +250,9 @@ public enum PDFToolkit {
     static func encrypt(inputURL: URL, outputURL: URL, password: String) throws {
         guard !password.isEmpty else { throw PDFOperationError.passwordRequired }
         try requireDistinctOutput(outputURL, from: [inputURL])
-        guard let doc = PDFDocument(url: inputURL) else {
-            throw PDFOperationError.couldNotOpen(inputURL)
-        }
-        guard !doc.isLocked else { throw PDFOperationError.incorrectPassword }
+        // `encryptedInput`, not `incorrectPassword`: the user never typed a password here, so the
+        // "check it and try again" message pointed at a field that doesn't exist on this path.
+        let doc = try openUnlockedDocument(at: inputURL)
         guard doc.pageCount > 0 else { throw PDFOperationError.emptyPDF }
 
         let options: [PDFDocumentWriteOption: Any] = [
@@ -295,9 +304,7 @@ public enum PDFToolkit {
     /// Rebuilds the PDF from rendered page images to reduce size. `quality` is 0...1 (JPEG-style tradeoff).
     public static func compress(inputURL: URL, outputURL: URL, quality: Double) throws {
         try requireDistinctOutput(outputURL, from: [inputURL])
-        guard let source = PDFDocument(url: inputURL) else {
-            throw PDFOperationError.couldNotOpen(inputURL)
-        }
+        let source = try openUnlockedDocument(at: inputURL)
         let data = try compressedData(from: source, quality: quality)
         do {
             try data.write(to: outputURL)
@@ -324,6 +331,11 @@ public enum PDFToolkit {
         }
         guard let source = PDFDocument(data: sourceData) else {
             throw PDFOperationError.couldNotOpen(inputURL)
+        }
+        // Before the pass-through below, so a locked file errors clearly instead of being copied
+        // under a "-compressed" name when it happens to fit the target.
+        guard !source.isLocked else {
+            throw PDFOperationError.encryptedInput(inputURL)
         }
 
         // Already at or under the target: rasterizing can only lose quality, so pass the source
@@ -430,9 +442,7 @@ public enum PDFToolkit {
         let trimmed = options.text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { throw PDFOperationError.watermarkTextRequired }
         try requireDistinctOutput(outputURL, from: [inputURL])
-        guard let source = PDFDocument(url: inputURL) else {
-            throw PDFOperationError.couldNotOpen(inputURL)
-        }
+        let source = try openUnlockedDocument(at: inputURL)
         guard source.pageCount > 0 else { throw PDFOperationError.emptyPDF }
 
         let pdfData = NSMutableData()
@@ -540,9 +550,7 @@ public enum PDFToolkit {
         let inked = items.filter(\.hasInk)
         guard !inked.isEmpty else { throw PDFOperationError.noFillSignItems }
         try requireDistinctOutput(outputURL, from: [inputURL])
-        guard let source = PDFDocument(url: inputURL) else {
-            throw PDFOperationError.couldNotOpen(inputURL)
-        }
+        let source = try openUnlockedDocument(at: inputURL)
         guard source.pageCount > 0 else { throw PDFOperationError.emptyPDF }
 
         let byPage = Dictionary(grouping: inked, by: \.pageIndex)
@@ -713,9 +721,7 @@ public enum PDFToolkit {
     ) throws {
         guard !marks.isEmpty else { throw PDFOperationError.noRedactions }
         try requireDistinctOutput(outputURL, from: [inputURL])
-        guard let source = PDFDocument(url: inputURL) else {
-            throw PDFOperationError.couldNotOpen(inputURL)
-        }
+        let source = try openUnlockedDocument(at: inputURL)
         guard source.pageCount > 0 else { throw PDFOperationError.emptyPDF }
 
         let grouped = Dictionary(grouping: marks, by: \.pageIndex)

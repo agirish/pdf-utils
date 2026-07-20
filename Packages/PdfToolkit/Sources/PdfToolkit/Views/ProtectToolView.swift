@@ -289,18 +289,18 @@ struct ProtectToolView: View {
                 labeledSecureField("Confirm password", text: $confirmPassword, prompt: "Re-enter the password")
                 if !confirmPassword.isEmpty && !passwordsMatch {
                     Label("Passwords don't match yet.", systemImage: "exclamationmark.triangle")
-                        .font(.caption.weight(.medium))
+                        .font(.subheadline.weight(.medium))
                         .foregroundStyle(.orange)
                 }
                 Label("If you forget this password, the file cannot be opened — there is no recovery.",
                       systemImage: "info.circle")
-                    .font(.caption)
+                    .font(.subheadline)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             case .remove:
                 labeledSecureField("Current password", text: $currentPassword, prompt: "The password that opens this PDF")
                 Label("The saved copy will open without any password.", systemImage: "lock.open")
-                    .font(.caption)
+                    .font(.subheadline)
                     .foregroundStyle(.secondary)
             }
         }

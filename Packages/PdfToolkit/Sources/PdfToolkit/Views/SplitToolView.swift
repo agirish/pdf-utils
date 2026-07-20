@@ -284,14 +284,14 @@ struct SplitToolView: View {
                     }
                 }
                 Text("The document is cut into consecutive chunks of this many pages; the last file takes whatever remains.")
-                    .font(.caption)
+                    .font(.subheadline)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             case .customRanges:
                 TextField("e.g. 1-3, 4-6, 7-10", text: $rangeText)
                     .textFieldStyle(.roundedBorder)
                 Text("Each comma group becomes one file (1-3 → a 3-page file). 1-based; ranges are inclusive.")
-                    .font(.caption)
+                    .font(.subheadline)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }

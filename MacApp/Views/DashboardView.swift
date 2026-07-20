@@ -18,19 +18,23 @@ struct DashboardView: View {
     ]
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 28) {
-                header
-                LazyVGrid(columns: columns, spacing: 20) {
-                    ForEach(Tool.allCases) { tool in
-                        NavigationLink(value: tool) {
-                            ToolTileView(tool: tool, floating: floatingTiles)
+        VStack(spacing: 0) {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 28) {
+                    header
+                    LazyVGrid(columns: columns, spacing: 20) {
+                        ForEach(Tool.allCases) { tool in
+                            NavigationLink(value: tool) {
+                                ToolTileView(tool: tool, floating: floatingTiles)
+                            }
+                            .buttonStyle(.plain)
                         }
-                        .buttonStyle(.plain)
                     }
                 }
+                .padding(32)
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
-            .padding(32)
+            dashboardFooter
         }
         .background(DashboardBackground())
         .navigationTitle(AppBrand.displayName)
@@ -75,16 +79,63 @@ struct DashboardView: View {
     }
 
     private var header: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: 12) {
             Text("Tools")
                 .font(.largeTitle.weight(.semibold))
-            Text("Pick a tool to work on your PDFs. Files stay on your Mac. Use the toolbar “?” for an overview of the window controls.")
+            Text("Pick a tool to work on your PDFs. Use the toolbar “?” for an overview of the window controls.")
                 .font(.body)
                 .foregroundStyle(.secondary)
                 .lineSpacing(3)
                 .frame(maxWidth: 680, alignment: .leading)
+            privacyBadge
+                .padding(.top, 2)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    /// The "processing stays on your Mac" reassurance, lifted out of the intro sentence into a compact
+    /// trust chip — a lock glyph and a faint green capsule read as "private/safe" at a glance.
+    private var privacyBadge: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "lock.fill")
+                .font(.caption2.weight(.bold))
+                .foregroundStyle(.green)
+            Text("Files stay on your Mac — nothing is uploaded")
+                .font(.subheadline.weight(.medium))
+                .foregroundStyle(.secondary)
+        }
+        .padding(.horizontal, 11)
+        .padding(.vertical, 6)
+        .background(Capsule(style: .continuous).fill(Color.green.opacity(0.10)))
+        .overlay(Capsule(style: .continuous).strokeBorder(Color.green.opacity(0.24), lineWidth: 1))
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Privacy: files stay on your Mac, nothing is uploaded")
+    }
+
+    /// A slim status bar pinned to the window's bottom edge: gives the tall dashboard visual closure
+    /// and a quiet home for the app identity and tool count.
+    private var dashboardFooter: some View {
+        HStack(spacing: 8) {
+            Text(AppBrand.displayName)
+                .fontWeight(.semibold)
+            if let version = appVersion {
+                Text("v\(version)")
+                    .foregroundStyle(.secondary)
+            }
+            Spacer(minLength: 12)
+            Text("\(Tool.allCases.count) tools")
+                .foregroundStyle(.secondary)
+        }
+        .font(.footnote)
+        .foregroundStyle(.secondary)
+        .padding(.horizontal, 32)
+        .padding(.vertical, 10)
+        .frame(maxWidth: .infinity)
+        .overlay(alignment: .top) { Divider() }
+    }
+
+    private var appVersion: String? {
+        Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String
     }
 }
 

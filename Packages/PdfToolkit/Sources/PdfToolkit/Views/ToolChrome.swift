@@ -72,12 +72,31 @@ private struct FormCardStyle: ViewModifier {
     }
 }
 
+/// The active tool's accent, injected by ``ToolDetailView`` so shared chrome (the primary action
+/// button) can color itself per tool without every call site threading the color through. Defaults
+/// to the system accent when there's no tool context (e.g. previews).
+private struct ToolAccentKey: EnvironmentKey {
+    static let defaultValue: Color = .accentColor
+}
+
+extension EnvironmentValues {
+    var toolAccent: Color {
+        get { self[ToolAccentKey.self] }
+        set { self[ToolAccentKey.self] = newValue }
+    }
+}
+
 struct RunActionButton: View {
     let title: String
     var busy: Bool = false
     /// When false, the button is disabled (e.g. no inputs yet).
     var canRun: Bool = true
     let action: () -> Void
+
+    // The primary CTA wears the tool's own accent (orange for Compress, green for Protect, …) so each
+    // screen reads as that tool. Read from the environment rather than a parameter so all twelve tool
+    // views inherit it for free; falls back to the system accent outside a tool context.
+    @Environment(\.toolAccent) private var accent
 
     var body: some View {
         Button {
@@ -95,6 +114,7 @@ struct RunActionButton: View {
             .padding(.vertical, 12)
         }
         .buttonStyle(.borderedProminent)
+        .tint(accent)
         .disabled(busy || !canRun)
     }
 }

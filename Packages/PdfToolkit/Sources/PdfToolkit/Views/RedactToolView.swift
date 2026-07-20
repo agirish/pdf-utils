@@ -232,7 +232,7 @@ struct RedactToolView: View {
             Text(
                 "Every page you mark is rebuilt as an image with solid black over each region—the text and vectors under the marks can't be recovered, and the rest of that page becomes non-selectable. Pages you don't mark are left untouched. Processing never leaves your Mac."
             )
-            .font(.caption)
+            .font(.subheadline)
             .foregroundStyle(.secondary)
             .fixedSize(horizontal: false, vertical: true)
 
@@ -251,7 +251,7 @@ struct RedactToolView: View {
                 Text(
                     "Higher values rasterize redacted pages with more pixels so remaining text stays crisp. Unredacted pages are unchanged."
                 )
-                .font(.caption)
+                .font(.subheadline)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
                 HStack {

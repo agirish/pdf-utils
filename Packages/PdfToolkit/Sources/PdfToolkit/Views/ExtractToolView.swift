@@ -245,7 +245,7 @@ struct ExtractToolView: View {
             Text(
                 "List order is kept (e.g. 5,1,2 → page 5, then 1, then 2). Ranges: 3-5 → 3,4,5; 5-3 → 5,4,3. Leave empty for all pages."
             )
-            .font(.caption)
+            .font(.subheadline)
             .foregroundStyle(.secondary)
             .fixedSize(horizontal: false, vertical: true)
             TextField("e.g. 1, 3-5", text: $rangeText)

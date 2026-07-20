@@ -322,7 +322,7 @@ struct RotateToolView: View {
             .pickerStyle(.segmented)
             Label("Every page of every file is rotated. Page ranges aren't available in Multiple files mode.",
                   systemImage: "info.circle")
-                .font(.caption)
+                .font(.subheadline)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
         }

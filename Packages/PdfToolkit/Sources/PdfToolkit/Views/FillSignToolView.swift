@@ -291,7 +291,7 @@ struct FillSignToolView: View {
             .controlSize(.large)
 
             Text("New items land on the page centered in the preview. Drag to position; drag the corner to resize.")
-                .font(.caption)
+                .font(.subheadline)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
         }

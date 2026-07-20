@@ -40,6 +40,8 @@ public struct ToolDetailView: View {
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
+            // Every tool view's primary RunActionButton reads this to tint itself the tool's accent.
+            .environment(\.toolAccent, tool.accent)
         }
         .background(DashboardBackground())
         .navigationTitle(tool.title)

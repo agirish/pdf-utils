@@ -245,7 +245,7 @@ struct DeletePagesToolView: View {
             Text("Pages to remove")
                 .font(.subheadline.weight(.semibold))
             Text("Example: 1, 3-5 removes those pages from a copy of the PDF.")
-                .font(.caption)
+                .font(.subheadline)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
             TextField("e.g. 2, 4-6", text: $rangeText)

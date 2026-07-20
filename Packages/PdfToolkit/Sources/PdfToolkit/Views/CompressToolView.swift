@@ -336,7 +336,7 @@ struct CompressToolView: View {
                     .labelsHidden()
             }
             Text("Tries progressively lower quality until the file fits under your target.")
-                .font(.caption)
+                .font(.subheadline)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
         }

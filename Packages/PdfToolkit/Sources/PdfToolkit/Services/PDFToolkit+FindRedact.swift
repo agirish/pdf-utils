@@ -36,19 +36,65 @@ enum FindRedactPattern: String, CaseIterable, Identifiable, Sendable {
     }
 
     /// The ICU regular expression. Raw strings keep the backslashes literal. `(?<!\d)…(?!\d)` guards
-    /// stop a phone/card pattern from biting a slice out of a longer digit run.
+    /// stop a phone/card pattern from biting a slice out of a longer digit run. The presets favor over-
+    /// catching (a human deletes a stray box) over under-catching (a leaked identifier), per the type's
+    /// header note — so shapes stay broad and the one filter that could hide a real value, a partial
+    /// email, is closed by covering the full local-part character set.
     var regexPattern: String {
         switch self {
         case .email:
-            return #"[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}"#
+            // Local part is the full RFC-5322 unquoted set (atext), including `'`. The old class
+            // omitted `'` and others, so "o'brien.pat@work.co" matched only "brien.pat@work.co" — a
+            // partial box that *looks* fully redacted, the worst outcome for a redaction tool.
+            return #"[A-Za-z0-9.!#$%&'*+/=?^_`|~\{\}\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}"#
         case .ssn:
-            return #"(?<!\d)\d{3}-\d{2}-\d{4}(?!\d)"#
+            // 9 digits grouped 3-2-4 with the separators optional, so dashed (123-45-6789), spaced
+            // (123 45 6789), and solid (123456789) SSNs all match. A bare 9-digit run is caught too —
+            // an unformatted SSN is exactly what the false-negative-averse philosophy wants marked.
+            return #"(?<!\d)\d{3}[-\s]?\d{2}[-\s]?\d{4}(?!\d)"#
         case .phone:
-            return #"(?<!\d)(?:\+?1[\s.\-]?)?\(?\d{3}\)?[\s.\-]?\d{3}[\s.\-]?\d{4}(?!\d)"#
+            // Two shapes: the US number (optional +1, optional area-code parens, 3-3-4 grouping), or an
+            // international number written with an explicit `+<country code>` followed by digit groups
+            // separated by spaces/dots/dashes — so +44 20 7946 0958 and +91 98765 43210 are caught, not
+            // just US formats.
+            return #"(?<!\d)(?:(?:\+?1[\s.\-]?)?\(?\d{3}\)?[\s.\-]?\d{3}[\s.\-]?\d{4}|\+\d{1,3}[\s.\-]?\d{1,4}(?:[\s.\-]?\d{1,4}){1,4})(?!\d)"#
         case .card:
-            // 16-digit grouped in fours, or the 4-6-5 American Express shape.
-            return #"(?<!\d)(?:\d{4}[ \-]?\d{4}[ \-]?\d{4}[ \-]?\d{4}|\d{4}[ \-]?\d{6}[ \-]?\d{5})(?!\d)"#
+            // 13–19 digits with optional space/dash/dot separators — covers 13-digit Visa, 14-digit
+            // Diners, 15-digit Amex, 16-digit, and 19-digit Visa/Maestro/UnionPay, dotted or grouped.
+            // The shape alone is permissive, so `acceptsMatch` runs a Luhn check to drop non-card digit
+            // runs (invoice/order numbers).
+            return #"(?<!\d)(?:\d[ \-.]?){12,18}\d(?!\d)"#
         }
+    }
+
+    /// A semantic check applied to each raw regex hit before it becomes a redaction mark, or `nil` to
+    /// accept every hit. Cards run a Luhn (mod-10) checksum: the 13–19-digit shape matches any long
+    /// digit run, and the checksum narrows that to plausible card numbers so invoice/order/tracking
+    /// numbers don't blanket the page with marks. The other presets trust their (already anchored) shape.
+    var acceptsMatch: (@Sendable (String) -> Bool)? {
+        switch self {
+        case .card: return { FindRedactPattern.passesLuhnChecksum($0) }
+        case .email, .ssn, .phone: return nil
+        }
+    }
+
+    /// Standard Luhn (mod-10) checksum over the ASCII digits in `text`, ignoring any separators. Real
+    /// card numbers satisfy it; most arbitrary long digit runs do not. It is only a checksum, not a
+    /// brand/prefix validator — a false positive here is a box the reviewer deletes, which the tool's
+    /// philosophy prefers to a missed card.
+    private static func passesLuhnChecksum(_ text: String) -> Bool {
+        let digits = text.compactMap { $0.isASCII && $0.isNumber ? $0.wholeNumberValue : nil }
+        guard !digits.isEmpty else { return false }
+        var sum = 0
+        for (offset, digit) in digits.reversed().enumerated() {
+            if offset.isMultiple(of: 2) {
+                sum += digit
+            } else {
+                let doubled = digit * 2
+                sum += doubled > 9 ? doubled - 9 : doubled
+            }
+        }
+        return sum.isMultiple(of: 10)
     }
 }
 
@@ -179,7 +225,9 @@ extension PDFToolkit {
 private struct TextMatcher {
     private enum Kind {
         case literal(String)
-        case regex(NSRegularExpression)
+        /// A compiled preset regex plus its optional semantic filter (e.g. the card Luhn check), run
+        /// against each hit in the match-collection step so a permissive shape doesn't over-mark.
+        case regex(NSRegularExpression, accepts: (@Sendable (String) -> Bool)?)
     }
     private let kind: Kind
 
@@ -195,7 +243,7 @@ private struct TextMatcher {
             guard let regex = try? NSRegularExpression(pattern: pattern.regexPattern, options: [.caseInsensitive]) else {
                 throw PDFOperationError.redactionFailed
             }
-            kind = .regex(regex)
+            kind = .regex(regex, accepts: pattern.acceptsMatch)
         }
     }
 
@@ -215,8 +263,12 @@ private struct TextMatcher {
                 searchStart = r.location + max(r.length, 1)
             }
             return found
-        case .regex(let regex):
-            return regex.matches(in: text, options: [], range: full).map(\.range)
+        case .regex(let regex, let accepts):
+            let results = regex.matches(in: text, options: [], range: full)
+            guard let accepts else { return results.map(\.range) }
+            // Drop hits the semantic filter rejects (a digit run that fails the card Luhn check), so a
+            // deliberately broad shape doesn't turn every long number into a mark.
+            return results.compactMap { accepts(ns.substring(with: $0.range)) ? $0.range : nil }
         }
     }
 }

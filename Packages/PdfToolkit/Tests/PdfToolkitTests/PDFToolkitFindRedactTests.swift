@@ -19,13 +19,15 @@ import Testing
 
     // MARK: - Regex presets (unit)
 
-    /// Builds a preset's compiled regex the same way the matcher does, and returns the substrings it
-    /// matches in `text`.
+    /// Builds a preset's compiled regex and applies the same semantic filter (`acceptsMatch`) the
+    /// matcher uses in its collection step — so the card Luhn check is exercised here, not just the
+    /// raw shape — and returns the substrings the preset would actually mark in `text`.
     private func matches(_ pattern: FindRedactPattern, in text: String) throws -> [String] {
         let regex = try NSRegularExpression(pattern: pattern.regexPattern, options: [.caseInsensitive])
         let ns = text as NSString
         return regex.matches(in: text, range: NSRange(location: 0, length: ns.length))
             .map { ns.substring(with: $0.range) }
+            .filter { pattern.acceptsMatch?($0) ?? true }
     }
 
     @Test func emailPresetCatchesAddressesAndIgnoresProse() throws {
@@ -33,22 +35,50 @@ import Testing
         #expect(found == ["jane.doe+tag@work.co", "bob_99@x.io"])
     }
 
-    @Test func ssnPresetMatchesDashedNinesOnly() throws {
+    /// The local part must cover the full unquoted (atext) set. An apostrophe is the common real case:
+    /// omitting it made "o'brien.pat@work.co" match only "brien.pat@work.co" — a box that *looks* like
+    /// a full redaction while leaking the name, worse than a clean miss.
+    @Test func emailPresetCoversApostropheAndOtherAtextInTheLocalPart() throws {
+        #expect(try matches(.email, in: "mail o'brien.pat@work.co please") == ["o'brien.pat@work.co"])
+        #expect(try matches(.email, in: "raw a!#$%&'*+/=?^_`{|}~-x@sub.example.com end")
+            == ["a!#$%&'*+/=?^_`{|}~-x@sub.example.com"])
+    }
+
+    @Test func ssnPresetMatchesDashedSpacedAndSolidNines() throws {
         #expect(try matches(.ssn, in: "SSN 123-45-6789 on file") == ["123-45-6789"])
-        // A phone-shaped or over-long digit run must not read as an SSN.
+        // Spaced and fully unformatted SSNs must match too — the old dashes-only pattern missed both.
+        #expect(try matches(.ssn, in: "SSN 123 45 6789 on file") == ["123 45 6789"])
+        #expect(try matches(.ssn, in: "SSN 123456789 on file") == ["123456789"])
+        // A bare 9-digit run is deliberately caught: it may be an unformatted SSN, and the tool prefers
+        // a box the reviewer deletes to a leaked identifier.
+        #expect(try matches(.ssn, in: "ref 987654321 end") == ["987654321"])
+        // But a 10-digit run and a mis-grouped run (2-3-4, 4-2-4) are not SSN-shaped and must not match.
         #expect(try matches(.ssn, in: "acct 1234-56-7890 and 12-345-6789").isEmpty)
     }
 
-    @Test func phonePresetMatchesCommonUSFormats() throws {
-        #expect(try matches(.phone, in: "call (415) 555-0132 today").count == 1)
-        #expect(try matches(.phone, in: "or +1 415.555.0132").count == 1)
-        #expect(try matches(.phone, in: "or 4155550132 works").count == 1)
+    @Test func phonePresetMatchesUSAndInternationalFormats() throws {
+        #expect(try matches(.phone, in: "call (415) 555-0132 today") == ["(415) 555-0132"])
+        #expect(try matches(.phone, in: "or +1 415.555.0132") == ["+1 415.555.0132"])
+        #expect(try matches(.phone, in: "or 4155550132 works") == ["4155550132"])
+        // International numbers written with an explicit +<country code> must match in full — a partial
+        // match would leave part of the number un-redacted.
+        #expect(try matches(.phone, in: "ring +44 20 7946 0958 now") == ["+44 20 7946 0958"])
+        #expect(try matches(.phone, in: "on +91 98765 43210 daily") == ["+91 98765 43210"])
     }
 
-    @Test func cardPresetMatchesGroupedAndAmexShapes() throws {
+    @Test func cardPresetMatchesThirteenThroughNineteenDigitShapesAndFiltersByLuhn() throws {
+        // Existing valid shapes still match (all Luhn-valid test numbers).
         #expect(try matches(.card, in: "Visa 4111 1111 1111 1111 exp") == ["4111 1111 1111 1111"])
         #expect(try matches(.card, in: "Amex 3782 822463 10005 ok") == ["3782 822463 10005"])
+        // Shapes the old fours-only pattern missed: 13-digit, dot-separated 14-digit Diners, 19-digit.
+        #expect(try matches(.card, in: "old 4222222222222 card") == ["4222222222222"])
+        #expect(try matches(.card, in: "dc 3056.930902.5904 x") == ["3056.930902.5904"])
+        #expect(try matches(.card, in: "big 4000 0000 0000 0000 006 y") == ["4000 0000 0000 0000 006"])
+        // Too-short runs never reach the Luhn filter — the shape rejects them.
         #expect(try matches(.card, in: "order 12345 shipped").isEmpty)
+        // A 16-digit run that fails the Luhn checksum (e.g. an invoice number) is rejected by the
+        // filter even though its shape matches — this is the false-positive guard.
+        #expect(try matches(.card, in: "inv 1234 5678 9012 3456 x").isEmpty)
     }
 
     // MARK: - Literal search geometry (end-to-end, unrotated)
@@ -103,6 +133,28 @@ import Testing
         // and cover "from"; the leading word means a correct mapping starts well to the right of x72.
         #expect(mark.rect.minX > 95)
         #expect(mark.rect.midY > 640)
+    }
+
+    /// Two separate matches on the *same* visual line must produce two separate marks with distinct,
+    /// side-by-side rectangles. The per-match line-bounds path (`selectionsByLine` → `bounds(for:)`,
+    /// one rect set per matched range) was otherwise only exercised by single-match or multi-line cases,
+    /// so a bug that merged same-line hits into one box — over-redacting the gap between them — would
+    /// have gone unnoticed.
+    @Test func twoMatchesOnOneLineYieldTwoDistinctRects() throws {
+        let dir = FixtureDir()
+        let src = dir.url("src.pdf")
+        try PDFFixtures.writeTwoZonePage(top: "a@x.io b@y.io", bottom: "PUBLICLINE", to: src)
+
+        let result = try PDFToolkit.findRedactionMarks(inputURL: src, query: .pattern(.email))
+        #expect(result.matchCount == 2)
+        let marks = result.marks().sorted { $0.rect.minX < $1.rect.minX }
+        #expect(marks.count == 2)
+        // Both boxes sit on the top line, not the bottom one…
+        #expect(marks.allSatisfy { $0.rect.midY > 640 })
+        // …and they are two separate side-by-side boxes: the left one ends before the right one's
+        // centre, so the per-match rects were not merged into one line-spanning box.
+        #expect(marks[0].rect.maxX < marks[1].rect.midX)
+        #expect(marks[1].rect.minX - marks[0].rect.minX > 40)
     }
 
     @Test func literalSearchIsCaseInsensitiveAndFindsEveryOccurrence() throws {

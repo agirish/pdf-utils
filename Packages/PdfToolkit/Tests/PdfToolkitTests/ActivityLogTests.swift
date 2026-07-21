@@ -212,23 +212,75 @@ struct ActivityLogTests {
     }
 
     @Test func beginLiveTailingSuspendsEvictionUntilTheFirstReadCompletes() async throws {
-        // Pins the suspension WIRING, not just the ledger API: a clean-ledger begin must suspend
-        // eviction synchronously (the locked check-and-suspend), and the tailer must resume it
-        // once its catch-up read finishes. Reverting either half — the plain hasEvicted read or
-        // the resume-after-first-read flag — fails here.
+        // Pins the suspension WIRING, not just the ledger API, via the monotonic counters: a
+        // clean-ledger begin must suspend exactly once (counted synchronously on this thread — no
+        // race against a fast tailer queue, unlike asserting the transient isEvictionSuspended),
+        // and the tailer must release exactly once when its first read completes. Reverting
+        // either half — the plain hasEvicted read or the resume wiring — fails here.
         let url = tempURL()
         defer { try? FileManager.default.removeItem(at: url) }
         try "[2026-01-01 00:00:00.000] [INFO] seed\n".write(to: url, atomically: true, encoding: .utf8)
         let log = ActivityLog(fileURL: url)
 
         log.beginLiveTailing()
-        #expect(log.ownLines.isEvictionSuspended)    // suspended before the tailer's queue runs
+        #expect(log.ownLines.suspensionsBegun == 1)  // deterministic: suspend ran on THIS thread
 
-        for _ in 0..<1000 where log.ownLines.isEvictionSuspended {
+        for _ in 0..<1000 where log.ownLines.suspensionsEnded == 0 {
             try await Task.sleep(for: .milliseconds(10))
         }
-        #expect(!log.ownLines.isEvictionSuspended)   // released by the first read completing
+        #expect(log.ownLines.suspensionsEnded == 1)  // released by the first read completing
         #expect(!log.ownLines.hasEvicted)            // and releasing under capacity evicted nothing
+    }
+
+    @Test func reArmPurgesSkippedOwnLinesInsteadOfPoisoningTheLedger() async throws {
+        // The 10%-flake mechanism found by review: an own line whose bytes land via RENAME (the
+        // writer's fallback under descriptor pressure) was anchored past on re-arm, its ledger
+        // registration never consumed — and the next byte-identical EXTERNAL line was consumed as
+        // "ours" and silently dropped. The re-arm must walk the skipped span consume-only: the
+        // registration is purged, and the later twin imports.
+        let url = tempURL()
+        defer { try? FileManager.default.removeItem(at: url) }
+        try "[2026-01-01 00:00:00.000] [INFO] seed\n".write(to: url, atomically: true, encoding: .utf8)
+
+        let ledger = OwnLineLedger(capacity: 100)
+        let imported = LockedValue<[LogEntry]>([])
+        let size = UInt64((try FileManager.default.attributesOfItem(atPath: url.path)[.size] as? NSNumber)?.uint64Value ?? 0)
+        let tailer = ActivityLogTailer(url: url, startOffset: size, ledger: ledger) { batch in
+            imported.mutate { $0.append(contentsOf: batch) }
+        }
+        tailer.start()
+
+        // Confirm the watch is armed before staging the rename.
+        try appendExternally("[2026-01-01 00:00:01.000] [INFO] armed\n", to: url)
+        for _ in 0..<1000 where !imported.value.contains(where: { $0.message == "armed" }) {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        #expect(imported.value.contains { $0.message == "armed" })
+
+        // An OWN line lands via atomic replace — bytes on a new inode, delivered as a rename.
+        let own = "[2026-01-01 00:00:02.000] [INFO] twin"
+        ledger.register(own)
+        let existing = try String(contentsOf: url, encoding: .utf8)
+        try Data((existing + own + "\n").utf8).write(to: url, options: .atomic)
+
+        // Wait until the re-arm is live again: probes written pre-anchor are deliberately skipped,
+        // so keep sending unique ones until one lands.
+        var probe = 0
+        while probe < 1000, !imported.value.contains(where: { $0.message.hasPrefix("post-rearm") }) {
+            try appendExternally("[2026-01-01 00:00:03.000] [INFO] post-rearm-\(probe)\n", to: url)
+            probe += 1
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        #expect(imported.value.contains { $0.message.hasPrefix("post-rearm") })
+
+        // The skipped own line's registration must be GONE (purged by the consume-only walk)…
+        #expect(!ledger.consume(own))
+        // …so a byte-identical EXTERNAL line must import instead of being eaten.
+        try appendExternally(own + "\n", to: url)
+        for _ in 0..<1000 where !imported.value.contains(where: { $0.message == "twin" }) {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        #expect(imported.value.filter { $0.message == "twin" }.count == 1)
     }
 
     @Test func ownLineLedgerSuspensionBlocksEvictionUntilResumed() {

@@ -547,11 +547,27 @@ final class OwnLineLedger: @unchecked Sendable {
         return evicted
     }
 
-    /// Whether a catch-up window is currently holding eviction open — observable so tests can pin
-    /// the begin-tailing wiring (suspend on begin, resume after the first read).
+    /// Whether a catch-up window is currently holding eviction open.
     var isEvictionSuspended: Bool {
         lock.lock(); defer { lock.unlock() }
         return evictionSuspended
+    }
+
+    /// Monotonic suspension counters, the deterministic seam for pinning the begin-tailing wiring:
+    /// `suspensionsBegun` increments synchronously inside `beginLiveTailing`'s caller thread, and
+    /// `suspensionsEnded` when the tailer releases — so a test can assert begun == 1 immediately
+    /// (no race against the tailer queue) and poll ended == 1. Asserting on the transient
+    /// `isEvictionSuspended` instead was a race: a fast tailer queue could release before the
+    /// test's first expectation evaluated.
+    private var begun = 0
+    private var ended = 0
+    var suspensionsBegun: Int {
+        lock.lock(); defer { lock.unlock() }
+        return begun
+    }
+    var suspensionsEnded: Int {
+        lock.lock(); defer { lock.unlock() }
+        return ended
     }
 
     /// One locked step for the catch-up decision: if nothing has ever been evicted, suspends
@@ -562,6 +578,7 @@ final class OwnLineLedger: @unchecked Sendable {
         lock.lock(); defer { lock.unlock() }
         guard !evicted else { return false }
         evictionSuspended = true
+        begun += 1
         return true
     }
 
@@ -570,6 +587,7 @@ final class OwnLineLedger: @unchecked Sendable {
     func resumeEviction() {
         lock.lock(); defer { lock.unlock() }
         evictionSuspended = false
+        ended += 1
         trimToCapacityLocked()
     }
 
@@ -625,10 +643,12 @@ final class ActivityLogTailer: @unchecked Sendable {
     /// Bytes read since the last newline — a line split across two reads is held here until complete.
     private var partial = Data()
 
-    /// When true, the initial read is a seed-anchored catch-up running with ledger eviction
-    /// suspended (see `OwnLineLedger.suspendEvictionIfCleanSoFar`); the tailer resumes eviction as
-    /// soon as that read completes — including when the open fails, so suspension can't leak.
-    private let resumesEvictionAfterFirstRead: Bool
+    /// True while the initial seed-anchored catch-up still owes the ledger a `resumeEviction()`.
+    /// Cleared by the first read that runs against an OPEN descriptor — not merely the first read
+    /// attempt: releasing on a failed open let registrations evict during the retry window and
+    /// reopened the very race the suspension closes. The slow-phase valve (see `openAndArm`) is
+    /// the bounded-growth escape hatch when the descriptor can't be opened promptly.
+    private var pendingFirstReadResume: Bool
 
     init(
         url: URL,
@@ -640,7 +660,7 @@ final class ActivityLogTailer: @unchecked Sendable {
         self.url = url
         self.offset = startOffset
         self.ledger = ledger
-        self.resumesEvictionAfterFirstRead = resumesEvictionAfterFirstRead
+        self.pendingFirstReadResume = resumesEvictionAfterFirstRead
         self.onExternal = onExternal
     }
 
@@ -657,18 +677,40 @@ final class ActivityLogTailer: @unchecked Sendable {
         queue.async { [self] in
             openAndArm()
             readNew()
-            if resumesEvictionAfterFirstRead {
-                ledger.resumeEviction()
-            }
+            completeFirstReadIfArmed()
         }
+    }
+
+    /// Releases the catch-up's eviction suspension once a first read has actually run against an
+    /// open descriptor. Called after every read attempt (initial and retried); a no-op until then.
+    private func completeFirstReadIfArmed() {
+        guard pendingFirstReadResume, fd >= 0 else { return }
+        pendingFirstReadResume = false
+        ledger.resumeEviction()
     }
 
     /// Re-anchor to the current end of file — used when the viewer clears the log so the tailer does
     /// not re-import the wiped lines. Runs on `queue` to stay ordered with reads.
     func reanchor() {
         queue.async { [self] in
-            offset = currentSize()
-            partial.removeAll()
+            if fd >= 0 {
+                // Skip forward WITHOUT poisoning the ledger: the span between the old offset and
+                // EOF may hold own lines whose registrations were never consumed — see
+                // `consumeOnly`. Anchoring blindly left them live to swallow a later
+                // byte-identical external line.
+                let size = currentSize()
+                if size > offset {
+                    consumeOnly(from: offset, to: size)
+                }
+                offset = size
+                partial.removeAll()
+            } else {
+                // Mid-outage there is no descriptor to measure: `currentSize()` reads 0 off a dead
+                // fd, and taking that as the anchor made a later successful retry import the
+                // ENTIRE pre-clear file into a just-cleared viewer. Remember the intent instead —
+                // the successful (re)arm applies it against the real file.
+                anchorAtEndOnNextArm = true
+            }
         }
     }
 
@@ -684,9 +726,10 @@ final class ActivityLogTailer: @unchecked Sendable {
     /// current offset — the rename branch's intent, remembered here so a RETRIED re-arm still
     /// lands at the new EOF rather than re-reading a whole replacement file from a stale offset.
     private var anchorAtEndOnNextArm = false
-    /// Bounded retries for transient `open()` failures (descriptor pressure under load). A silent
-    /// give-up left the tailer dead for the rest of the session — live updates just stopped, with
-    /// nothing in the UI to say why. ~5s of retries outlives any transient spike.
+    /// Fast-phase retries for transient `open()` failures (descriptor pressure under load):
+    /// 20 × 250 ms outlives a spike. After the budget the cadence drops to one attempt per 5 s,
+    /// INDEFINITELY — a hard give-up left the tailer permanently dead for the session, which was
+    /// the original sin here; capping the fast phase only bounds the churn, not the recovery.
     private var openRetriesRemaining = 20
 
     /// (Re)opens the read descriptor and its watch. `O_CREAT` without `O_TRUNC` makes this race-free
@@ -705,16 +748,26 @@ final class ActivityLogTailer: @unchecked Sendable {
 
         let opened = open(url.path, O_RDONLY | O_CREAT, 0o644)
         guard opened >= 0 else {
-            if openRetriesRemaining > 0 {
-                openRetriesRemaining -= 1
-                queue.asyncAfter(deadline: .now() + .milliseconds(250)) { [weak self] in
-                    guard let self, self.fd < 0 else { return }
-                    self.openAndArm()
-                    // A successful retried arm has already applied any pending EOF anchor; this
-                    // read then picks up from the correct offset (the catch-up window on a
-                    // first-open retry, or nothing at all after a rename re-arm).
-                    self.readNew()
-                }
+            let inFastPhase = openRetriesRemaining > 0
+            if inFastPhase { openRetriesRemaining -= 1 }
+            if !inFastPhase || openRetriesRemaining == 0, pendingFirstReadResume {
+                // Degradation valve at the fast→slow transition: the first-read suspension can't
+                // be held for an open-ended outage (the ledger would grow with every own line
+                // logged). Release it and downgrade the eventual first read from seed catch-up to
+                // consume-and-anchor — after seconds of outage, evictions may have happened, and
+                // a catch-up import could double an evicted own line.
+                pendingFirstReadResume = false
+                ledger.resumeEviction()
+                anchorAtEndOnNextArm = true
+            }
+            queue.asyncAfter(deadline: .now() + (inFastPhase ? .milliseconds(250) : .seconds(5))) { [weak self] in
+                guard let self, self.fd < 0 else { return }
+                self.openAndArm()
+                // A successful retried arm has already applied any pending EOF anchor; this read
+                // then picks up from the correct offset (the catch-up window on a first-open
+                // retry, or nothing at all after an anchored re-arm).
+                self.readNew()
+                self.completeFirstReadIfArmed()
             }
             return
         }
@@ -748,10 +801,58 @@ final class ActivityLogTailer: @unchecked Sendable {
         self.source = source
         source.resume()
 
+        // The arm window can race a replace (an init-time trim's rename; historically also the
+        // writer's create-or-replace on a fresh install): an unlink that lands BEFORE the source
+        // is armed delivers no event, so the watch would sit on an orphaned inode forever. Verify
+        // the path still resolves to the armed inode; on mismatch, re-arm shortly with the
+        // anchor-at-end intent — the replacement's content is a trim tail (already reflected in
+        // the mirror), and the consume-only walk keeps the ledger honest.
+        var armedStat = stat()
+        var pathStat = stat()
+        if fstat(fd, &armedStat) == 0, stat(url.path, &pathStat) == 0, armedStat.st_ino != pathStat.st_ino {
+            anchorAtEndOnNextArm = true
+            queue.asyncAfter(deadline: .now() + .milliseconds(50)) { [weak self] in
+                guard let self else { return }
+                self.openAndArm()
+                self.readNew()
+                self.completeFirstReadIfArmed()
+            }
+            return
+        }
+
         if anchorAtEndOnNextArm {
             anchorAtEndOnNextArm = false
-            offset = currentSize()
+            // Anchor at the new file's end, but first walk EVERYTHING being skipped in
+            // consume-only mode. Anchoring blindly poisoned the ledger: an own line whose bytes
+            // landed in the skipped span (the writer's fallback append lands via rename exactly
+            // when descriptors are tight) kept its registration forever, and the next
+            // byte-identical EXTERNAL line was consumed as "ours" and silently dropped — the
+            // suite's 1-in-10 flake, reproduced deterministically before this fix.
+            let size = currentSize()
+            consumeOnly(from: 0, to: size)
+            offset = size
             partial.removeAll()
+        }
+    }
+
+    /// Reads `[from, to)` and offers every complete line to the ledger WITHOUT importing anything.
+    /// Sound by multiset accounting: a registration is consumed at most once, already-consumed
+    /// lines simply miss, and unregistered (external/seed) lines are untouched — so scanning a
+    /// superset of the truly-skipped span can never over-consume. External lines in a skipped span
+    /// stay lost to the live view (the documented trim-boundary residual); what this guarantees is
+    /// that skipping can no longer make the ledger eat a FUTURE line.
+    private func consumeOnly(from: UInt64, to: UInt64) {
+        guard to > from, fd >= 0 else { return }
+        let wanted = Int(to - from)
+        var buffer = Data(count: wanted)
+        let read = buffer.withUnsafeMutableBytes { raw -> Int in
+            guard let base = raw.baseAddress else { return 0 }
+            return pread(fd, base, wanted, off_t(from))
+        }
+        guard read > 0 else { return }
+        for lineBytes in buffer.prefix(read).split(separator: UInt8(ascii: "\n"), omittingEmptySubsequences: true) {
+            guard let line = String(data: Data(lineBytes), encoding: .utf8) else { continue }
+            _ = ledger.consume(line)
         }
     }
 
@@ -856,11 +957,15 @@ final class LogFileWriter: @unchecked Sendable {
 
     /// (Re)opens the write handle positioned at end-of-file, creating the file if missing, and
     /// records the opened file's identity. Runs on `queue`.
+    ///
+    /// One atomic create-or-open, NOT check-then-create: `FileManager.createFile` REPLACES an
+    /// existing file's inode (verified empirically), and on a fresh install it raced the tailer's
+    /// own `O_CREAT` — the tailer could arm its dispatch source on an inode this replace had just
+    /// orphaned, in the microseconds before arming delivers no event, leaving the live view
+    /// permanently blind. With plain `O_CREAT` on both sides, whoever creates first wins and the
+    /// other opens the same inode.
     private func openHandle() {
-        if !FileManager.default.fileExists(atPath: url.path) {
-            FileManager.default.createFile(atPath: url.path, contents: nil, attributes: nil)
-        }
-        let fd = open(url.path, O_WRONLY | O_APPEND)
+        let fd = open(url.path, O_WRONLY | O_APPEND | O_CREAT, 0o644)
         handle = fd >= 0 ? FileHandle(fileDescriptor: fd, closeOnDealloc: true) : nil
         handleFileIdentity = handle == nil ? nil : currentFileIdentity()
     }
@@ -905,10 +1010,23 @@ final class LogFileWriter: @unchecked Sendable {
                     landed = true
                 }
             } else {
-                // Last-resort fallback when the handle could not be opened. Append manually — a bare
-                // `.atomic` write would replace the whole log with this one line. Self-heals next append.
-                let existing = (try? Data(contentsOf: self.url)) ?? Data()
-                landed = (try? (existing + data).write(to: self.url, options: .atomic)) != nil
+                // Last-resort fallback when the handle could not be opened: a raw in-place
+                // O_APPEND write. The previous shape (read-all + `.atomic` rewrite) landed the
+                // line via RENAME, and under exactly the descriptor pressure that gets us here
+                // that rename forced the tailer into an anchor-skip — the reproduced route by
+                // which a concurrent external line vanished from the live view. An in-place
+                // append swaps no inode, posts no rename, and needs ONE descriptor where the
+                // atomic path needed several. If even this open fails, the line lands nowhere —
+                // the writer's existing contract (completion skipped, so the viewer never shows
+                // a line the file does not hold). Self-heals next append.
+                let rawFD = open(self.url.path, O_WRONLY | O_APPEND | O_CREAT, 0o644)
+                if rawFD >= 0 {
+                    landed = data.withUnsafeBytes { raw -> Bool in
+                        guard let base = raw.baseAddress else { return false }
+                        return Darwin.write(rawFD, base, data.count) == data.count
+                    }
+                    close(rawFD)
+                }
             }
             self.bytesSinceTrimCheck += data.count
             if self.bytesSinceTrimCheck >= self.trimCheckInterval {

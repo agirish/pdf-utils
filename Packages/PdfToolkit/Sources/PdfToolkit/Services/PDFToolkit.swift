@@ -420,188 +420,6 @@ public enum PDFToolkit {
         return data
     }
 
-    /// Rebuilds the PDF from rendered page images to reduce size. `quality` is 0...1 (JPEG-style tradeoff).
-    public static func compress(inputURL: URL, outputURL: URL, quality: Double) throws {
-        try requireDistinctOutput(outputURL, from: [inputURL])
-        try writeOutput(try compressData(inputURL: inputURL, quality: quality), to: outputURL)
-    }
-
-    /// In-memory core of ``compress(inputURL:outputURL:quality:)`` — the guarded open plus the
-    /// shared page-rebuild loop.
-    internal static func compressData(inputURL: URL, quality: Double) throws -> Data {
-        let source = try openUnlockedDocument(at: inputURL)
-        return try compressedData(from: source, quality: quality)
-    }
-
-    /// Compresses toward a byte budget by sweeping a bounded ladder of qualities from high to low,
-    /// stopping at the first that lands under `targetBytes`. Writes the best attempt: the highest
-    /// quality that fits, or — when even the lowest quality overshoots — the smallest file produced,
-    /// so an unreachable target still yields the most-compressed result rather than an error.
-    ///
-    /// The sweep rebuilds the document a handful of times at most (the ladder is short), trading a
-    /// few extra rasterizations for a size the caller can actually promise. ``compressToTargetData``
-    /// binary-searches the quality ladder for the highest rung that fits, falling back to the smallest
-    /// result when none do; its end-to-end behavior is pinned by `PDFToolkitCompressTargetTests`.
-    static func compressToTarget(inputURL: URL, outputURL: URL, targetBytes: Int) throws {
-        try requireDistinctOutput(outputURL, from: [inputURL])
-        guard let sourceBytes = try? inputURL.resourceValues(forKeys: [.fileSizeKey]).fileSize else {
-            throw PDFOperationError.couldNotOpen(inputURL)
-        }
-
-        // Already at or under the target: keep the cheap on-disk copy instead of pulling the whole
-        // source through memory just to write it back out.
-        if sourceBytes <= targetBytes {
-            // Guarded open before the pass-through, so a locked file errors clearly instead of
-            // being copied under a "-compressed" name when it happens to fit the target.
-            _ = try openUnlockedDocument(at: inputURL)
-            do {
-                try? FileManager.default.removeItem(at: outputURL)
-                try FileManager.default.copyItem(at: inputURL, to: outputURL)
-            } catch {
-                throw PDFOperationError.couldNotWrite(outputURL)
-            }
-            return
-        }
-
-        try writeOutput(try compressToTargetData(inputURL: inputURL, targetBytes: targetBytes), to: outputURL)
-    }
-
-    /// In-memory core of ``compressToTarget(inputURL:outputURL:targetBytes:)`` — the quality-ladder
-    /// sweep. A source that already fits the target passes through as its own unchanged bytes.
-    internal static func compressToTargetData(inputURL: URL, targetBytes: Int) throws -> Data {
-        // The byte count, not the bytes: pinning the whole source Data across a multi-rung sweep
-        // doubled peak memory on exactly the scan-heavy files this operation exists for. The full
-        // bytes are read only in the rare inflation fallback at the end.
-        guard let sourceBytes = try? inputURL.resourceValues(forKeys: [.fileSizeKey]).fileSize else {
-            throw PDFOperationError.couldNotOpen(inputURL)
-        }
-        // Guarded open before the pass-through below, so a locked file errors clearly instead of
-        // being handed back under a "-compressed" name when it happens to fit the target.
-        let source = try openUnlockedDocument(at: inputURL)
-
-        // Already at or under the target: rasterizing can only lose quality, so pass the source
-        // through unchanged instead of walking the ladder for a worse, possibly larger file.
-        if sourceBytes <= targetBytes {
-            do {
-                return try Data(contentsOf: inputURL)
-            } catch {
-                throw PDFOperationError.couldNotOpen(inputURL)
-            }
-        }
-
-        // Attempt size is monotone in quality (a lower rung rasterizes fewer pixels), so binary-
-        // search the ladder for the highest rung that fits: at most 3 rebuilds instead of walking
-        // up to all 6. Memory holds at most one fitting payload OR the running smallest — once any
-        // rung fits, the smallest-so-far fallback can never be needed and is released.
-        let ladder: [Double] = [0.9, 0.75, 0.6, 0.45, 0.3, 0.2]
-        var fittingBest: Data?
-        var smallest: Data?
-        var lo = 0
-        var hi = ladder.count - 1
-        while lo <= hi {
-            let mid = (lo + hi) / 2
-            // Per-attempt pool: each rung rebuilds the whole document; its scratch must not stack
-            // across rungs. The returned Data survives the drain — it's retained, not autoreleased.
-            let data = try autoreleasepool { try compressedData(from: source, quality: ladder[mid]) }
-            if data.count <= targetBytes {
-                fittingBest = data      // fits — hunt a higher-quality rung
-                smallest = nil
-                hi = mid - 1
-            } else {
-                if fittingBest == nil, data.count < (smallest?.count ?? .max) {
-                    smallest = data
-                }
-                lo = mid + 1
-            }
-        }
-
-        guard var chosen = fittingBest ?? smallest else {
-            throw PDFOperationError.compressionFailed
-        }
-        // Rasterizing a lean vector/text PDF can *inflate* it past every rung. Never hand back a
-        // "compressed" file bigger than the original — fall back to the source bytes, so the
-        // output is bounded by the input even when the target is unreachable.
-        if chosen.count >= sourceBytes {
-            do {
-                chosen = try Data(contentsOf: inputURL)
-            } catch {
-                throw PDFOperationError.couldNotOpen(inputURL)
-            }
-        }
-
-        return chosen
-    }
-
-    /// JPEG factor for rebuilt compress pages, driven by the quality lever. The top of the range stays
-    /// at 0.85 — the value calibrated to what `PDFPage(image:)` (the previous path) effectively encoded
-    /// at, so highest-quality output holds the historical size curve (a photo-class bitmap through
-    /// PDFPage(image:) landed within ~8% of an explicit 0.85 encode, probed) — and eases down to ~0.33
-    /// at the bottom.
-    ///
-    /// Encoding quality is deliberately a *second* size lever alongside raster resolution: resolution
-    /// downsampling caps at 1 pt/px (`rasterGeometry(allowUpscale: false)`), so on a standard-size page
-    /// — whose long edge is already below every quality's `maxPixel` — resolution alone is identical at
-    /// every setting and the quality slider would do nothing. Varying the JPEG factor makes quality
-    /// (and the strength cards that front it) actually change the output size on ordinary pages too.
-    private static func compressedPageJPEGFactor(for quality: Double) -> Double {
-        min(0.85, max(0.3, 0.30 + 0.55 * quality))
-    }
-
-    /// Rebuilds every page as a bitmap at the resolution implied by `quality` and returns the new PDF
-    /// as in-memory `Data`. Shared by `compress` (writes it once) and `compressToTarget` (measures the
-    /// size at several qualities before writing the best one) so the page-rebuild loop lives in one place.
-    ///
-    /// **Streamed**: each page's JPEG bytes flow into the growing output as they're produced, so
-    /// peak memory is one page's render/encode scratch plus the compressed output — not every page
-    /// bitmap pinned in a `PDFDocument` until a final serialization, which peaked at gigabytes on
-    /// long scans. CGPDFContext embeds a JPEG-sourced CGImage as its original DCT data (probed:
-    /// a 579 KB JPEG emitted a 583 KB page), so this is `PDFPage(image:)`'s encoding made explicit.
-    private static func compressedData(from source: PDFDocument, quality: Double) throws -> Data {
-        let q = min(1, max(0.05, quality))
-        let maxPixel = CGFloat(600 + (2400 - 600) * q)
-
-        let pdfData = NSMutableData()
-        guard let consumer = CGDataConsumer(data: pdfData as CFMutableData),
-              let ctx = CGContext(consumer: consumer, mediaBox: nil, nil)
-        else {
-            throw PDFOperationError.compressionFailed
-        }
-
-        var emitted = 0
-        for i in 0..<source.pageCount {
-            // Per-page pool: the render bitmap, its rep, and the JPEG bytes are all page-sized
-            // transients — drained page by page, only the compressed stream accumulates.
-            try autoreleasepool {
-                guard let page = source.page(at: i), let cgPage = page.pageRef else { return }
-                guard
-                    let geometry = rasterGeometry(for: page, maxPixelDimension: maxPixel, allowUpscale: false),
-                    let bitmap = renderBitmap(page, cgPage: cgPage, geometry: geometry, redactionFills: []),
-                    let jpeg = NSBitmapImageRep(cgImage: bitmap)
-                        .representation(using: .jpeg, properties: [.compressionFactor: compressedPageJPEGFactor(for: q)]),
-                    let jpegSource = CGImageSourceCreateWithData(jpeg as CFData, nil),
-                    let jpegImage = CGImageSourceCreateImageAtIndex(jpegSource, 0, nil)
-                else {
-                    throw PDFOperationError.compressionFailed
-                }
-                // The bitmap is the page as *displayed* (rotation applied, crop box), so the
-                // emitted page uses that size — the raw media box would letterbox rotated pages,
-                // and no PDFPage.rotation is re-applied on top.
-                let box = CGRect(origin: .zero, size: geometry.displaySize)
-                beginDisplayedPage(ctx, box: box)
-                ctx.interpolationQuality = .high
-                ctx.draw(jpegImage, in: box)
-                ctx.endPDFPage()
-                emitted += 1
-            }
-        }
-        ctx.closePDF()
-
-        guard emitted > 0, pdfData.length > 0 else {
-            throw PDFOperationError.compressionFailed
-        }
-        return pdfData as Data
-    }
-
     /// Stamps text or a logo image onto the chosen pages and writes a new PDF.
     ///
     /// Each page is copied into a fresh CoreGraphics PDF context with `drawPDFPage`, which keeps the
@@ -927,7 +745,9 @@ public enum PDFToolkit {
 
     /// How a page maps onto a raster: the crop box drawn (what viewers actually display), its
     /// rotation-aware displayed size in points, and the exact pixels-per-point scale.
-    private struct PageRasterGeometry {
+    // Internal (not private): the shared raster helpers that return/consume it are used by the
+    // Compress core in a sibling file, which reads `displaySize` off the geometry.
+    struct PageRasterGeometry {
         let pageBox: CGRect
         let displaySize: CGSize
         let scale: CGFloat
@@ -935,7 +755,9 @@ public enum PDFToolkit {
         var pixelHeight: Int { max(1, Int(ceil(displaySize.height * scale))) }
     }
 
-    private static func rasterGeometry(
+    // Internal (not private): the raster pipeline is shared by redaction and the Compress core in a
+    // sibling file (PDFToolkit+Compress.swift), which rebuilds pages through the same rasterizer.
+    static func rasterGeometry(
         for page: PDFPage,
         maxPixelDimension: CGFloat,
         allowUpscale: Bool
@@ -961,7 +783,8 @@ public enum PDFToolkit {
     /// a field of white. And the rect must use the rotation-swapped *displayed* size, or a
     /// /Rotate 90 page gets letterboxed into its unrotated aspect. Redaction rects arrive in PDF
     /// user space and are filled under the same transform, so they track the content exactly.
-    private static func renderBitmap(
+    // Internal (not private): shared with the Compress core in PDFToolkit+Compress.swift (same raster path).
+    static func renderBitmap(
         _ page: PDFPage,
         cgPage: CGPDFPage,
         geometry: PageRasterGeometry,

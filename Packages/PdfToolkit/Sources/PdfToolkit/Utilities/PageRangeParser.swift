@@ -154,11 +154,14 @@ public enum PageRangeParser {
                     throw PDFOperationError.invalidPageRange(String(p))
                 }
 
-                let oneBasedSequence: [Int]
+                // Lazy sequences, never materialized arrays: a typo like "1-999999999" must throw
+                // pageOutOfBounds at the first bad page, not allocate gigabytes first. The sibling
+                // parsers already iterate their ranges lazily.
+                let oneBasedSequence: AnySequence<Int>
                 if startOneBased <= endOneBased {
-                    oneBasedSequence = Array(startOneBased...endOneBased)
+                    oneBasedSequence = AnySequence(startOneBased...endOneBased)
                 } else {
-                    oneBasedSequence = Array(stride(from: startOneBased, through: endOneBased, by: -1))
+                    oneBasedSequence = AnySequence(stride(from: startOneBased, through: endOneBased, by: -1))
                 }
 
                 for oneBased in oneBasedSequence {

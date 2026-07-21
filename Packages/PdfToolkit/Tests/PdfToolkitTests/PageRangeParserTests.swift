@@ -136,6 +136,22 @@ import Foundation
         #expect(try! PageRangeParser.parse("", pageCount: 3, preserveOrder: true) == [0, 1, 2])
     }
 
+    @Test func preserveOrderThrowsOnAstronomicalRangeWithoutAllocating() {
+        // "1-999999999" is one extra digit away from a real range. The order-preserving branch
+        // used to materialize the whole span into an Array before any bounds check — gigabytes
+        // for a typo. It must instead throw at the first out-of-bounds page, instantly. (If this
+        // regresses, the test doesn't fail so much as the suite OOMs — either way, loudly.)
+        let ascending = #expect(throws: PDFOperationError.self) {
+            try PageRangeParser.parse("1-999999999", pageCount: 3, preserveOrder: true)
+        }
+        if case .pageOutOfBounds(let page) = ascending { #expect(page == 4) }
+
+        let descending = #expect(throws: PDFOperationError.self) {
+            try PageRangeParser.parse("999999999-1", pageCount: 3, preserveOrder: true)
+        }
+        if case .pageOutOfBounds(let page) = descending { #expect(page == 999_999_999) }
+    }
+
     @Test func preserveOrderRejectsOutOfBoundsRange() {
         let error = #expect(throws: PDFOperationError.self) {
             try PageRangeParser.parse("2-4", pageCount: 3, preserveOrder: true)

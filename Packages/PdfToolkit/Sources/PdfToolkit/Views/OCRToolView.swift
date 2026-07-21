@@ -11,6 +11,14 @@ struct OCRToolView: View {
     @State private var busy = false
     @State private var progressPage = 0
     @State private var progressTotal = 0
+    /// The in-flight run, kept so Cancel and leaving the screen can actually abort it — recognition
+    /// holds the shared PDF serial queue, so an unabortable multi-minute run starves every other
+    /// tool's previews.
+    @State private var runTask: Task<Void, Never>?
+    /// Bumped at every run start AND end. Progress callbacks hop to the main actor as unordered
+    /// tasks; the generation check drops both stragglers from a finished run and out-of-order
+    /// updates (paired with the monotonic page guard).
+    @State private var progressGeneration = 0
     @State private var alertMessage: String?
     @State private var showImporter = false
     @State private var showExporter = false
@@ -81,6 +89,11 @@ struct OCRToolView: View {
         .task(id: selectionPathKey) {
             await loadThumbnails()
         }
+        // Leaving the screen must free the PDF serial queue, not let a multi-minute recognition
+        // run finish for a result nobody will see.
+        .onDisappear {
+            runTask?.cancel()
+        }
     }
 
     // MARK: - Sidebar
@@ -119,7 +132,7 @@ struct OCRToolView: View {
             Divider()
 
             RunActionButton(title: "Make searchable & save…", busy: busy, canRun: inputURL != nil) {
-                Task { await runOCR() }
+                runTask = Task { await runOCR() }
             }
             .padding(16)
             .toolActionBar()
@@ -269,9 +282,17 @@ struct OCRToolView: View {
             if busy && progressTotal > 0 {
                 Divider()
                 ProgressView(value: Double(progressPage), total: Double(progressTotal))
-                Text("Recognizing text… page \(progressPage) of \(progressTotal)")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                HStack {
+                    Text("Recognizing text… page \(progressPage) of \(progressTotal)")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Spacer(minLength: 8)
+                    Button("Cancel") {
+                        runTask?.cancel()
+                    }
+                    .buttonStyle(.borderless)
+                    .font(.caption.weight(.medium))
+                }
             }
         }
         .padding(16)
@@ -325,10 +346,16 @@ struct OCRToolView: View {
         busy = true
         progressPage = 0
         progressTotal = 0
+        progressGeneration += 1
+        let generation = progressGeneration
         AppStateManager.shared.beginOperation(Tool.ocr.title)
         defer {
             busy = false
             progressTotal = 0
+            // Invalidate straggler progress tasks still queued on the main actor — without this a
+            // late hop could repaint a "page N of M" readout after the run already finished.
+            progressGeneration += 1
+            runTask = nil
             AppStateManager.shared.endOperation(Tool.ocr.title)
         }
 
@@ -346,6 +373,9 @@ struct OCRToolView: View {
                             options: options,
                             progress: { page, total in
                                 Task { @MainActor in
+                                    // Main-actor hops are not FIFO: drop out-of-order and
+                                    // after-the-run updates instead of painting them.
+                                    guard generation == progressGeneration, page > progressPage else { return }
                                     progressPage = page
                                     progressTotal = total
                                 }
@@ -379,7 +409,7 @@ struct OCRToolView: View {
                 showExporter = true
             }
         } catch is CancellationError {
-            // The screen was left mid-run; nothing to report.
+            // Cancelled deliberately — the Cancel button or leaving the screen. Nothing to report.
         } catch {
             alertMessage = error.localizedDescription
             ActivityLog.shared.error("\(Tool.ocr.title) failed: \(error.localizedDescription)")

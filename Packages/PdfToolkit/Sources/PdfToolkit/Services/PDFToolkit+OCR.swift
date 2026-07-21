@@ -60,23 +60,11 @@ extension PDFToolkit {
         for i in 0..<source.pageCount {
             progress?(i + 1, source.pageCount)
             if isCancelled?() == true { throw CancellationError() }
-            // Throw, never skip: silently dropping an unreadable page would ship an output with
-            // fewer pages than the input — data loss dressed up as success. (Locked docs, whose
-            // pages all lack a pageRef, are already refused by openUnlockedDocument.)
-            guard let page = source.page(at: i), let cgPage = page.pageRef else {
-                throw PDFOperationError.couldNotOpen(inputURL)
-            }
-
-            let cropBox = page.bounds(for: .cropBox)
-            let rotation = ((page.rotation % 360) + 360) % 360
-            let displaySize = (rotation == 90 || rotation == 270)
-                ? CGSize(width: cropBox.height, height: cropBox.width)
-                : cropBox.size
-            let box = CGRect(origin: .zero, size: displaySize)
+            let dp = try displayedPage(source.page(at: i), inputURL: inputURL)
 
             let needsRecognition: Bool
             if options.skipPagesWithText {
-                let existing = (page.string ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+                let existing = (dp.page.string ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
                 needsRecognition = existing.isEmpty
             } else {
                 needsRecognition = true
@@ -85,7 +73,7 @@ extension PDFToolkit {
             var lines: [RecognizedLine] = []
             if needsRecognition {
                 let renderSize = options.accurate ? accurateOCRPixelDimension : fastOCRPixelDimension
-                guard let bitmap = renderPageBitmap(page, maxPixelDimension: renderSize) else {
+                guard let bitmap = renderPageBitmap(dp.page, maxPixelDimension: renderSize) else {
                     throw PDFOperationError.ocrFailed
                 }
                 lines = try recognizeText(in: bitmap, accurate: options.accurate)
@@ -94,24 +82,11 @@ extension PDFToolkit {
                 summary.skippedPages += 1
             }
 
-            // Same emit pattern as watermark, including the CFData media-box gotcha.
-            var pageBox = box
-            let pageBoxData = Data(bytes: &pageBox, count: MemoryLayout<CGRect>.size)
-            ctx.beginPDFPage([kCGPDFContextMediaBox as String: pageBoxData] as CFDictionary)
-
-            ctx.saveGState()
-            let transform = cgPage.getDrawingTransform(.cropBox, rect: box, rotate: 0, preserveAspectRatio: false)
-            ctx.concatenate(transform)
-            ctx.drawPDFPage(cgPage)
-            ctx.restoreGState()
-
-            drawAnnotations(of: page, in: ctx)
-
-            for line in lines {
-                drawInvisibleLine(line.string, at: pageRect(for: line.normalizedRect, in: box), in: ctx)
+            emitDisplayedPage(dp, into: ctx) { ctx, dp in
+                for line in lines {
+                    drawInvisibleLine(line.string, at: pageRect(for: line.normalizedRect, in: dp.box), in: ctx)
+                }
             }
-
-            ctx.endPDFPage()
         }
         ctx.closePDF()
 

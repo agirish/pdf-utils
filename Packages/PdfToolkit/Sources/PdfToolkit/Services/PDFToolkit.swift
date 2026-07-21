@@ -454,39 +454,10 @@ public enum PDFToolkit {
         }
 
         for i in 0..<source.pageCount {
-            guard let page = source.page(at: i), let cgPage = page.pageRef else { continue }
-            // Crop box, not media box: it is what viewers display, so the stamped page keeps the
-            // visible size. (Vector content outside the crop still rides along in the stream —
-            // clipped off-page by the emitted media box, not removed; only rasterizing paths
-            // truly destroy it.)
-            let cropBox = page.bounds(for: .cropBox)
-            let rotation = ((page.rotation % 360) + 360) % 360
-            let displaySize = (rotation == 90 || rotation == 270)
-                ? CGSize(width: cropBox.height, height: cropBox.width)
-                : cropBox.size
-            let box = CGRect(origin: .zero, size: displaySize)
-
-            // The media-box value must be CFData wrapping the CGRect bytes — a bridged CGRect is
-            // silently ignored, and the context then falls back to its default US Letter page:
-            // every watermarked page came out 612×792, clipping content off anything larger (A4's
-            // top 50pt simply vanished) and padding anything smaller.
-            var pageBox = box
-            let pageBoxData = Data(bytes: &pageBox, count: MemoryLayout<CGRect>.size)
-            ctx.beginPDFPage([kCGPDFContextMediaBox as String: pageBoxData] as CFDictionary)
-
-            ctx.saveGState()
-            let transform = cgPage.getDrawingTransform(.cropBox, rect: box, rotate: 0, preserveAspectRatio: false)
-            ctx.concatenate(transform)
-            ctx.drawPDFPage(cgPage)
-            ctx.restoreGState()
-
-            // Outside the page transform: annotation drawing maps into displayed-page space itself
-            // (see drawAnnotations), and the context's base space here *is* display space.
-            drawAnnotations(of: page, in: ctx)
-
-            drawWatermark(in: ctx, box: box, text: trimmed, options: options)
-
-            ctx.endPDFPage()
+            let dp = try displayedPage(source.page(at: i), inputURL: inputURL)
+            emitDisplayedPage(dp, into: ctx) { ctx, dp in
+                drawWatermark(in: ctx, box: dp.box, text: trimmed, options: options)
+            }
         }
         ctx.closePDF()
 
@@ -567,49 +538,27 @@ public enum PDFToolkit {
         }
 
         for i in 0..<source.pageCount {
-            guard let page = source.page(at: i), let cgPage = page.pageRef else { continue }
-            let cropBox = page.bounds(for: .cropBox)
-            let rotation = ((page.rotation % 360) + 360) % 360
-            let displaySize = (rotation == 90 || rotation == 270)
-                ? CGSize(width: cropBox.height, height: cropBox.width)
-                : cropBox.size
-            let box = CGRect(origin: .zero, size: displaySize)
-
-            // CFData-wrapped rect, as in `watermark`: a bridged CGRect is silently ignored and the
-            // context falls back to US Letter, clipping content off larger pages.
-            var pageBox = box
-            let pageBoxData = Data(bytes: &pageBox, count: MemoryLayout<CGRect>.size)
-            ctx.beginPDFPage([kCGPDFContextMediaBox as String: pageBoxData] as CFDictionary)
-
-            let transform = cgPage.getDrawingTransform(.cropBox, rect: box, rotate: 0, preserveAspectRatio: false)
-            ctx.saveGState()
-            ctx.concatenate(transform)
-            ctx.drawPDFPage(cgPage)
-            ctx.restoreGState()
-
-            // Outside the page transform: annotation drawing maps into displayed-page space itself
-            // (see drawAnnotations).
-            drawAnnotations(of: page, in: ctx)
-
-            // Placed items draw on top of the annotations, each in the space that renders it the
-            // way the editor previewed it. Signatures are polylines: every point maps through the
-            // page transform, so rotation is handled exactly. Typed text is laid out by
-            // NSStringDrawing along the current CTM's axes — under the rotated page transform it
-            // baked sideways (and wrapped to the unswapped width) on /Rotate pages while the editor
-            // showed it upright, so text draws in display space with the display-mapped rect.
-            for item in byPage[i] ?? [] {
-                switch item.content {
-                case .text(let text):
-                    drawFillText(text, in: displayRect(item.rect, cropBox: cropBox, rotation: rotation), ctx: ctx)
-                case .signature(let signature):
-                    ctx.saveGState()
-                    ctx.concatenate(transform)
-                    drawFillSignature(signature, in: item.rect, ctx: ctx)
-                    ctx.restoreGState()
+            let dp = try displayedPage(source.page(at: i), inputURL: inputURL)
+            emitDisplayedPage(dp, into: ctx) { ctx, dp in
+                // Placed items draw on top of the annotations, each in the space that renders it
+                // the way the editor previewed it. Signatures are polylines: every point maps
+                // through the page transform, so rotation is handled exactly. Typed text is laid
+                // out by NSStringDrawing along the current CTM's axes — under the rotated page
+                // transform it baked sideways (and wrapped to the unswapped width) on /Rotate
+                // pages while the editor showed it upright, so text draws in display space with
+                // the display-mapped rect.
+                for item in byPage[i] ?? [] {
+                    switch item.content {
+                    case .text(let text):
+                        drawFillText(text, in: displayRect(item.rect, cropBox: dp.cropBox, rotation: dp.rotation), ctx: ctx)
+                    case .signature(let signature):
+                        ctx.saveGState()
+                        ctx.concatenate(dp.transform)
+                        drawFillSignature(signature, in: item.rect, ctx: ctx)
+                        ctx.restoreGState()
+                    }
                 }
             }
-
-            ctx.endPDFPage()
         }
         ctx.closePDF()
 
@@ -821,10 +770,7 @@ public enum PDFToolkit {
     ) -> PageRasterGeometry? {
         let box = page.bounds(for: .cropBox)
         guard box.width > 0, box.height > 0, page.pageRef != nil else { return nil }
-        let rotation = ((page.rotation % 360) + 360) % 360
-        let displaySize = (rotation == 90 || rotation == 270)
-            ? CGSize(width: box.height, height: box.width)
-            : box.size
+        let displaySize = displayedSize(of: box, rotation: page.rotation)
         let longest = max(displaySize.width, displaySize.height)
         let raw = maxPixelDimension / max(longest, 1)
         // Redaction supersamples past 1 PDF point per pixel (otherwise pages look ~72 dpi and text

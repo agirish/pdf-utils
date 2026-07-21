@@ -154,10 +154,7 @@ extension PDFToolkit {
     /// millimeter of trim, plenty for margins.
     static func contentInsets(of page: PDFPage, padding: CGFloat) -> CropInsets? {
         let crop = page.bounds(for: .cropBox)
-        let rotation = ((page.rotation % 360) + 360) % 360
-        let displaySize = (rotation == 90 || rotation == 270)
-            ? CGSize(width: crop.height, height: crop.width)
-            : crop.size
+        let displaySize = displayedSize(of: crop, rotation: page.rotation)
         guard displaySize.width > 0, displaySize.height > 0 else { return nil }
 
         let longest = max(displaySize.width, displaySize.height)

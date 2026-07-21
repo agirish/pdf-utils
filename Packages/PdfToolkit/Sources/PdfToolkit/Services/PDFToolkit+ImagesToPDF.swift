@@ -62,11 +62,7 @@ extension PDFToolkit {
             let imageSize = CGSize(width: image.width, height: image.height)
             let box = pageBox(for: imageSize, options: options)
 
-            // CFData-wrapped CGRect, not a bridged CGRect — same gotcha as the watermark path: a
-            // bridged rect is silently ignored and every page falls back to US Letter.
-            var pageBox = box
-            let pageBoxData = Data(bytes: &pageBox, count: MemoryLayout<CGRect>.size)
-            ctx.beginPDFPage([kCGPDFContextMediaBox as String: pageBoxData] as CFDictionary)
+            beginDisplayedPage(ctx, box: box)
             ctx.saveGState()
             if options.pageSize != .matchImage, options.fillsPage {
                 ctx.clip(to: box)

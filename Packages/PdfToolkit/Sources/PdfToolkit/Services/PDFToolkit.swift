@@ -545,10 +545,20 @@ public enum PDFToolkit {
         return attempts.min { $0.byteCount < $1.byteCount }
     }
 
-    /// JPEG factor for rebuilt compress pages — calibrated to what `PDFPage(image:)` (the previous
-    /// path) effectively encoded at, so output sizes stay on the historical curve: a photo-class
-    /// bitmap through PDFPage(image:) landed within ~8% of an explicit 0.85 encode (probed).
-    private static let compressedPageJPEGFactor = 0.85
+    /// JPEG factor for rebuilt compress pages, driven by the quality lever. The top of the range stays
+    /// at 0.85 — the value calibrated to what `PDFPage(image:)` (the previous path) effectively encoded
+    /// at, so highest-quality output holds the historical size curve (a photo-class bitmap through
+    /// PDFPage(image:) landed within ~8% of an explicit 0.85 encode, probed) — and eases down to ~0.33
+    /// at the bottom.
+    ///
+    /// Encoding quality is deliberately a *second* size lever alongside raster resolution: resolution
+    /// downsampling caps at 1 pt/px (`rasterGeometry(allowUpscale: false)`), so on a standard-size page
+    /// — whose long edge is already below every quality's `maxPixel` — resolution alone is identical at
+    /// every setting and the quality slider would do nothing. Varying the JPEG factor makes quality
+    /// (and the strength cards that front it) actually change the output size on ordinary pages too.
+    private static func compressedPageJPEGFactor(for quality: Double) -> Double {
+        min(0.85, max(0.3, 0.30 + 0.55 * quality))
+    }
 
     /// Rebuilds every page as a bitmap at the resolution implied by `quality` and returns the new PDF
     /// as in-memory `Data`. Shared by `compress` (writes it once) and `compressToTarget` (measures the
@@ -580,7 +590,7 @@ public enum PDFToolkit {
                     let geometry = rasterGeometry(for: page, maxPixelDimension: maxPixel, allowUpscale: false),
                     let bitmap = renderBitmap(page, cgPage: cgPage, geometry: geometry, redactionFills: []),
                     let jpeg = NSBitmapImageRep(cgImage: bitmap)
-                        .representation(using: .jpeg, properties: [.compressionFactor: compressedPageJPEGFactor]),
+                        .representation(using: .jpeg, properties: [.compressionFactor: compressedPageJPEGFactor(for: q)]),
                     let jpegSource = CGImageSourceCreateWithData(jpeg as CFData, nil),
                     let jpegImage = CGImageSourceCreateImageAtIndex(jpegSource, 0, nil)
                 else {

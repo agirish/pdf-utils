@@ -30,7 +30,6 @@ struct ReorderToolView: View {
     @State private var isDropTargeted = false
     @State private var isGeneratingPreviews = false
     @State private var thumbnailSize: CGFloat = 120
-    @State private var selectedItemID: Int?
     /// `<path>@<mtime>` of the loaded file, captured once per load — the prefix every row's and
     /// preview cell's cache key shares.
     @State private var fileKeyBase = ""
@@ -79,6 +78,13 @@ struct ReorderToolView: View {
                     ? "Restore a page on the left to preview it."
                     : "Drop a PDF here or choose one to arrange its pages.",
                 emptySystemImage: "arrow.up.arrow.down.square",
+                onDeletePage: { pageNumber in removePage(originalPageNumber: pageNumber) },
+                onMovePages: { source, destination in
+                    withAnimation(.easeInOut(duration: 0.18)) {
+                        items.move(fromOffsets: source, toOffset: destination)
+                    }
+                },
+                reorderHint: "Drag pages to reorder; the badge stays each page's original number.",
                 render: { spec in
                     guard let url = inputURL else { return nil }
                     // The key's `#<n>` suffix is the ORIGINAL page index (position-independent),
@@ -143,8 +149,8 @@ struct ReorderToolView: View {
                 Group {
                     if inputURL == nil {
                         emptyDropZone
-                    } else {
-                        pageListCard
+                    } else if let url = inputURL {
+                        loadedControls(url: url)
                     }
                 }
                 .onDrop(of: [.pdf, .fileURL], isTargeted: $isDropTargeted) { providers in
@@ -214,9 +220,9 @@ struct ReorderToolView: View {
 
     private var sidebarSubtitle: String {
         if inputURL == nil {
-            return "Drop a PDF or add a file. Drag rows — or use the arrows — to set a new page order, and drop any you don't need."
+            return "Drop a PDF or add a file. Drag its thumbnails on the right to set a new page order, and trash any you don't need."
         }
-        return "Drag rows to rearrange, or use ↑ / ↓. Trash a page to leave it out of the saved copy — your original file is untouched."
+        return "Drag thumbnails on the right to rearrange. Trash a page to leave it out of the saved copy — your original file is untouched."
     }
 
     private var emptyDropZone: some View {
@@ -227,7 +233,7 @@ struct ReorderToolView: View {
                 .foregroundStyle(accent.opacity(0.85))
             Text("Drop a PDF here or add a file")
                 .font(.title3.weight(.semibold))
-            Text("Its pages appear as a list you can drag into any order — remove the ones you don't need.")
+            Text("Its pages appear as thumbnails you can drag into any order — remove the ones you don't need.")
                 .font(.body)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
@@ -251,8 +257,13 @@ struct ReorderToolView: View {
         .accessibilityLabel("No file selected. Drop a PDF or choose PDF.")
     }
 
-    private var pageListCard: some View {
+    /// The controls-only body once a file is loaded — the file card, then either the reorder guidance
+    /// or (when every page is dropped) the all-removed notice, plus the "Removed" restore area. The
+    /// pages themselves live only in the right-hand grid now; this pane holds no page list.
+    private func loadedControls(url: URL) -> some View {
         VStack(alignment: .leading, spacing: 12) {
+            selectedFileCard(url: url)
+
             if isGeneratingPreviews && items.isEmpty && removedItems.isEmpty {
                 HStack(spacing: 8) {
                     ProgressView().controlSize(.small)
@@ -260,12 +271,12 @@ struct ReorderToolView: View {
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
                 }
-                .padding(.vertical, 12)
+                .padding(.vertical, 4)
             } else {
                 if allPagesRemoved {
                     allPagesRemovedNotice
                 } else {
-                    activePageList
+                    reorderGuidance
                 }
                 if !removedItems.isEmpty {
                     removedSection
@@ -274,31 +285,83 @@ struct ReorderToolView: View {
         }
     }
 
-    private var activePageList: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("\(items.count) page\(items.count == 1 ? "" : "s") — drag to reorder")
-                .font(.subheadline.weight(.medium))
-                .foregroundStyle(.secondary)
-                .padding(.horizontal, 4)
+    /// The loaded file at a glance — name and a kept/removed page count. Mirrors Delete Pages' card so
+    /// Reorder's controls-only sidebar reads the same as the other single-PDF tools.
+    private func selectedFileCard(url: URL) -> some View {
+        HStack(alignment: .center, spacing: 12) {
+            ZStack {
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .fill(accent.opacity(0.14))
+                    .frame(width: 40, height: 40)
+                Image(systemName: "doc.fill")
+                    .font(.body.weight(.medium))
+                    .foregroundStyle(accent)
+            }
+            .accessibilityHidden(true)
 
-            List(selection: $selectedItemID) {
-                ForEach(items) { item in
-                    pageRow(for: item)
-                        .listRowInsets(EdgeInsets(top: 6, leading: 12, bottom: 6, trailing: 8))
-                        .listRowBackground(rowBackground)
-                        .tag(item.id)
+            VStack(alignment: .leading, spacing: 4) {
+                Text(url.lastPathComponent)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                    .font(.callout.weight(.medium))
+                if isGeneratingPreviews && items.isEmpty && removedItems.isEmpty {
+                    Text("Loading preview…")
+                        .font(.subheadline)
+                        .foregroundStyle(.tertiary)
+                } else {
+                    Text(pageCountSummary)
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
                 }
-                .onMove(perform: moveItems)
             }
-            .listStyle(.plain)
-            .scrollContentBackground(.hidden)
-            .frame(minHeight: 220, idealHeight: 320, maxHeight: 460)
-            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-            .overlay {
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .strokeBorder(Color.primary.opacity(0.06), lineWidth: 1)
-            }
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
+        .padding(.vertical, 10)
+        .padding(.horizontal, 12)
+        .background {
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(Color.primary.opacity(0.025))
+        }
+        .overlay {
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .strokeBorder(Color.primary.opacity(0.06), lineWidth: 1)
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Selected file \(url.lastPathComponent)")
+    }
+
+    private var pageCountSummary: String {
+        let kept = items.count
+        if removedItems.isEmpty {
+            return "\(kept) page\(kept == 1 ? "" : "s")"
+        }
+        return "\(kept) kept · \(removedItems.count) removed"
+    }
+
+    /// One-line explainer that the reorder interaction now lives in the right-hand grid, since the
+    /// sidebar no longer shows the draggable page list.
+    private var reorderGuidance: some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: "hand.draw")
+                .font(.body)
+                .foregroundStyle(accent)
+            Text("Drag the thumbnails on the right to set a new order. Trash any page to leave it out of the saved copy — your original file is untouched.")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(12)
+        .background {
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(Color.primary.opacity(0.025))
+        }
+        .overlay {
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .strokeBorder(Color.primary.opacity(0.06), lineWidth: 1)
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Drag the thumbnails on the right to reorder. Trash a page to leave it out of the saved copy.")
     }
 
     /// Shown when every page has been removed: saving is blocked, so point the user at the Restore
@@ -414,77 +477,7 @@ struct ReorderToolView: View {
         .accessibilityHint("Restores this page to the list")
     }
 
-    private var rowBackground: some View {
-        RoundedRectangle(cornerRadius: 10, style: .continuous)
-            .fill(Color.primary.opacity(0.025))
-    }
-
-    private func pageRow(for item: ReorderItem) -> some View {
-        let position = items.firstIndex(of: item) ?? 0
-        return HStack(alignment: .center, spacing: 12) {
-            RowIndexBadge(number: position + 1, accent: accent)
-
-            ReorderRowThumbnail(cacheKey: "\(fileKeyBase)#\(item.originalIndex)") {
-                guard let url = inputURL else { return nil }
-                return (try? await PDFPageThumbnailLoader.loadPage(from: url, pageIndex: item.originalIndex))?.image
-            }
-            .frame(width: 34, height: 44)
-            .background(Color.white)
-            .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
-            .overlay {
-                RoundedRectangle(cornerRadius: 4, style: .continuous)
-                    .strokeBorder(Color.primary.opacity(0.12), lineWidth: 0.5)
-            }
-
-            Text("Page \(item.pageNumber)")
-                .font(.callout.weight(.medium))
-                .frame(maxWidth: .infinity, alignment: .leading)
-
-            HStack(spacing: 2) {
-                Button { move(from: position, by: -1) } label: {
-                    Image(systemName: "chevron.up").font(.body.weight(.medium))
-                }
-                .buttonStyle(.borderless)
-                .disabled(position == 0)
-                .help("Move up")
-
-                Button { move(from: position, by: 1) } label: {
-                    Image(systemName: "chevron.down").font(.body.weight(.medium))
-                }
-                .buttonStyle(.borderless)
-                .disabled(position == items.count - 1)
-                .help("Move down")
-            }
-            .padding(.horizontal, 8)
-            .padding(.vertical, 4)
-            .background {
-                Capsule().fill(Color(nsColor: .controlBackgroundColor).opacity(0.65))
-            }
-
-            Button(role: .destructive) {
-                removePage(item)
-            } label: {
-                Image(systemName: "trash").font(.body.weight(.medium))
-            }
-            .buttonStyle(.borderless)
-            .help("Remove page \(item.pageNumber) — left out of the saved copy; your file is untouched")
-        }
-        .padding(.vertical, 4)
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel("Position \(position + 1), original page \(item.pageNumber)")
-    }
-
     // MARK: - Ordering
-
-    private func moveItems(from source: IndexSet, to destination: Int) {
-        items.move(fromOffsets: source, toOffset: destination)
-    }
-
-    private func move(from index: Int, by delta: Int) {
-        let target = index + delta
-        guard items.indices.contains(target) else { return }
-        items.swapAt(index, target)
-    }
 
     private func resetOrder() {
         // Back to the untouched document: every page present, in original order.
@@ -494,6 +487,13 @@ struct ReorderToolView: View {
 
     // MARK: - Removal
 
+    /// Grid trash button / context menu → the item removal. The grid speaks in 1-based original page
+    /// numbers (the badge it shows); an item's `pageNumber` is that same number, so this maps back.
+    private func removePage(originalPageNumber: Int) {
+        guard let item = items.first(where: { $0.pageNumber == originalPageNumber }) else { return }
+        removePage(item)
+    }
+
     /// Excludes a page from the exported copy. The rendered page is kept in `removedItems` (sorted by
     /// original index) so it can be restored; nothing is written to disk.
     private func removePage(_ item: ReorderItem) {
@@ -501,7 +501,6 @@ struct ReorderToolView: View {
         let removed = items.remove(at: index)
         let insertAt = removedItems.firstIndex { $0.originalIndex > removed.originalIndex } ?? removedItems.count
         removedItems.insert(removed, at: insertAt)
-        if selectedItemID == removed.id { selectedItemID = nil }
     }
 
     /// Puts a removed page back at the end of the working order; the user can drag it wherever they

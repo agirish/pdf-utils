@@ -205,21 +205,21 @@ extension Tool {
         case .reorder:
             return ToolHelpContent(
                 overview:
-                    "Reorder Pages lists every page of a PDF so you can rearrange them—and drop the ones you don't need—then save the result as a new file. Removing a page only leaves it out of the saved copy; your original file is never changed, and any removed page can be restored. The preview on the right always reflects the pages you're keeping, labeled with each page's original number.",
+                    "Reorder Pages shows every page of a PDF as a thumbnail you can drag into a new order—and drop the ones you don't need—then save the result as a new file. Removing a page only leaves it out of the saved copy; your original file is never changed, and any removed page can be restored. Each thumbnail keeps its original page number as a badge, so you can always tell where a page came from; its place in the grid is its new position.",
                 steps: [
-                    "Choose or drop a PDF; its pages load as a draggable list.",
-                    "Drag rows into the order you want, or nudge a row with its ↑ / ↓ buttons.",
-                    "Trash any page you don't want in the copy; restore it from the Removed area if you change your mind.",
-                    "Watch the preview reflow to the pages you're keeping; use Reset to restore the original order and bring every page back.",
-                    "Click Save reordered PDF… and pick a name for the new file.",
+                    "Choose or drop a PDF; its pages appear as thumbnails on the right.",
+                    "Drag a thumbnail to a new spot—the others shuffle to make room. (Right-click a page to Move or Remove it without dragging.)",
+                    "Trash a page's thumbnail to leave it out of the copy; restore it from the Removed area on the left if you change your mind.",
+                    "Watch the grid reflow to the pages you're keeping; use Reset to restore the original order and bring every page back.",
+                    "Click Reorder & save… and pick a name for the new file.",
                 ],
                 controls: [
-                    ("Page list", "One row per kept page. The leading number is the new position; “Page N” is where it came from."),
-                    ("↑ / ↓", "Moves a row up or down by one without dragging."),
+                    ("Drag a thumbnail", "Moves that page; the grid reorders live as the drag crosses other pages. Its badge stays the original page number."),
+                    ("Right-click a page", "Move to Front / Left / Right / End, or Remove—the same moves for when dragging is awkward."),
                     ("Trash", "Leaves that page out of the saved copy. Nothing is written to disk, so it's easy to undo."),
                     ("Removed (N) · Restore", "Lists the pages you've removed; Restore adds one back, Restore all brings every page back."),
                     ("Reset", "Restores the original order and brings back every removed page. Appears once you've changed something."),
-                    ("Save reordered PDF…", "Writes a new PDF with only the kept pages, in the list order; the original file is unchanged."),
+                    ("Reorder & save…", "Writes a new PDF with the kept pages, in the grid order; the original file is unchanged."),
                 ],
                 tips: [
                     "Saving without changing anything just copies the document in its original order.",

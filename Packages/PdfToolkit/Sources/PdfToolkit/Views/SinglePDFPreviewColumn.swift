@@ -1,4 +1,5 @@
 import SwiftUI
+import UniformTypeIdentifiers
 
 /// Right-hand preview column for tools that show page thumbnails (Merge, Compress, Rotate, Extract, Delete).
 ///
@@ -30,14 +31,26 @@ struct SinglePDFPreviewColumn: View {
     var selectionPrompt: String? = nil
 
     /// Invoked with a cell's 1-based display number to *remove* that page from the preview (Merge's
-    /// inline page-drop). When non-nil, each thumbnail gains a small trash button. Independent of the
-    /// selection layer above — Merge sets this and leaves `selectedPages`/`onTogglePage` nil, so the
-    /// pages render as plain (non-toggleable) previews that can each be dropped.
+    /// inline page-drop, Reorder's per-page drop). When non-nil, each thumbnail gains a small trash
+    /// button. Independent of the selection layer above — a caller sets this and leaves
+    /// `selectedPages`/`onTogglePage` nil, so the pages render as plain previews that can each be dropped.
     var onDeletePage: ((Int) -> Void)? = nil
+
+    /// Reorders pages by dragging thumbnails: mirrors SwiftUI `.onMove(from:to:)` applied over `pages`.
+    /// When non-nil, every thumbnail becomes draggable and the grid live-reorders as a drag crosses
+    /// cells (the Reorder tool). Independent of the selection/delete layers; default nil leaves every
+    /// other caller a plain, non-draggable preview exactly as before.
+    var onMovePages: ((IndexSet, Int) -> Void)? = nil
+    /// Optional one-line hint shown under the subtitle when reordering is enabled, explaining the drag.
+    var reorderHint: String? = nil
 
     /// Produces one cell's image off the main actor (PDF pages via the loader's serial queue,
     /// image files via ImageIO). Runs when a cell appears and its key misses the shared cache.
     var render: (PreviewPageSpec) async -> NSImage?
+
+    /// The page id whose cell is being dragged (it dims until the drop completes); nil when no
+    /// reorder drag is in flight. Defaulted so it stays out of the synthesized memberwise init.
+    @State private var draggingSpecID: Int? = nil
 
     var body: some View {
         Group {
@@ -60,6 +73,14 @@ struct SinglePDFPreviewColumn: View {
 
                         if let selectionPrompt {
                             Label(selectionPrompt, systemImage: "hand.tap")
+                                .font(.subheadline.weight(.medium))
+                                .foregroundStyle(accent)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+
+                        if let reorderHint {
+                            Label(reorderHint, systemImage: "hand.draw")
                                 .font(.subheadline.weight(.medium))
                                 .foregroundStyle(accent)
                                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -109,11 +130,19 @@ struct SinglePDFPreviewColumn: View {
                             spacing: 16
                         ) {
                             ForEach(pages) { spec in
-                                pageCell(spec)
+                                reorderableCell(spec)
                             }
                         }
                         .padding(16)
                     }
+                    // Grid-level catch so a drag released outside any cell (a cancel) still un-dims the
+                    // dragged page — its `performDrop` never fires. Inter-cell moves keep the whole grid
+                    // targeted, so this only clears once the drag leaves the grid entirely. Inert (empty
+                    // type list) for callers that didn't opt into reordering.
+                    .onDrop(
+                        of: onMovePages == nil ? [] : [.text],
+                        isTargeted: Binding(get: { false }, set: { if !$0 { draggingSpecID = nil } })
+                    ) { _ in false }
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .background(ToolPreviewPaneBackground())
@@ -131,6 +160,75 @@ struct SinglePDFPreviewColumn: View {
     }
 
     // MARK: - Page cell
+
+    /// Wraps ``pageCell`` with the drag-to-reorder layer when `onMovePages` is set (Reorder). The
+    /// dragged cell dims, a live reorder fires as the drag crosses each neighbour, and a context menu
+    /// gives the same moves (plus Remove) for keyboard/non-drag use. With `onMovePages` nil — every
+    /// other caller — the cell is returned untouched, so nothing about their grids changes.
+    @ViewBuilder
+    private func reorderableCell(_ spec: PreviewPageSpec) -> some View {
+        if let onMovePages {
+            pageCell(spec)
+                .opacity(draggingSpecID == spec.id ? 0.35 : 1)
+                .onDrag {
+                    draggingSpecID = spec.id
+                    // The payload is only a fallback identifier; the live reorder is driven by
+                    // `draggingSpecID`, so the exact string never has to be read back.
+                    return NSItemProvider(object: "\(spec.id)" as NSString)
+                } preview: {
+                    dragPreview(spec)
+                }
+                .onDrop(
+                    of: [.text],
+                    delegate: GridReorderDropDelegate(
+                        targetID: spec.id,
+                        pages: pages,
+                        draggingSpecID: $draggingSpecID,
+                        onMove: onMovePages
+                    )
+                )
+                .contextMenu { reorderMenu(spec) }
+        } else {
+            pageCell(spec)
+        }
+    }
+
+    /// The floating image shown under the cursor mid-drag: the cell's cached thumbnail (it is on
+    /// screen, so it is always a cache hit) at the current grid size, or a blank sheet as a fallback.
+    private func dragPreview(_ spec: PreviewPageSpec) -> some View {
+        Group {
+            if let image = PreviewThumbnailCache.shared.image(for: spec.cacheKey) {
+                Image(nsImage: image)
+                    .resizable()
+                    .aspectRatio(contentMode: .fit)
+            } else {
+                Color.white.aspectRatio(8.5 / 11, contentMode: .fit)
+            }
+        }
+        .frame(width: thumbnailSize)
+        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+    }
+
+    /// Keyboard/non-drag fallback for reordering (drag is mouse-only). Offsets follow
+    /// `Array.move(fromOffsets:toOffset:)`: to land after the right-hand neighbour the destination is
+    /// `index + 2`. Also surfaces Remove when the caller opted into `onDeletePage`.
+    @ViewBuilder
+    private func reorderMenu(_ spec: PreviewPageSpec) -> some View {
+        if let onMovePages, let index = pages.firstIndex(where: { $0.id == spec.id }) {
+            Button("Move to Front") { onMovePages(IndexSet(integer: index), 0) }
+                .disabled(index == 0)
+            Button("Move Left") { onMovePages(IndexSet(integer: index), index - 1) }
+                .disabled(index == 0)
+            Button("Move Right") { onMovePages(IndexSet(integer: index), index + 2) }
+                .disabled(index == pages.count - 1)
+            Button("Move to End") { onMovePages(IndexSet(integer: index), pages.count) }
+                .disabled(index == pages.count - 1)
+        }
+        if let onDeletePage {
+            Divider()
+            Button("Remove Page", role: .destructive) { onDeletePage(spec.id) }
+        }
+    }
 
     /// One thumbnail. When selection is opted into, it becomes a click-to-toggle button carrying a
     /// selection check and accent ring; otherwise it renders exactly as the plain preview always has.
@@ -272,5 +370,38 @@ private struct PreviewCellImage: View {
             attempted = true
             tick += 1
         }
+    }
+}
+
+/// Drives the live thumbnail reorder. As the drag crosses a cell, this moves the dragged page next to
+/// that cell right away, so the grid shuffles under the cursor instead of only settling on release.
+///
+/// Both indices are re-derived from the LATEST `pages` on every event (the delegate is rebuilt each
+/// render), so the incremental moves compose correctly. The dragged page is tracked in
+/// `draggingSpecID` rather than read from the drop payload, so no async item loading is needed.
+private struct GridReorderDropDelegate: DropDelegate {
+    let targetID: Int
+    let pages: [PreviewPageSpec]
+    @Binding var draggingSpecID: Int?
+    let onMove: (IndexSet, Int) -> Void
+
+    func dropEntered(info: DropInfo) {
+        guard let draggingSpecID, draggingSpecID != targetID,
+              let from = pages.firstIndex(where: { $0.id == draggingSpecID }),
+              let to = pages.firstIndex(where: { $0.id == targetID }) else { return }
+        // `Array.move`'s destination is an original-coordinate insertion point: landing after a
+        // lower cell needs `to + 1`; landing before a higher cell is just `to`.
+        withAnimation(.easeInOut(duration: 0.18)) {
+            onMove(IndexSet(integer: from), to > from ? to + 1 : to)
+        }
+    }
+
+    func dropUpdated(info: DropInfo) -> DropProposal? {
+        DropProposal(operation: .move)
+    }
+
+    func performDrop(info: DropInfo) -> Bool {
+        draggingSpecID = nil
+        return true
     }
 }

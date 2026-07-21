@@ -48,9 +48,13 @@ struct SinglePDFPreviewColumn: View {
     /// image files via ImageIO). Runs when a cell appears and its key misses the shared cache.
     var render: (PreviewPageSpec) async -> NSImage?
 
-    /// The page id whose cell is being dragged (it dims until the drop completes); nil when no
-    /// reorder drag is in flight. Defaulted so it stays out of the synthesized memberwise init.
+    /// The page id being dragged, captured when the drag starts and read on drop to know the source.
+    /// Not tied to any lingering visual, so a cancelled drag leaves nothing stuck. Defaulted so it
+    /// stays out of the synthesized memberwise init.
     @State private var draggingSpecID: Int? = nil
+    /// The page id of the cell the drag is currently hovering — highlighted as the drop target, and
+    /// cleared on exit or drop so it never persists.
+    @State private var dropTargetID: Int? = nil
 
     var body: some View {
         Group {
@@ -135,14 +139,6 @@ struct SinglePDFPreviewColumn: View {
                         }
                         .padding(16)
                     }
-                    // Grid-level catch so a drag released outside any cell (a cancel) still un-dims the
-                    // dragged page — its `performDrop` never fires. Inter-cell moves keep the whole grid
-                    // targeted, so this only clears once the drag leaves the grid entirely. Inert (empty
-                    // type list) for callers that didn't opt into reordering.
-                    .onDrop(
-                        of: onMovePages == nil ? [] : [.text],
-                        isTargeted: Binding(get: { false }, set: { if !$0 { draggingSpecID = nil } })
-                    ) { _ in false }
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .background(ToolPreviewPaneBackground())
@@ -162,18 +158,21 @@ struct SinglePDFPreviewColumn: View {
     // MARK: - Page cell
 
     /// Wraps ``pageCell`` with the drag-to-reorder layer when `onMovePages` is set (Reorder). The
-    /// dragged cell dims, a live reorder fires as the drag crosses each neighbour, and a context menu
-    /// gives the same moves (plus Remove) for keyboard/non-drag use. With `onMovePages` nil — every
-    /// other caller — the cell is returned untouched, so nothing about their grids changes.
+    /// cell you drag over lifts as the drop target; the move is applied once, on drop — never during
+    /// the drag, which is what keeps it reliable (mutating the grid mid-drag tears down the drop
+    /// targets and the drop snaps back). A context menu gives the same moves (plus Remove) for
+    /// keyboard/non-drag use. With `onMovePages` nil — every other caller — the cell is returned
+    /// untouched, so nothing about their grids changes.
     @ViewBuilder
     private func reorderableCell(_ spec: PreviewPageSpec) -> some View {
         if let onMovePages {
             pageCell(spec)
-                .opacity(draggingSpecID == spec.id ? 0.35 : 1)
+                .scaleEffect(dropTargetID == spec.id && draggingSpecID != spec.id ? 1.06 : 1)
+                .animation(.easeInOut(duration: 0.12), value: dropTargetID)
                 .onDrag {
                     draggingSpecID = spec.id
-                    // The payload is only a fallback identifier; the live reorder is driven by
-                    // `draggingSpecID`, so the exact string never has to be read back.
+                    // The payload identifies the dragged page; the drop reads `draggingSpecID`, so the
+                    // string itself never has to be parsed back.
                     return NSItemProvider(object: "\(spec.id)" as NSString)
                 } preview: {
                     dragPreview(spec)
@@ -184,6 +183,7 @@ struct SinglePDFPreviewColumn: View {
                         targetID: spec.id,
                         pages: pages,
                         draggingSpecID: $draggingSpecID,
+                        dropTargetID: $dropTargetID,
                         onMove: onMovePages
                     )
                 )
@@ -373,27 +373,27 @@ private struct PreviewCellImage: View {
     }
 }
 
-/// Drives the live thumbnail reorder. As the drag crosses a cell, this moves the dragged page next to
-/// that cell right away, so the grid shuffles under the cursor instead of only settling on release.
-///
-/// Both indices are re-derived from the LATEST `pages` on every event (the delegate is rebuilt each
-/// render), so the incremental moves compose correctly. The dragged page is tracked in
-/// `draggingSpecID` rather than read from the drop payload, so no async item loading is needed.
+/// Reorders one page per drop. Crucially it does NOT mutate during the drag — hovering a cell only
+/// lifts it as the drop target; the single `onMove` runs in `performDrop`. Reordering mid-drag would
+/// rebuild the `LazyVGrid` and invalidate the drop targets, which is what made an earlier live-shuffle
+/// version snap most drops back. The dragged page is tracked in `draggingSpecID` (set at drag start),
+/// so the drop needs no async reading of the item payload.
 private struct GridReorderDropDelegate: DropDelegate {
     let targetID: Int
     let pages: [PreviewPageSpec]
     @Binding var draggingSpecID: Int?
+    @Binding var dropTargetID: Int?
     let onMove: (IndexSet, Int) -> Void
 
+    /// Only accept our own reorder drags, never stray text dropped from elsewhere.
+    func validateDrop(info: DropInfo) -> Bool { draggingSpecID != nil }
+
     func dropEntered(info: DropInfo) {
-        guard let draggingSpecID, draggingSpecID != targetID,
-              let from = pages.firstIndex(where: { $0.id == draggingSpecID }),
-              let to = pages.firstIndex(where: { $0.id == targetID }) else { return }
-        // `Array.move`'s destination is an original-coordinate insertion point: landing after a
-        // lower cell needs `to + 1`; landing before a higher cell is just `to`.
-        withAnimation(.easeInOut(duration: 0.18)) {
-            onMove(IndexSet(integer: from), to > from ? to + 1 : to)
-        }
+        if draggingSpecID != targetID { dropTargetID = targetID }
+    }
+
+    func dropExited(info: DropInfo) {
+        if dropTargetID == targetID { dropTargetID = nil }
     }
 
     func dropUpdated(info: DropInfo) -> DropProposal? {
@@ -401,7 +401,21 @@ private struct GridReorderDropDelegate: DropDelegate {
     }
 
     func performDrop(info: DropInfo) -> Bool {
-        draggingSpecID = nil
+        defer {
+            draggingSpecID = nil
+            dropTargetID = nil
+        }
+        guard let dragging = draggingSpecID,
+              let from = pages.firstIndex(where: { $0.id == dragging }),
+              let to = pages.firstIndex(where: { $0.id == targetID }) else { return false }
+        // No-op drop onto itself still counts as handled, so the drag settles instead of snapping back.
+        if from != to {
+            // `Array.move`'s destination is an original-coordinate insertion point: landing after a
+            // lower cell needs `to + 1`; landing before a higher cell is just `to`.
+            withAnimation(.easeInOut(duration: 0.2)) {
+                onMove(IndexSet(integer: from), to > from ? to + 1 : to)
+            }
+        }
         return true
     }
 }

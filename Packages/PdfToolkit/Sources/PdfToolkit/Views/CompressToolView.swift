@@ -21,6 +21,9 @@ struct CompressToolView: View {
     @State private var showExporter = false
     @State private var exportDoc: PDFFileDocument?
     @State private var suggestedName = "compressed.pdf"
+    /// The single queued file's size, resolved once per file change — a computed property here used
+    /// to stat the disk on every keystroke of the target-size field.
+    @State private var sourceSizeText: String?
 
     @StateObject private var runner = BatchRunner()
 
@@ -68,6 +71,24 @@ struct CompressToolView: View {
         } message: {
             Text(alertMessage ?? "")
         }
+        .task(id: singleSourcePath) {
+            guard runner.items.count == 1, let url = runner.items.first?.url else {
+                sourceSizeText = nil
+                return
+            }
+            let size = await Task.detached(priority: .utility) {
+                try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize
+            }.value
+            guard !Task.isCancelled else { return }
+            sourceSizeText = size.map {
+                "Now \(ByteCountFormatter.string(fromByteCount: Int64($0), countStyle: .file))"
+            }
+        }
+    }
+
+    /// Task key for the size lookup: the lone queued file's path, or empty when 0 or many files.
+    private var singleSourcePath: String {
+        runner.items.count == 1 ? (runner.items.first?.url.path ?? "") : ""
     }
 
     // MARK: - Controls
@@ -112,7 +133,7 @@ struct CompressToolView: View {
                 Text("Target size")
                     .font(.subheadline.weight(.semibold))
                 Spacer()
-                if let label = sourceSizeLabel {
+                if let label = sourceSizeText {
                     Text(label)
                         .font(.caption)
                         .foregroundStyle(.secondary)
@@ -141,15 +162,6 @@ struct CompressToolView: View {
         case ..<0.75: return "Balanced"
         default: return "Higher quality"
         }
-    }
-
-    /// The original file's size, shown next to the target field as context. Best-effort — a nil here
-    /// (e.g. the URL isn't currently readable, or several files are queued) just hides the hint.
-    private var sourceSizeLabel: String? {
-        guard runner.items.count == 1, let url = runner.items.first?.url,
-              let size = try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize
-        else { return nil }
-        return "Now \(ByteCountFormatter.string(fromByteCount: Int64(size), countStyle: .file))"
     }
 
     // MARK: - Single-file run

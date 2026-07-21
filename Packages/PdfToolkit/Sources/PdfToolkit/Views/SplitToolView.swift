@@ -4,15 +4,19 @@ import SwiftUI
 import UniformTypeIdentifiers
 
 private enum SplitMode: String, CaseIterable, Identifiable {
+    case visual
     case everyN
     case customRanges
 
     var id: String { rawValue }
 
+    /// Compact labels so all three fit the segmented control; the full wording lives in the helper
+    /// text below each mode.
     var title: String {
         switch self {
-        case .everyN: return "Every N pages"
-        case .customRanges: return "Custom ranges"
+        case .visual: return "Visual"
+        case .everyN: return "Every N"
+        case .customRanges: return "Custom"
         }
     }
 }
@@ -25,9 +29,12 @@ private struct SplitResult {
 struct SplitToolView: View {
     @Environment(\.toolAccent) private var accent
     @State private var inputURL: URL?
-    @State private var mode: SplitMode = .everyN
+    @State private var mode: SplitMode = .visual
     @State private var chunkSize = 1
     @State private var rangeText = ""
+    /// Visual mode's source of truth: 1-based cut points ("cut after page k"). The colored page groups,
+    /// the live count, and the export all derive from this (see ``SplitCuts``). Empty = one file.
+    @State private var cuts: Set<Int> = []
     @State private var busy = false
     @State private var alertMessage: String?
     @State private var showImporter = false
@@ -43,17 +50,57 @@ struct SplitToolView: View {
 
     private var pageCount: Int { pageSpecs.count }
 
-    /// Number of output files the current settings would produce (for the live hint).
-    private var estimatedParts: Int? {
+    /// The exact output segments the current mode would write, when they are fully known — Visual and
+    /// every-N always resolve; Custom resolves only once its text parses. `nil` means "not resolvable
+    /// yet" (e.g. a half-typed custom range), which the count falls back to estimating.
+    private var liveSegments: [[Int]]? {
         guard pageCount > 0 else { return nil }
         switch mode {
+        case .visual:
+            return SplitCuts.segments(pageCount: pageCount, cuts: cuts)
         case .everyN:
-            return PageRangeParser.everyNPagesSegments(pageCount: pageCount, chunkSize: chunkSize).count
+            return PageRangeParser.everyNPagesSegments(pageCount: pageCount, chunkSize: chunkSize)
         case .customRanges:
-            let groups = rangeText.split(separator: ",").filter {
-                !$0.trimmingCharacters(in: .whitespaces).isEmpty
-            }
-            return groups.isEmpty ? nil : groups.count
+            return try? PageRangeParser.parseSegments(rangeText, pageCount: pageCount)
+        }
+    }
+
+    /// Number of output files the current settings would produce (for the live "Creates N files" hint).
+    private var estimatedParts: Int? {
+        guard pageCount > 0 else { return nil }
+        if let segments = liveSegments { return segments.count }
+        // Custom mode mid-type: the ranges don't parse yet, so estimate from comma groups so the hint
+        // still tracks what the user is typing.
+        let groups = rangeText.split(separator: ",").filter {
+            !$0.trimmingCharacters(in: .whitespaces).isEmpty
+        }
+        return groups.isEmpty ? nil : groups.count
+    }
+
+    /// Per-file page counts for the summary, e.g. "3 + 3 + 2 pages". Shown only when the segments are
+    /// fully resolved and few enough to stay readable; a fine-grained split (many one-page files) drops
+    /// to just the file count above.
+    private var pageBreakdown: String? {
+        guard let segments = liveSegments, !segments.isEmpty, segments.count <= 12 else { return nil }
+        let total = segments.reduce(0) { $0 + $1.count }
+        let counts = segments.map { String($0.count) }.joined(separator: " + ")
+        return "\(counts) page\(total == 1 ? "" : "s")"
+    }
+
+    /// The cut set the every-N stepper implies, so its reflection grid draws the same colored groups the
+    /// setting will export.
+    private var everyNPreviewCuts: Set<Int> {
+        SplitCuts.everyNCuts(pageCount: pageCount, chunkSize: chunkSize)
+    }
+
+    /// Toggles the cut after a 1-based page — a gap click in the visual grid. Out-of-range guards keep a
+    /// stray cut from ever pointing past the document.
+    private func toggleCut(_ page: Int) {
+        guard page >= 1, page < pageCount else { return }
+        if cuts.contains(page) {
+            cuts.remove(page)
+        } else {
+            cuts.insert(page)
         }
     }
 
@@ -65,24 +112,8 @@ struct SplitToolView: View {
                 HSplitView {
                     sidebarColumn
                         .toolSidebarWidth()
-                    SinglePDFPreviewColumn(
-                        pages: pageSpecs,
-                        isGenerating: isGeneratingPreviews,
-                        thumbnailSize: $thumbnailSize,
-                        accent: accent,
-                        previewSubtitle: "Every page in the file; the settings on the left decide where the cuts fall.",
-                        emptyTitle: "No PDF selected",
-                        emptySubtitle: "Drop a PDF here or choose one to see its pages.",
-                        emptySystemImage: "scissors",
-                        selectedPages: visualSelection,
-                        onTogglePage: visualTogglePage,
-                        selectionPrompt: visualSelectionPrompt,
-                        render: { spec in
-                            guard let url = inputURL else { return nil }
-                            return (try? await PDFPageThumbnailLoader.loadPage(from: url, pageIndex: spec.id - 1))?.image
-                        }
-                    )
-                    .frame(minWidth: 360)
+                    previewColumn
+                        .frame(minWidth: 360)
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
@@ -108,6 +139,63 @@ struct SplitToolView: View {
         }
         .task(id: selectionPathKey) {
             await loadThumbnails()
+        }
+    }
+
+    // MARK: - Preview column
+
+    /// The right-hand pane, chosen per mode. Visual and every-N share the colored-group grid — Visual
+    /// with live scissor cut-markers, every-N reflecting the setting read-only. Custom keeps its
+    /// click-to-select thumbnails, the power-user surface that can express reorders and overlaps a
+    /// gap-based grid can't.
+    @ViewBuilder
+    private var previewColumn: some View {
+        let renderPage: (PreviewPageSpec) async -> NSImage? = { spec in
+            guard let url = inputURL else { return nil }
+            return (try? await PDFPageThumbnailLoader.loadPage(from: url, pageIndex: spec.id - 1))?.image
+        }
+        switch mode {
+        case .visual:
+            SplitGroupedPreviewColumn(
+                pages: pageSpecs,
+                isGenerating: isGeneratingPreviews,
+                thumbnailSize: $thumbnailSize,
+                accent: accent,
+                cuts: cuts,
+                onToggleCut: { toggleCut($0) },
+                previewSubtitle: "Each colored group becomes its own PDF. Click a scissors between pages to cut.",
+                emptyTitle: "No PDF selected",
+                emptySubtitle: "Drop a PDF here or choose one to see its pages.",
+                render: renderPage
+            )
+        case .everyN:
+            SplitGroupedPreviewColumn(
+                pages: pageSpecs,
+                isGenerating: isGeneratingPreviews,
+                thumbnailSize: $thumbnailSize,
+                accent: accent,
+                cuts: everyNPreviewCuts,
+                onToggleCut: nil,
+                previewSubtitle: "Each colored group becomes its own PDF — the stepper on the left sets where the cuts fall.",
+                emptyTitle: "No PDF selected",
+                emptySubtitle: "Drop a PDF here or choose one to see its pages.",
+                render: renderPage
+            )
+        case .customRanges:
+            SinglePDFPreviewColumn(
+                pages: pageSpecs,
+                isGenerating: isGeneratingPreviews,
+                thumbnailSize: $thumbnailSize,
+                accent: accent,
+                previewSubtitle: "Every page in the file; the settings on the left decide where the cuts fall.",
+                emptyTitle: "No PDF selected",
+                emptySubtitle: "Drop a PDF here or choose one to see its pages.",
+                emptySystemImage: "scissors",
+                selectedPages: visualSelection,
+                onTogglePage: visualTogglePage,
+                selectionPrompt: visualSelectionPrompt,
+                render: renderPage
+            )
         }
     }
 
@@ -281,6 +369,18 @@ struct SplitToolView: View {
             .labelsHidden()
 
             switch mode {
+            case .visual:
+                Text("Click a scissors between pages on the right to start a new file there; click a cut to merge two files back together. Each colored group is one PDF.")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                if !cuts.isEmpty {
+                    Button("Clear cuts") { cuts = [] }
+                        .buttonStyle(.borderless)
+                        .font(.subheadline.weight(.medium))
+                        .foregroundStyle(.secondary)
+                        .help("Merge everything back into one file")
+                }
             case .everyN:
                 HStack(spacing: 12) {
                     Stepper(value: $chunkSize, in: 1...max(1, pageCount)) {
@@ -302,9 +402,17 @@ struct SplitToolView: View {
             }
 
             if let parts = estimatedParts {
-                Label("Produces \(parts) file\(parts == 1 ? "" : "s")", systemImage: "doc.on.doc")
-                    .font(.caption.weight(.medium))
-                    .foregroundStyle(accent)
+                VStack(alignment: .leading, spacing: 4) {
+                    Label("Creates \(parts) file\(parts == 1 ? "" : "s")", systemImage: "doc.on.doc")
+                        .font(.caption.weight(.medium))
+                        .foregroundStyle(accent)
+                    if let pageBreakdown {
+                        Text(pageBreakdown)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
             }
         }
         .padding(16)
@@ -341,6 +449,7 @@ struct SplitToolView: View {
         // replace the whole field with just the clicked page.
         pageSpecs = []
         rangeText = ""
+        cuts = []
         isGeneratingPreviews = true
         do {
             // Only the page count loads up front; cells render on demand as they appear.
@@ -451,6 +560,7 @@ struct SplitToolView: View {
         let modeSnapshot = mode
         let chunkSnapshot = max(1, chunkSize)
         let rangeSnapshot = rangeText
+        let cutsSnapshot = cuts
         let stripMetadata = UserDefaults.standard.bool(forKey: SettingsKeys.stripMetadataOnExport)
 
         do {
@@ -464,6 +574,8 @@ struct SplitToolView: View {
 
                     let segments: [[Int]]
                     switch modeSnapshot {
+                    case .visual:
+                        segments = SplitCuts.segments(pageCount: count, cuts: cutsSnapshot)
                     case .everyN:
                         segments = PageRangeParser.everyNPagesSegments(pageCount: count, chunkSize: chunkSnapshot)
                     case .customRanges:

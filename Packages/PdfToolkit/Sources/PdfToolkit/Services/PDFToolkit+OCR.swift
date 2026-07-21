@@ -60,31 +60,35 @@ extension PDFToolkit {
         for i in 0..<source.pageCount {
             progress?(i + 1, source.pageCount)
             if isCancelled?() == true { throw CancellationError() }
-            let dp = try displayedPage(source.page(at: i), inputURL: inputURL)
+            // Per-page pool: the recognition bitmap (up to 3300 px on the long edge, tens of MB)
+            // and Vision's scratch must drain per page, not pile up for the whole document.
+            try autoreleasepool {
+                let dp = try displayedPage(source.page(at: i), inputURL: inputURL)
 
-            let needsRecognition: Bool
-            if options.skipPagesWithText {
-                let existing = (dp.page.string ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-                needsRecognition = existing.isEmpty
-            } else {
-                needsRecognition = true
-            }
-
-            var lines: [RecognizedLine] = []
-            if needsRecognition {
-                let renderSize = options.accurate ? accurateOCRPixelDimension : fastOCRPixelDimension
-                guard let bitmap = renderPageBitmap(dp.page, maxPixelDimension: renderSize) else {
-                    throw PDFOperationError.ocrFailed
+                let needsRecognition: Bool
+                if options.skipPagesWithText {
+                    let existing = (dp.page.string ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+                    needsRecognition = existing.isEmpty
+                } else {
+                    needsRecognition = true
                 }
-                lines = try recognizeText(in: bitmap, accurate: options.accurate)
-                summary.recognizedPages += 1
-            } else {
-                summary.skippedPages += 1
-            }
 
-            emitDisplayedPage(dp, into: ctx) { ctx, dp in
-                for line in lines {
-                    drawInvisibleLine(line.string, at: pageRect(for: line.normalizedRect, in: dp.box), in: ctx)
+                var lines: [RecognizedLine] = []
+                if needsRecognition {
+                    let renderSize = options.accurate ? accurateOCRPixelDimension : fastOCRPixelDimension
+                    guard let bitmap = renderPageBitmap(dp.page, maxPixelDimension: renderSize) else {
+                        throw PDFOperationError.ocrFailed
+                    }
+                    lines = try recognizeText(in: bitmap, accurate: options.accurate)
+                    summary.recognizedPages += 1
+                } else {
+                    summary.skippedPages += 1
+                }
+
+                emitDisplayedPage(dp, into: ctx) { ctx, dp in
+                    for line in lines {
+                        drawInvisibleLine(line.string, at: pageRect(for: line.normalizedRect, in: dp.box), in: ctx)
+                    }
                 }
             }
         }

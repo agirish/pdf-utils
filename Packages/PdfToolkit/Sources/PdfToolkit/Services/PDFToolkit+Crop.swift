@@ -153,6 +153,12 @@ extension PDFToolkit {
     /// ``insetRect(_:rotation:by:)``. ~600 px on the long edge resolves a point to well under a
     /// millimeter of trim, plenty for margins.
     static func contentInsets(of page: PDFPage, padding: CGFloat) -> CropInsets? {
+        // Pool per call (= per page in autoCrop's loop): the thumbnail, its TIFF, and the bitmap
+        // rep are all page-sized transients; only the tiny CropInsets value leaves.
+        autoreleasepool { contentInsetsBody(of: page, padding: padding) }
+    }
+
+    private static func contentInsetsBody(of page: PDFPage, padding: CGFloat) -> CropInsets? {
         let crop = page.bounds(for: .cropBox)
         let displaySize = displayedSize(of: crop, rotation: page.rotation)
         guard displaySize.width > 0, displaySize.height > 0 else { return nil }

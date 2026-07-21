@@ -52,9 +52,14 @@ enum PDFPageThumbnailLoader {
                     // Task.checkCancellation() is inert on the GCD queue; only this probe can see
                     // the caller's cancellation and stop a superseded sweep early.
                     if isCancelled() { throw CancellationError() }
-                    guard let page = doc.page(at: i) else { continue }
-                    let image = page.thumbnail(of: thumbnailBox(for: page), for: .mediaBox)
-                    items.append(PDFPageThumbnail(pageNumber: i + 1, image: image))
+                    // Per-page pool: thumbnail rendering leaves page-sized autoreleased scratch
+                    // that otherwise accumulates for the whole sweep on long documents. The kept
+                    // NSImage survives the drain — the items array owns it.
+                    autoreleasepool {
+                        guard let page = doc.page(at: i) else { return }
+                        let image = page.thumbnail(of: thumbnailBox(for: page), for: .mediaBox)
+                        items.append(PDFPageThumbnail(pageNumber: i + 1, image: image))
+                    }
                 }
                 return items
             }

@@ -360,7 +360,9 @@ public enum PDFToolkit {
         var attempts: [CompressionAttempt] = []
         var best: Data?
         for q in ladder {
-            let data = try compressedData(from: source, quality: q)
+            // Per-attempt pool: each rung rebuilds the whole document; its scratch must not stack
+            // across rungs. The returned Data survives the drain — it's retained, not autoreleased.
+            let data = try autoreleasepool { try compressedData(from: source, quality: q) }
             attempts.append(CompressionAttempt(quality: q, byteCount: data.count))
             if data.count < (best?.count ?? .max) {
                 best = data
@@ -405,22 +407,27 @@ public enum PDFToolkit {
 
         let output = PDFDocument()
         for i in 0..<source.pageCount {
-            guard let page = source.page(at: i) else { continue }
-            guard let image = renderPage(page, maxPixelDimension: maxPixel) else {
-                throw PDFOperationError.compressionFailed
+            // Per-page pool: rendering leaves autoreleased scratch (contexts, reps) the size of the
+            // page bitmap — without draining per page, a long scan accumulates all of it until the
+            // whole document finishes. The NSImage that matters survives: the inserted page owns it.
+            try autoreleasepool {
+                guard let page = source.page(at: i) else { return }
+                guard let image = renderPage(page, maxPixelDimension: maxPixel) else {
+                    throw PDFOperationError.compressionFailed
+                }
+                // The bitmap is the page as *displayed* (rotation applied, crop box), so the emitted
+                // page must use that size — the raw media box would letterbox rotated pages.
+                let pageRect = CGRect(origin: .zero, size: image.size)
+                let imageOpts: [PDFPage.ImageInitializationOption: Any] = [
+                    .mediaBox: NSValue(rect: pageRect),
+                ]
+                guard let newPage = PDFPage(image: image, options: imageOpts) else {
+                    throw PDFOperationError.compressionFailed
+                }
+                // Bitmap already includes PDF rotation via CGPDFPage drawing transform; do not re-apply PDFPage.rotation.
+                newPage.rotation = 0
+                output.insert(newPage, at: output.pageCount)
             }
-            // The bitmap is the page as *displayed* (rotation applied, crop box), so the emitted
-            // page must use that size — the raw media box would letterbox rotated pages.
-            let pageRect = CGRect(origin: .zero, size: image.size)
-            let imageOpts: [PDFPage.ImageInitializationOption: Any] = [
-                .mediaBox: NSValue(rect: pageRect),
-            ]
-            guard let newPage = PDFPage(image: image, options: imageOpts) else {
-                throw PDFOperationError.compressionFailed
-            }
-            // Bitmap already includes PDF rotation via CGPDFPage drawing transform; do not re-apply PDFPage.rotation.
-            newPage.rotation = 0
-            output.insert(newPage, at: output.pageCount)
         }
 
         guard output.pageCount > 0, let data = output.dataRepresentation() else {
@@ -683,44 +690,49 @@ public enum PDFToolkit {
 
         let output = PDFDocument()
         for pageIndex in 0..<source.pageCount {
-            guard let page = source.page(at: pageIndex) else { continue }
-            let rectsForPage = (grouped[pageIndex] ?? []).map(\.rect)
+            // Per-page pool: redaction renders at up to `maxPixelDimension` (4000 px default,
+            // ~150 MB of transient bitmap per US Letter page) — that scratch must drain per page,
+            // not accumulate for the whole document. The inserted page survives; output owns it.
+            try autoreleasepool {
+                guard let page = source.page(at: pageIndex) else { return }
+                let rectsForPage = (grouped[pageIndex] ?? []).map(\.rect)
 
-            if rectsForPage.isEmpty {
-                try Self.insertUnredactedPage(
-                    into: output,
-                    from: page,
-                    stripAnnotations: options.stripAnnotationsFromUnredactedPages
-                )
-            } else {
-                guard
-                    let cgPage = page.pageRef,
-                    let geometry = rasterGeometry(
-                        for: page,
-                        maxPixelDimension: options.maxPixelDimension,
-                        allowUpscale: true
+                if rectsForPage.isEmpty {
+                    try Self.insertUnredactedPage(
+                        into: output,
+                        from: page,
+                        stripAnnotations: options.stripAnnotationsFromUnredactedPages
                     )
-                else {
-                    throw PDFOperationError.redactionFailed
+                } else {
+                    guard
+                        let cgPage = page.pageRef,
+                        let geometry = rasterGeometry(
+                            for: page,
+                            maxPixelDimension: options.maxPixelDimension,
+                            allowUpscale: true
+                        )
+                    else {
+                        throw PDFOperationError.redactionFailed
+                    }
+                    // A marked page is rasterized even when every fill clips away against the crop box
+                    // (a mark dragged wholly into a cropped-out margin): rasterization destroys the
+                    // out-of-crop content the mark covered, which is the safe direction — the old
+                    // "empty fills → fail the whole export" behavior aborted with no hint which mark
+                    // was the problem, and copying the page as vector would keep recoverable content.
+                    let fills = mergeOverlappingRedactions(rectsForPage, pageBox: geometry.pageBox)
+                    guard
+                        let cgImage = renderBitmap(page, cgPage: cgPage, geometry: geometry, redactionFills: fills),
+                        let pdfData = Self.singlePagePDFData(cgImage: cgImage, pageSize: geometry.displaySize),
+                        let tempDoc = PDFDocument(data: pdfData),
+                        let newPage = tempDoc.page(at: 0)
+                    else {
+                        throw PDFOperationError.redactionFailed
+                    }
+                    // Move the page into `output` so we never rely on `PDFPage.copy()` for image-heavy pages
+                    // (copy has dropped resolution / MediaBox issues). `insert` removes the page from `tempDoc`.
+                    newPage.rotation = 0
+                    output.insert(newPage, at: output.pageCount)
                 }
-                // A marked page is rasterized even when every fill clips away against the crop box
-                // (a mark dragged wholly into a cropped-out margin): rasterization destroys the
-                // out-of-crop content the mark covered, which is the safe direction — the old
-                // "empty fills → fail the whole export" behavior aborted with no hint which mark
-                // was the problem, and copying the page as vector would keep recoverable content.
-                let fills = mergeOverlappingRedactions(rectsForPage, pageBox: geometry.pageBox)
-                guard
-                    let cgImage = renderBitmap(page, cgPage: cgPage, geometry: geometry, redactionFills: fills),
-                    let pdfData = Self.singlePagePDFData(cgImage: cgImage, pageSize: geometry.displaySize),
-                    let tempDoc = PDFDocument(data: pdfData),
-                    let newPage = tempDoc.page(at: 0)
-                else {
-                    throw PDFOperationError.redactionFailed
-                }
-                // Move the page into `output` so we never rely on `PDFPage.copy()` for image-heavy pages
-                // (copy has dropped resolution / MediaBox issues). `insert` removes the page from `tempDoc`.
-                newPage.rotation = 0
-                output.insert(newPage, at: output.pageCount)
             }
         }
 

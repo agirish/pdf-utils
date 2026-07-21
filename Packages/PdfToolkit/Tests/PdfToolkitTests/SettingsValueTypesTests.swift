@@ -178,6 +178,24 @@ import Foundation
         #expect(SettingsKeys.lastToolUsed == "pdfutils.settings.lastToolUsed")
         #expect(SettingsKeys.stripMetadataOnExport == "pdfutils.settings.stripMetadataOnExport")
         #expect(SettingsKeys.defaultCompressionQuality == "pdfutils.settings.defaultCompressionQuality")
+        #expect(SettingsKeys.dashboardLayout == "pdfutils.settings.dashboardLayout")
+    }
+
+    // MARK: DashboardLayout
+
+    @Test func dashboardLayoutHasStableRawValuesAndCopy() {
+        #expect(DashboardLayout.allCases == [.categories, .grid, .list])
+        // Raw values are persisted via `SettingsKeys.dashboardLayout`; renaming one resets the setting.
+        #expect(DashboardLayout.categories.rawValue == "categories")
+        #expect(DashboardLayout.grid.rawValue == "grid")
+        #expect(DashboardLayout.list.rawValue == "list")
+        for layout in DashboardLayout.allCases {
+            #expect(layout.id == layout.rawValue)
+            #expect(!layout.displayName.isEmpty)
+            #expect(!layout.detail.isEmpty)
+        }
+        // An unknown stored value falls back to the default (Categories) at every read site.
+        #expect(DashboardLayout(rawValue: "nonsense") == nil)
     }
 
     @Test func liquidGlassKeyStringsAreStable() {

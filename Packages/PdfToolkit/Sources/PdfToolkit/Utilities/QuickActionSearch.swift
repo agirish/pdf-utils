@@ -53,6 +53,7 @@ public extension QuickAction {
                 subtitle: "Preferences for files, appearance, and more",
                 kind: .settings(nil)
             ),
+            // NB: the tool entries above are what `toolCatalog` (and so the dashboard search) ranks over.
             QuickAction(
                 id: "settings.files",
                 title: "Files Settings",
@@ -79,6 +80,27 @@ public extension QuickAction {
             ),
         ])
         return actions
+    }
+
+    /// The catalog narrowed to tool destinations — the corpus the dashboard search ranks over. Sharing
+    /// the catalog's tool entries (same titles/subtitles) is what keeps dashboard search and the ⌘K
+    /// palette consistent. Computed, like `catalog`, so it makes no `Sendable` demand of `Tool`.
+    static var toolCatalog: [QuickAction] {
+        catalog.filter { action in
+            if case .tool = action.kind { return true }
+            return false
+        }
+    }
+}
+
+/// Tools whose title/subtitle match `query`, fuzzy-ranked exactly as the ⌘K palette ranks its actions
+/// (`rankedMatches` over `QuickAction.toolCatalog`) and flattened to the tools themselves, non-matches
+/// dropped. An empty/whitespace query returns every tool in catalog order. This is what the dashboard
+/// search field calls, so the two search surfaces behave identically. Pure and unit-tested.
+public func rankedToolMatches(query: String) -> [Tool] {
+    rankedMatches(query: query, in: QuickAction.toolCatalog).compactMap { action in
+        if case let .tool(tool) = action.kind { return tool }
+        return nil
     }
 }
 

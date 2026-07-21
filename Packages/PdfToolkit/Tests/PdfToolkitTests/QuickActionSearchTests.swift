@@ -101,4 +101,31 @@ import Testing
         let results = rankedMatches(query: "watermark", in: QuickAction.catalog)
         #expect(results.first?.kind == .tool(.watermark))
     }
+
+    // MARK: - Dashboard search reuse (`rankedToolMatches`)
+
+    @Test func toolCatalogIsEveryToolAndNothingElse() {
+        // The dashboard searches tools only — no Settings/Activity Log entries leak in.
+        let tools = QuickAction.toolCatalog.compactMap { action -> Tool? in
+            if case let .tool(tool) = action.kind { return tool }
+            return nil
+        }
+        #expect(tools == Tool.allCases)
+        #expect(QuickAction.toolCatalog.count == Tool.allCases.count)
+    }
+
+    @Test func emptyQueryReturnsEveryToolInCatalogOrder() {
+        #expect(rankedToolMatches(query: "") == Tool.allCases)
+        #expect(rankedToolMatches(query: "   ") == Tool.allCases)
+    }
+
+    @Test func dashboardSearchRanksLikeThePalette() {
+        // Same fuzzy tiers the ⌘K palette uses: a title prefix wins, and non-matches drop out.
+        #expect(rankedToolMatches(query: "watermark").first == .watermark)
+        // "cmp" is c…m…p in "Compress PDF" — a subsequence match, exactly as in the palette.
+        #expect(rankedToolMatches(query: "cmp").contains(.compress))
+        // Matches the subtitle too ("Encrypt a PDF, or remove its password" → Password Protect).
+        #expect(rankedToolMatches(query: "password").contains(.protect))
+        #expect(rankedToolMatches(query: "zzzz").isEmpty)
+    }
 }

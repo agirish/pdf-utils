@@ -118,6 +118,7 @@ struct SettingsSearchEntry: Identifiable {
 
     static let all: [SettingsSearchEntry] = [
         .init(title: "Theme", tab: .appearance, keywords: ["light", "dark", "system", "appearance", "mode"]),
+        .init(title: "Dashboard layout", tab: .appearance, keywords: ["dashboard", "layout", "categories", "grid", "list", "groups", "tools", "arrange"]),
         .init(title: "Accent color", tab: .appearance, keywords: ["hue", "tint", "color", "accent", "swatch"]),
         .init(title: "Tool colors", tab: .appearance, keywords: ["tool", "colors", "accent", "multicolor", "single", "monochrome", "style"]),
         .init(title: "Glass effect", tab: .appearance, keywords: ["glass", "blur", "frost", "clear", "solid", "material", "translucent"]),
@@ -264,7 +265,9 @@ struct AppearanceSettingsTab: View {
     @AppStorage(LiquidGlass.surfaceStyleKey) private var surfaceStyleRaw: String = SurfaceStyle.unified.rawValue
     @AppStorage(LiquidGlass.tintKey) private var surfaceTint: Double = 0
     @AppStorage(SettingsKeys.mergePreviewBackground) private var mergePreviewBackgroundRaw: String = MergePreviewBackgroundStyle.matchMain.rawValue
+    @AppStorage(SettingsKeys.dashboardLayout) private var dashboardLayoutRaw: String = DashboardLayout.categories.rawValue
 
+    private var dashboardLayout: DashboardLayout { DashboardLayout(rawValue: dashboardLayoutRaw) ?? .categories }
     private var appearanceMode: AppearanceMode { AppearanceMode(rawValue: appearanceModeRaw) ?? .system }
     private var glassLevel: GlassLevel { GlassLevel(rawValue: glassLevelRaw) ?? .frosted }
     private var selectedHue: LiquidGlassHue { LiquidGlassHue(rawValue: selectedHueRaw) ?? LiquidGlass.defaultHue }
@@ -286,6 +289,20 @@ struct AppearanceSettingsTab: View {
                 Text("Theme")
             } footer: {
                 Text(appearanceMode.detail)
+            }
+
+            Section {
+                Picker("Dashboard layout", selection: $dashboardLayoutRaw) {
+                    ForEach(DashboardLayout.allCases) { layout in
+                        Text(layout.displayName).tag(layout.rawValue)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+            } header: {
+                Text("Dashboard layout")
+            } footer: {
+                Text(dashboardLayout.detail)
             }
 
             Section("Accent color") {
@@ -624,6 +641,7 @@ struct AdvancedSettingsTab: View {
             LiquidGlass.tintKey,
             ListDensity.defaultsKey,
             SettingsKeys.mergePreviewBackground,
+            SettingsKeys.dashboardLayout,
             // Files
             SettingsKeys.saveLocation,
             SettingsKeys.afterExportAction,

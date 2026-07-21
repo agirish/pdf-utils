@@ -23,6 +23,11 @@ public enum SettingsKeys {
     /// The last tool the user opened (a ``Tool`` raw value); drives ``reopenLastTool``.
     public static let lastToolUsed = "pdfutils.settings.lastToolUsed"
 
+    // MARK: Appearance tab
+
+    /// How the dashboard arranges its tools (a ``DashboardLayout`` raw value): categories, grid, or list.
+    public static let dashboardLayout = "pdfutils.settings.dashboardLayout"
+
     // MARK: Advanced tab
 
     /// When true, saved PDFs have their document info (author, title, dates) cleared.

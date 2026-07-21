@@ -131,6 +131,21 @@ public enum Tool: String, CaseIterable, Identifiable, Hashable {
         }
     }
 
+    /// Which dashboard section this tool lives under (see ``ToolCategory``). The authoritative
+    /// membership map; `ToolCategory.tools` fixes the order within a section and is kept in sync by test.
+    public var category: ToolCategory {
+        switch self {
+        case .compress, .ocr:
+            return .optimize
+        case .merge, .split, .extract, .reorder, .deletePages, .rotate:
+            return .organize
+        case .crop, .watermark, .fillSign, .imagesToPdf:
+            return .edit
+        case .redact, .protect, .metadata:
+            return .secure
+        }
+    }
+
     public var accent: Color {
         switch self {
         case .compress: return .orange

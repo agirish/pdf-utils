@@ -28,6 +28,11 @@ public final class AppStateManager: ObservableObject {
     }
 
     public var pendingOperationsDescription: String {
-        return activeOperations.keys.sorted().joined(separator: ", ")
+        // Show the multiplicity the counted dictionary exists to track: two same-named runs read
+        // as "Compress PDF (×2)", not as one — the quit alert should say how much is at stake.
+        activeOperations.keys.sorted().map { name in
+            let count = activeOperations[name] ?? 1
+            return count > 1 ? "\(name) (×\(count))" : name
+        }.joined(separator: ", ")
     }
 }

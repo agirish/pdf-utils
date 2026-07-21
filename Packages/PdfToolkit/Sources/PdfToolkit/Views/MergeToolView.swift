@@ -413,19 +413,19 @@ struct MergeToolView: View {
                     return dict
                 }
             }
-            // `.task(id:)` cancelled this pass if the entry list changed mid-read; a superseded
-            // pass must not install its partial snapshot (a stale total and a prematurely cleared
-            // spinner) over the state the newer pass now owns — the same contract every thumbnail
-            // loader in this package honors.
-            guard !Task.isCancelled else { return }
+            // Checked INSIDE the main-actor block, like generatePreviews: a superseded pass must
+            // not install its partial snapshot (a stale total and a prematurely cleared spinner)
+            // over the state the newer pass now owns, and only on the main actor is the check
+            // atomic with the install — off-actor, cancellation could land in the hop.
             await MainActor.run {
+                guard !Task.isCancelled else { return }
                 pagesByEntryID = counts
                 totalPages = counts.values.reduce(0, +)
                 pageSummaryLoading = false
             }
         } catch {
-            guard !Task.isCancelled else { return }
             await MainActor.run {
+                guard !Task.isCancelled else { return }
                 pagesByEntryID = [:]
                 totalPages = 0
                 pageSummaryLoading = false

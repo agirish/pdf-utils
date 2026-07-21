@@ -185,12 +185,11 @@ struct FillSignPDFEditor: NSViewRepresentable {
                     // /Rotate. Hard-coding page-space (minX, maxY) was right only for unrotated
                     // pages: on a /Rotate 90 scan that corner shares maxY with the grabbed one,
                     // so the first drag collapsed the box to the minimum height and then tracked
-                    // the wrong corner.
-                    if let vr = viewRect(for: item) {
-                        resizeAnchor = pdfView.convert(CGPoint(x: vr.minX, y: vr.maxY), to: page)
-                    } else {
-                        resizeAnchor = CGPoint(x: item.rect.minX, y: item.rect.maxY)
-                    }
+                    // the wrong corner. Computed against the guard-bound page directly — an
+                    // optional fallback here would just re-enshrine the wrong-corner math on the
+                    // one path where it matters.
+                    let vr = pdfView.convert(item.rect, from: page)
+                    resizeAnchor = pdfView.convert(CGPoint(x: vr.minX, y: vr.maxY), to: page)
                 }
                 overlay?.selectedID = hit.id
                 overlay?.needsDisplay = true

@@ -36,7 +36,9 @@ import Foundation
         let a = "Op-\(UUID().uuidString)", b = "Op-\(UUID().uuidString)"
         defer { manager.endOperation(a); manager.endOperation(b) }
 
-        #expect(!manager.hasPendingOperations || !manager.activeOperations.isEmpty)  // baseline sanity
+        // The two views of "anything running?" must agree exactly (the old form of this line,
+        // `!a || !b` with b == a, was vacuously true no matter what the manager did).
+        #expect(manager.hasPendingOperations == !manager.activeOperations.isEmpty)
         manager.beginOperation(b)
         manager.beginOperation(a)
         #expect(manager.hasPendingOperations)
@@ -60,8 +62,10 @@ import Foundation
 
         manager.beginOperation(name)
         manager.beginOperation(name)
+        #expect(manager.pendingOperationsDescription.contains("\(name) (×2)")) // alert shows the stake
         manager.endOperation(name)
         #expect(manager.activeOperations.keys.contains(name)) // the second run is still going
+        #expect(!manager.pendingOperationsDescription.contains("×"))           // back to a bare name
 
         manager.endOperation(name)
         #expect(!manager.activeOperations.keys.contains(name))

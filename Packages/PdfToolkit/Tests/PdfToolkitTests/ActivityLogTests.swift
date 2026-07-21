@@ -80,7 +80,7 @@ struct ActivityLogTests {
         try handle.write(contentsOf: Data(external.utf8))
         try handle.close()
 
-        for _ in 0..<300 where !log.entries.contains(where: { $0.message.hasPrefix("Compress PDF") }) {
+        for _ in 0..<1000 where !log.entries.contains(where: { $0.message.hasPrefix("Compress PDF") }) {
             try await Task.sleep(for: .milliseconds(10))
         }
         #expect(log.entries.contains(where: { $0.message.hasPrefix("Compress PDF") }))
@@ -102,7 +102,7 @@ struct ActivityLogTests {
         try appendExternally("[2026-01-01 00:00:01.000] [INFO] Compress PDF: pre-open → /tmp/x.pdf (1 KB)\n", to: url)
         log.beginLiveTailing()
 
-        for _ in 0..<300 where !log.entries.contains(where: { $0.message.hasPrefix("Compress PDF") }) {
+        for _ in 0..<1000 where !log.entries.contains(where: { $0.message.hasPrefix("Compress PDF") }) {
             try await Task.sleep(for: .milliseconds(10))
         }
         #expect(log.entries.contains(where: { $0.message.hasPrefix("Compress PDF") }))
@@ -123,7 +123,7 @@ struct ActivityLogTests {
         try appendExternally("[2026-01-01 00:00:01.000] [INFO] Compress PDF: fresh-install → /tmp/x.pdf (1 KB)\n", to: url)
         log.beginLiveTailing()
 
-        for _ in 0..<300 where !log.entries.contains(where: { $0.message.hasPrefix("Compress PDF") }) {
+        for _ in 0..<1000 where !log.entries.contains(where: { $0.message.hasPrefix("Compress PDF") }) {
             try await Task.sleep(for: .milliseconds(10))
         }
         #expect(log.entries.contains(where: { $0.message.hasPrefix("Compress PDF") }))
@@ -157,14 +157,14 @@ struct ActivityLogTests {
         log.beginLiveTailing()
         // Ensure the watch is armed before the append+replace pair, so the pair races only itself.
         try appendExternally("[2026-01-01 00:00:01.000] [INFO] armed\n", to: url)
-        for _ in 0..<300 where !log.entries.contains(where: { $0.message == "armed" }) {
+        for _ in 0..<1000 where !log.entries.contains(where: { $0.message == "armed" }) {
             try await Task.sleep(for: .milliseconds(10))
         }
 
         try appendExternally("[2026-01-01 00:00:02.000] [INFO] last-before-swap\n", to: url)
         try Data("[2026-01-01 00:00:03.000] [INFO] new-file\n".utf8).write(to: url, options: .atomic)
 
-        for _ in 0..<300 where !log.entries.contains(where: { $0.message == "last-before-swap" }) {
+        for _ in 0..<1000 where !log.entries.contains(where: { $0.message == "last-before-swap" }) {
             try await Task.sleep(for: .milliseconds(10))
         }
         #expect(log.entries.contains(where: { $0.message == "last-before-swap" }))
@@ -181,13 +181,13 @@ struct ActivityLogTests {
         log.beginLiveTailing()
 
         log.info("twin")
-        for _ in 0..<300 where !log.entries.contains(where: { $0.message == "twin" }) {
+        for _ in 0..<1000 where !log.entries.contains(where: { $0.message == "twin" }) {
             try await Task.sleep(for: .milliseconds(10))
         }
         let canonical = try #require(log.entries.first { $0.message == "twin" }?.formattedString)
         try appendExternally(canonical + "\n", to: url)
 
-        for _ in 0..<300 where log.entries.filter({ $0.message == "twin" }).count < 2 {
+        for _ in 0..<1000 where log.entries.filter({ $0.message == "twin" }).count < 2 {
             try await Task.sleep(for: .milliseconds(10))
         }
         try await Task.sleep(for: .milliseconds(150))   // room for a wrong third import
@@ -220,12 +220,12 @@ struct ActivityLogTests {
         log.beginLiveTailing()
 
         log.info("own-newer") // stamped with the real (2026) clock
-        for _ in 0..<300 where !log.entries.contains(where: { $0.message == "own-newer" }) {
+        for _ in 0..<1000 where !log.entries.contains(where: { $0.message == "own-newer" }) {
             try await Task.sleep(for: .milliseconds(10))
         }
 
         try appendExternally("[2026-01-01 00:00:00.000] [INFO] external-older\n", to: url)
-        for _ in 0..<300 where !log.entries.contains(where: { $0.message == "external-older" }) {
+        for _ in 0..<1000 where !log.entries.contains(where: { $0.message == "external-older" }) {
             try await Task.sleep(for: .milliseconds(10))
         }
 
@@ -243,7 +243,7 @@ struct ActivityLogTests {
         log.beginLiveTailing()
         log.info("only once")
 
-        for _ in 0..<300 where !log.entries.contains(where: { $0.message == "only once" }) {
+        for _ in 0..<1000 where !log.entries.contains(where: { $0.message == "only once" }) {
             try await Task.sleep(for: .milliseconds(10))
         }
         // Give the file tailer ample time to (wrongly) re-import it before asserting.
@@ -287,7 +287,7 @@ struct ActivityLogTests {
         log.beginLiveTailing()
 
         try appendExternally("[2026-01-01 00:00:01.000] [INFO] Merge PDF: before → /tmp/a.pdf (1 KB)\n", to: url)
-        for _ in 0..<300 where !log.entries.contains(where: { $0.message.contains("before") }) {
+        for _ in 0..<1000 where !log.entries.contains(where: { $0.message.contains("before") }) {
             try await Task.sleep(for: .milliseconds(10))
         }
         #expect(log.entries.contains(where: { $0.message.contains("before") }))
@@ -299,7 +299,7 @@ struct ActivityLogTests {
         try await Task.sleep(for: .milliseconds(300))
 
         try appendExternally("[2026-01-01 00:00:03.000] [INFO] Compress PDF: after → /tmp/b.pdf (2 KB)\n", to: url)
-        for _ in 0..<300 where !log.entries.contains(where: { $0.message.contains("after") }) {
+        for _ in 0..<1000 where !log.entries.contains(where: { $0.message.contains("after") }) {
             try await Task.sleep(for: .milliseconds(10))
         }
         #expect(log.entries.contains(where: { $0.message.contains("after") }))

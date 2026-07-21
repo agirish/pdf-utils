@@ -1,4 +1,5 @@
 import SwiftUI
+import UniformTypeIdentifiers
 import PdfToolkit
 
 struct DashboardView: View {
@@ -12,8 +13,21 @@ struct DashboardView: View {
     private var dashboardLayoutRaw: String = DashboardLayout.categories.rawValue
     @AppStorage(SettingsKeys.dashboardCategoryOrder)
     private var categoryOrderRaw: String = ""
+    @AppStorage(SettingsKeys.dashboardToolOrder)
+    private var toolOrderRaw: String = ""
+    @AppStorage(SettingsKeys.dashboardPinnedTools)
+    private var pinnedRaw: String = ""
 
     @State private var searchQuery = ""
+
+    // The in-flight drag. Exactly one of a tool drag (within a section/Pinned) or a category drag (a
+    // whole section) is live at a time; the two never mix, which is how the tool and category drop
+    // targets — all registered on the same `.text` payload — tell each other's drags apart (a tool
+    // drop ignores the event when `draggingToolGroup` is nil, and a header ignores it when
+    // `draggingCategory` is nil).
+    @State private var draggingTool: Tool?
+    @State private var draggingToolGroup: ToolDragGroup?
+    @State private var draggingCategory: ToolCategory?
 
     private var floatingTiles: Bool {
         (SurfaceStyle(rawValue: surfaceStyleRaw) ?? .unified) == .cards
@@ -35,10 +49,17 @@ struct DashboardView: View {
         ToolCategoryOrder.resolve(categoryOrderRaw)
     }
 
+    /// The tools the user has pinned to the top, in pin order (see ``PinnedTools``).
+    private var pinnedTools: [Tool] {
+        PinnedTools.resolve(pinnedRaw)
+    }
+
     /// Whether to offer "Reset order": only in the Categories view, not while searching, and only once
-    /// the order has actually been changed from the default.
-    private var canResetCategoryOrder: Bool {
-        dashboardLayout == .categories && !isSearching && !ToolCategoryOrder.isDefault(orderedCategories)
+    /// the *arrangement* has actually been changed from the default — either the section order or any
+    /// section's tool order. Pins are separate and unaffected by Reset.
+    private var canResetArrangement: Bool {
+        dashboardLayout == .categories && !isSearching &&
+        (!ToolCategoryOrder.isDefault(orderedCategories) || !ToolOrder.isDefault(toolOrderRaw))
     }
 
     private let columns = [
@@ -52,19 +73,67 @@ struct DashboardView: View {
         rankedToolMatches(query: searchQuery)
     }
 
-    // MARK: - Category reordering
+    /// `tools` with the pinned ones lifted to the front in pin order — how Grid and List honor pins
+    /// without a separate section. A single instance each (unlike Categories, where a pin is a
+    /// shortcut and the tool also keeps its home-section tile).
+    private func hoistingPins(_ tools: [Tool]) -> [Tool] {
+        let pins = pinnedTools
+        guard !pins.isEmpty else { return tools }
+        return pins + tools.filter { !pins.contains($0) }
+    }
+
+    // MARK: - Reordering & pinning
 
     private func moveCategory(_ category: ToolCategory, _ direction: ToolCategoryOrder.MoveDirection) {
         let next = ToolCategoryOrder.moving(category, direction, in: orderedCategories)
-        withAnimation(.easeInOut(duration: 0.28)) {
+        withAnimation(.easeInOut(duration: 0.24)) {
             categoryOrderRaw = ToolCategoryOrder.serialize(next)
         }
     }
 
-    private func resetCategoryOrder() {
+    /// Persist a group's freshly-reordered tool list. Pinned writes the pin order; a category writes
+    /// its within-section order.
+    private func commitToolOrder(_ tools: [Tool], in group: ToolDragGroup) {
+        switch group {
+        case .pinned:
+            pinnedRaw = PinnedTools.serialize(tools)
+        case .category(let category):
+            toolOrderRaw = ToolOrder.replacing(category, with: tools, in: toolOrderRaw)
+        }
+    }
+
+    /// Move a tool one slot within its group — the keyboard/VoiceOver equivalent of a drag, exposed as
+    /// an accessibility action since drag-and-drop is invisible to assistive tech.
+    private func moveTool(_ tool: Tool, _ direction: ToolCategoryOrder.MoveDirection, in group: ToolDragGroup) {
+        withAnimation(.easeInOut(duration: 0.2)) {
+            switch group {
+            case .pinned:
+                pinnedRaw = PinnedTools.moving(tool, direction, in: pinnedRaw)
+            case .category:
+                toolOrderRaw = ToolOrder.moving(tool, direction, in: toolOrderRaw)
+            }
+        }
+    }
+
+    private func togglePin(_ tool: Tool) {
+        withAnimation(.easeInOut(duration: 0.22)) {
+            pinnedRaw = PinnedTools.toggling(tool, in: pinnedRaw)
+        }
+    }
+
+    private func resetArrangement() {
         withAnimation(.easeInOut(duration: 0.28)) {
             categoryOrderRaw = ""
+            toolOrderRaw = ""
         }
+    }
+
+    /// End the current drag session — clears whichever drag was live so a dropped (or cancelled) tile
+    /// stops reading as "lifted".
+    private func clearDragging() {
+        draggingTool = nil
+        draggingToolGroup = nil
+        draggingCategory = nil
     }
 
     var body: some View {
@@ -131,21 +200,21 @@ struct DashboardView: View {
             }
             HStack(spacing: 12) {
                 searchField
-                if canResetCategoryOrder {
+                if canResetArrangement {
                     Button {
-                        resetCategoryOrder()
+                        resetArrangement()
                     } label: {
                         Label("Reset order", systemImage: "arrow.uturn.backward")
                     }
                     .controlSize(.regular)
-                    .help("Restore the default category order")
+                    .help("Restore the default section and tool order")
                     .transition(.opacity.combined(with: .move(edge: .leading)))
                 }
                 Spacer(minLength: 0)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .animation(.easeInOut(duration: 0.2), value: canResetCategoryOrder)
+        .animation(.easeInOut(duration: 0.2), value: canResetArrangement)
     }
 
     /// A standard macOS search field: glyph + plain field + a clear button, on the shared
@@ -182,59 +251,159 @@ struct DashboardView: View {
     private var content: some View {
         if isSearching {
             // A live query flattens every layout to matches only. Categories/Grid keep their tiles;
-            // List keeps its rows.
+            // List keeps its rows. Pinning and reordering are suppressed here — search is a transient,
+            // ranked view, not an arrangement you edit.
             if matchedTools.isEmpty {
                 noMatches
             } else if dashboardLayout == .list {
-                toolList(matchedTools)
+                toolList(matchedTools, pinnable: false)
             } else {
-                toolGrid(matchedTools)
+                toolGrid(matchedTools, pinnable: false)
             }
         } else {
             switch dashboardLayout {
             case .categories: categoriesContent
-            case .grid: toolGrid(Tool.allCases)
-            case .list: toolList(Tool.allCases)
+            case .grid: toolGrid(hoistingPins(Tool.allCases), pinnable: true)
+            case .list: toolList(hoistingPins(Tool.allCases), pinnable: true)
             }
         }
     }
 
     private var categoriesContent: some View {
         let categories = orderedCategories
+        let pinned = pinnedTools
         return VStack(alignment: .leading, spacing: 32) {
-            ForEach(Array(categories.enumerated()), id: \.element) { index, category in
+            if !pinned.isEmpty {
+                VStack(alignment: .leading, spacing: 16) {
+                    pinnedHeader
+                    reorderableGrid(pinned, group: .pinned)
+                }
+                .transition(.opacity)
+            }
+            ForEach(Array(categories.enumerated()), id: \.element) { _, category in
                 CategorySectionView(
                     category: category,
-                    index: index,
-                    count: categories.count,
-                    onMove: moveCategory
+                    isDragging: draggingCategory == category,
+                    makeDragProvider: {
+                        draggingCategory = category
+                        return NSItemProvider(object: category.rawValue as NSString)
+                    },
+                    dropDelegate: CategoryReorderDropDelegate(
+                        target: category,
+                        order: categories,
+                        dragging: draggingCategory,
+                        move: { next in
+                            withAnimation(.easeInOut(duration: 0.22)) {
+                                categoryOrderRaw = ToolCategoryOrder.serialize(next)
+                            }
+                        },
+                        end: clearDragging
+                    ),
+                    onMove: { moveCategory(category, $0) }
                 ) {
-                    toolGrid(category.tools)
+                    reorderableGrid(ToolOrder.resolve(toolOrderRaw, for: category), group: .category(category))
                 }
             }
         }
+        // Catches drops that land in the gaps between tiles/sections so a cancelled drag still ends
+        // cleanly; the per-tile and per-header delegates handle drops on an actual target.
+        .onDrop(of: [.text], delegate: DragSessionEndDelegate(end: clearDragging))
     }
 
-    /// The flat adaptive tile grid — the app's original dashboard body, reused verbatim for Grid mode,
-    /// each category section, and tile-mode search results.
-    private func toolGrid(_ tools: [Tool]) -> some View {
+    /// The Pinned section's header: a pin glyph + label + hairline. Deliberately *not* a drag handle —
+    /// Pinned is fixed at the top of the Categories view.
+    private var pinnedHeader: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "pin.fill")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            Text("Pinned".uppercased())
+                .font(.subheadline.weight(.semibold))
+                .tracking(0.8)
+                .foregroundStyle(.secondary)
+                .fixedSize()
+                .accessibilityAddTraits(.isHeader)
+            Rectangle()
+                .fill(.primary.opacity(0.10))
+                .frame(height: 1)
+        }
+    }
+
+    /// A grid of draggable, reorderable tiles for one group (a category or Pinned). The whole tile is
+    /// the drag handle; a quick click still opens the tool (the system's drag threshold separates the
+    /// two), and the hover pin button toggles the pin.
+    private func reorderableGrid(_ tools: [Tool], group: ToolDragGroup) -> some View {
         LazyVGrid(columns: columns, spacing: 20) {
             ForEach(tools) { tool in
+                let pinned = PinnedTools.contains(tool, in: pinnedRaw)
                 NavigationLink(value: tool) {
-                    ToolTileView(tool: tool, floating: floatingTiles)
+                    ToolTileView(tool: tool, floating: floatingTiles, isPinned: pinned) {
+                        togglePin(tool)
+                    }
                 }
                 .buttonStyle(.plain)
+                .opacity(draggingTool == tool && draggingToolGroup == group ? 0.35 : 1)
+                .onDrag {
+                    draggingTool = tool
+                    draggingToolGroup = group
+                    return NSItemProvider(object: tool.rawValue as NSString)
+                }
+                .onDrop(of: [.text], delegate: ToolReorderDropDelegate(
+                    target: tool,
+                    group: group,
+                    orderedTools: tools,
+                    draggingTool: draggingTool,
+                    draggingGroup: draggingToolGroup,
+                    move: { next in
+                        withAnimation(.easeInOut(duration: 0.18)) {
+                            commitToolOrder(next, in: group)
+                        }
+                    },
+                    end: clearDragging
+                ))
+                .accessibilityAction(named: pinned ? "Unpin from top" : "Pin to top") { togglePin(tool) }
+                .accessibilityAction(named: "Move up") { moveTool(tool, .up, in: group) }
+                .accessibilityAction(named: "Move down") { moveTool(tool, .down, in: group) }
             }
         }
     }
 
-    private func toolList(_ tools: [Tool]) -> some View {
-        VStack(spacing: 8) {
+    /// The flat adaptive tile grid — Grid mode and tile-mode search results. `pinnable` shows the pin
+    /// button and marks pinned tiles; search passes `false`.
+    @ViewBuilder
+    private func toolGrid(_ tools: [Tool], pinnable: Bool) -> some View {
+        LazyVGrid(columns: columns, spacing: 20) {
             ForEach(tools) { tool in
-                NavigationLink(value: tool) {
-                    ToolRowView(tool: tool, floating: floatingTiles)
+                let pinned = pinnable && PinnedTools.contains(tool, in: pinnedRaw)
+                let link = NavigationLink(value: tool) {
+                    ToolTileView(tool: tool, floating: floatingTiles, isPinned: pinned,
+                                 onTogglePin: pinnable ? { togglePin(tool) } : nil)
                 }
                 .buttonStyle(.plain)
+                if pinnable {
+                    link.accessibilityAction(named: pinned ? "Unpin from top" : "Pin to top") { togglePin(tool) }
+                } else {
+                    link
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func toolList(_ tools: [Tool], pinnable: Bool) -> some View {
+        VStack(spacing: 8) {
+            ForEach(tools) { tool in
+                let pinned = pinnable && PinnedTools.contains(tool, in: pinnedRaw)
+                let link = NavigationLink(value: tool) {
+                    ToolRowView(tool: tool, floating: floatingTiles, isPinned: pinned,
+                                onTogglePin: pinnable ? { togglePin(tool) } : nil)
+                }
+                .buttonStyle(.plain)
+                if pinnable {
+                    link.accessibilityAction(named: pinned ? "Unpin from top" : "Pin to top") { togglePin(tool) }
+                } else {
+                    link
+                }
             }
         }
     }
@@ -252,41 +421,47 @@ struct DashboardView: View {
     }
 }
 
-/// Identity for keyboard focus among the two reorder buttons, so the pill can reveal itself when either
-/// end takes Full-Keyboard-Access focus — not only under the pointer.
-private enum ReorderButton: Hashable { case up, down }
+/// Which reorder scope a tile belongs to. Tool drags never cross groups (you can't drag a tile out of
+/// its section, and pinning is the hover button's job), so the group both scopes a drag and lets the
+/// tool and category drop targets — sharing one `.text` payload — ignore each other's drags.
+private enum ToolDragGroup: Equatable {
+    case pinned
+    case category(ToolCategory)
+}
 
-/// One category section in the Categories view: its header (small uppercase label + hairline rule)
-/// above the section's tile grid. Owns its own hover state so the move-up/down controls stay hidden
-/// until the pointer is over this section — or one of them takes keyboard focus — keeping the dashboard
-/// clean when you're not rearranging. The whole section (header + tiles) is the hover target, so the
-/// controls are easy to reach.
+/// One category section in the Categories view: a header that doubles as the section's drag handle,
+/// above the section's reorderable tile grid. Owns its own hover state so the grip affordance stays
+/// hidden until the pointer is over the header — keeping the dashboard clean when you're not
+/// rearranging. The whole header (not just the grip) is the draggable target, so losing the pointer
+/// off the small glyph never strands the drag.
 private struct CategorySectionView<Grid: View>: View {
     let category: ToolCategory
-    let index: Int
-    let count: Int
-    let onMove: (ToolCategory, ToolCategoryOrder.MoveDirection) -> Void
+    let isDragging: Bool
+    let makeDragProvider: () -> NSItemProvider
+    let dropDelegate: CategoryReorderDropDelegate
+    let onMove: (ToolCategoryOrder.MoveDirection) -> Void
     @ViewBuilder let grid: () -> Grid
 
     @State private var hovered = false
-    @FocusState private var focusedButton: ReorderButton?
-
-    /// Reveal the reorder pill under the pointer or when either button holds keyboard focus, so
-    /// Full-Keyboard-Access users can tab to and use controls a hover-only reveal would hide from them.
-    private var controlsRevealed: Bool { hovered || focusedButton != nil }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             header
             grid()
         }
-        .onHover { hovered = $0 }
+        .opacity(isDragging ? 0.5 : 1)
     }
 
-    /// The section label in the artifact's treatment — small, uppercase, letter-spaced — trailed by a
-    /// hairline rule and the hover-revealed reorder pill, in native SF type.
     private var header: some View {
-        HStack(spacing: 12) {
+        HStack(spacing: 10) {
+            // A drag-handle hint that fades in on hover. It's only a cue — the entire header row is the
+            // drag target, so the reveal-on-hover can't repeat the old arrows' "reach it and it's gone".
+            Image(systemName: "line.3.horizontal")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.tertiary)
+                .opacity(hovered ? 1 : 0)
+                .animation(.easeOut(duration: 0.15), value: hovered)
+                .accessibilityHidden(true)
             Text(category.displayName.uppercased())
                 .font(.subheadline.weight(.semibold))
                 .tracking(0.8)
@@ -296,56 +471,92 @@ private struct CategorySectionView<Grid: View>: View {
             Rectangle()
                 .fill(.primary.opacity(0.10))
                 .frame(height: 1)
-            // Kept in the layout at zero opacity (rather than removed) so revealing it doesn't reflow the
-            // hairline; hit-testing follows visibility so an unseen control can't be clicked, while
-            // keyboard focus still reaches it (opacity, unlike `.hidden()`, leaves it in the focus order).
-            reorderControls
-                .opacity(controlsRevealed ? 1 : 0)
-                .allowsHitTesting(controlsRevealed)
-                .animation(.easeOut(duration: 0.15), value: controlsRevealed)
         }
+        .contentShape(Rectangle())
+        .onHover { hovered = $0 }
+        .onDrag(makeDragProvider)
+        .onDrop(of: [.text], delegate: dropDelegate)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(category.displayName) section")
+        .accessibilityAction(named: "Move up") { onMove(.up) }
+        .accessibilityAction(named: "Move down") { onMove(.down) }
+    }
+}
+
+// MARK: - Drag & drop delegates
+
+/// Live-reorders a group's tiles as the pointer crosses each one during a drag. It reads the drag from
+/// `@State` rather than the drop payload, so it can ignore a *category* drag (when `draggingGroup` is
+/// nil) even though both drags share the `.text` type.
+private struct ToolReorderDropDelegate: DropDelegate {
+    let target: Tool
+    let group: ToolDragGroup
+    let orderedTools: [Tool]
+    let draggingTool: Tool?
+    let draggingGroup: ToolDragGroup?
+    let move: ([Tool]) -> Void
+    let end: () -> Void
+
+    func validateDrop(info: DropInfo) -> Bool { draggingTool != nil && draggingGroup == group }
+    func dropUpdated(info: DropInfo) -> DropProposal? { DropProposal(operation: .move) }
+
+    func dropEntered(info: DropInfo) {
+        guard let dragged = draggingTool, draggingGroup == group, dragged != target,
+              let from = orderedTools.firstIndex(of: dragged),
+              let to = orderedTools.firstIndex(of: target) else { return }
+        var next = orderedTools
+        next.remove(at: from)
+        guard let anchor = next.firstIndex(of: target) else { return }
+        // Insert after the target when sweeping forward, before it when sweeping back — the classic
+        // reorder feel as the pointer crosses tiles.
+        next.insert(dragged, at: from < to ? anchor + 1 : anchor)
+        move(next)
     }
 
-    /// The up/down pair that moves this category's whole section. Grouped on a soft pill so they read
-    /// as one control; each end button disables at the edge it can't move past.
-    private var reorderControls: some View {
-        HStack(spacing: 0) {
-            Button {
-                onMove(category, .up)
-            } label: {
-                Image(systemName: "chevron.up")
-                    .frame(width: 22, height: 20)
-                    .contentShape(Rectangle())
-            }
-            .focused($focusedButton, equals: .up)
-            .disabled(index == 0)
-            .help("Move \(category.displayName) up")
-            .accessibilityLabel("Move \(category.displayName) up")
+    func performDrop(info: DropInfo) -> Bool { end(); return true }
+}
 
-            Button {
-                onMove(category, .down)
-            } label: {
-                Image(systemName: "chevron.down")
-                    .frame(width: 22, height: 20)
-                    .contentShape(Rectangle())
-            }
-            .focused($focusedButton, equals: .down)
-            .disabled(index == count - 1)
-            .help("Move \(category.displayName) down")
-            .accessibilityLabel("Move \(category.displayName) down")
-        }
-        .buttonStyle(.plain)
-        .font(.caption.weight(.semibold))
-        .foregroundStyle(.secondary)
-        .background(.quaternary.opacity(0.6), in: Capsule())
-        .overlay(Capsule().strokeBorder(.primary.opacity(0.06), lineWidth: 1))
+/// Live-reorders the category sections as a dragged header crosses another header.
+private struct CategoryReorderDropDelegate: DropDelegate {
+    let target: ToolCategory
+    let order: [ToolCategory]
+    let dragging: ToolCategory?
+    let move: ([ToolCategory]) -> Void
+    let end: () -> Void
+
+    func validateDrop(info: DropInfo) -> Bool { dragging != nil }
+    func dropUpdated(info: DropInfo) -> DropProposal? { DropProposal(operation: .move) }
+
+    func dropEntered(info: DropInfo) {
+        guard let dragged = dragging, dragged != target,
+              let from = order.firstIndex(of: dragged),
+              let to = order.firstIndex(of: target) else { return }
+        var next = order
+        next.remove(at: from)
+        guard let anchor = next.firstIndex(of: target) else { return }
+        next.insert(dragged, at: from < to ? anchor + 1 : anchor)
+        move(next)
     }
+
+    func performDrop(info: DropInfo) -> Bool { end(); return true }
+}
+
+/// A container-level catch-all so a drag that ends in empty space (or is cancelled) still resets the
+/// drag session — the per-tile/per-header delegates only fire on an actual target.
+private struct DragSessionEndDelegate: DropDelegate {
+    let end: () -> Void
+    func dropUpdated(info: DropInfo) -> DropProposal? { DropProposal(operation: .move) }
+    func performDrop(info: DropInfo) -> Bool { end(); return true }
 }
 
 struct ToolTileView: View {
     let tool: Tool
     /// Cards mode: each tile is an elevated floating card. Unified: tiles read as one flat surface.
     var floating: Bool = true
+    /// Whether this tool is pinned — drives the filled pin glyph shown even without hover.
+    var isPinned: Bool = false
+    /// Pin/unpin action. `nil` hides the pin button entirely (e.g. search results).
+    var onTogglePin: (() -> Void)? = nil
     @State private var hovered = false
     @Environment(\.colorScheme) private var scheme
     private var dark: Bool { scheme == .dark }
@@ -471,23 +682,53 @@ struct ToolTileView: View {
                     )
             }
         }
+        .overlay(alignment: .topTrailing) { pinButton }
         .shadow(color: .black.opacity(shadowOpacity), radius: shadowRadius, y: shadowY)
         .scaleEffect(hovered ? 1.02 : 1)
         .animation(.easeOut(duration: 0.18), value: hovered)
         .onHover { hovered = $0 }
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(tool.title). \(tool.subtitle)")
+        .accessibilityLabel("\(tool.title). \(tool.subtitle)\(isPinned ? ". Pinned" : "")")
+    }
+
+    /// The hover-revealed pin toggle, top-trailing. Visible whenever the tile is hovered *or* pinned,
+    /// so a pinned tile always shows its filled pin as an at-a-glance marker. Hit-testing stays on
+    /// regardless of visibility — on a trackpad the pointer's presence is what reveals it, so there's
+    /// no invisible-but-clickable target the way the old hover arrows had. Its own accessibility is
+    /// hidden because the enclosing tile exposes Pin/Unpin as a named action instead.
+    @ViewBuilder
+    private var pinButton: some View {
+        if let onTogglePin {
+            Button(action: onTogglePin) {
+                Image(systemName: isPinned ? "pin.fill" : "pin")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(isPinned ? AnyShapeStyle(accent) : AnyShapeStyle(Color.secondary))
+                    .frame(width: 24, height: 24)
+                    .background(.ultraThinMaterial, in: Circle())
+                    .overlay(Circle().strokeBorder(.primary.opacity(0.08), lineWidth: 1))
+                    .contentShape(Circle())
+            }
+            .buttonStyle(.plain)
+            .opacity(isPinned || hovered ? 1 : 0)
+            .animation(.easeOut(duration: 0.15), value: hovered)
+            .help(isPinned ? "Unpin from top" : "Pin to top")
+            .accessibilityHidden(true)
+            .padding(10)
+        }
     }
 }
 
 /// The compact table row for the List layout: a small accent icon plate, the tool's title and
-/// one-line subtitle, and a trailing chevron. Reads the same glass/accent settings as `ToolTileView`
-/// (directly, since the dashboard sits outside the tool screen's `\.toolAccent`) so the List mode
-/// honors Multicolor/Single, the glass level, and the tint wash exactly like the tiles do.
+/// one-line subtitle, an optional pin toggle, and a trailing chevron. Reads the same glass/accent
+/// settings as `ToolTileView` (directly, since the dashboard sits outside the tool screen's
+/// `\.toolAccent`) so the List mode honors Multicolor/Single, the glass level, and the tint wash
+/// exactly like the tiles do.
 struct ToolRowView: View {
     let tool: Tool
     /// Cards mode lifts each row with a soft shadow; Unified keeps them flat, like a plain table.
     var floating: Bool = true
+    var isPinned: Bool = false
+    var onTogglePin: (() -> Void)? = nil
     @State private var hovered = false
     @Environment(\.colorScheme) private var scheme
     private var dark: Bool { scheme == .dark }
@@ -520,6 +761,7 @@ struct ToolRowView: View {
                     .lineLimit(1)
             }
             Spacer(minLength: 12)
+            pinButton
             Image(systemName: "chevron.right")
                 .font(.footnote.weight(.semibold))
                 .foregroundStyle(hovered ? AnyShapeStyle(accent) : AnyShapeStyle(.tertiary))
@@ -546,7 +788,7 @@ struct ToolRowView: View {
         .animation(.easeOut(duration: 0.16), value: hovered)
         .onHover { hovered = $0 }
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(tool.title). \(tool.subtitle)")
+        .accessibilityLabel("\(tool.title). \(tool.subtitle)\(isPinned ? ". Pinned" : "")")
     }
 
     private var iconPlate: some View {
@@ -570,6 +812,26 @@ struct ToolRowView: View {
                 .font(.system(size: 18, weight: .medium))
                 .symbolRenderingMode(.hierarchical)
                 .foregroundStyle(accent)
+        }
+    }
+
+    /// The row's pin toggle: shown whenever hovered or pinned, mirroring the tile's affordance. Its own
+    /// accessibility is hidden; the enclosing row exposes Pin/Unpin as a named action.
+    @ViewBuilder
+    private var pinButton: some View {
+        if let onTogglePin {
+            Button(action: onTogglePin) {
+                Image(systemName: isPinned ? "pin.fill" : "pin")
+                    .font(.footnote.weight(.semibold))
+                    .foregroundStyle(isPinned ? AnyShapeStyle(accent) : AnyShapeStyle(.secondary))
+                    .frame(width: 22, height: 22)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .opacity(isPinned || hovered ? 1 : 0)
+            .animation(.easeOut(duration: 0.15), value: hovered)
+            .help(isPinned ? "Unpin from top" : "Pin to top")
+            .accessibilityHidden(true)
         }
     }
 }

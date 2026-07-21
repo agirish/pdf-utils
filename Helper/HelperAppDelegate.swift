@@ -1,4 +1,5 @@
 import Cocoa
+import PDFKit
 import ServiceManagement
 import UserNotifications
 import PdfToolkit
@@ -21,10 +22,26 @@ final class HelperAppDelegate: NSObject, NSApplicationDelegate, UNUserNotificati
     private let commandDirectory = FileManager.default.homeDirectoryForCurrentUser
         .appendingPathComponent("Library/Containers/com.pdfutils.PdfUtils.FinderSync/Data")
 
-    /// Requests older than this are dropped (still deleted). A stale file means the helper died
-    /// between the extension's write and processing; executing it at the next login — hours or days
-    /// later, with no user action — is worse than losing it. A live ping arrives within seconds.
-    private static let commandMaxAge: TimeInterval = 5 * 60
+    /// Interactive requests (unlock, extract) prompt through modal alerts. Spawning each as its
+    /// own Task stacked prompts: `runModal`'s nested run loop drains the main queue, so a second
+    /// request's alert opened ON TOP of the first and the stack had to be answered newest-first —
+    /// completion order inverted request order. This FIFO runs them one at a time in the order
+    /// they were made; non-interactive work still dispatches to the work queue immediately.
+    private var interactiveJobs: [() async -> Void] = []
+    private var interactiveRunnerActive = false
+
+    private func enqueueInteractive(_ job: @escaping () async -> Void) {
+        interactiveJobs.append(job)
+        guard !interactiveRunnerActive else { return }
+        interactiveRunnerActive = true
+        Task { @MainActor [self] in
+            while !interactiveJobs.isEmpty {
+                let next = interactiveJobs.removeFirst()
+                await next()
+            }
+            interactiveRunnerActive = false
+        }
+    }
 
     /// Serial so Finder-triggered PDF work never runs PDFKit on two threads at once — the same
     /// invariant the in-app tools honor via `PDFBackgroundWork`.
@@ -211,16 +228,11 @@ final class HelperAppDelegate: NSObject, NSApplicationDelegate, UNUserNotificati
         }
     }
 
-    /// Every queued request, oldest first: the legacy shared `command.json` (if an old extension
-    /// instance is still loaded), then the per-request files — whose millisecond-prefixed names
-    /// sort chronologically.
+    /// Every queued request, oldest first — ordering rules live in ``FinderCommandFiles`` (shared
+    /// with the extension, unit-tested in the package).
     private func pendingCommandURLs() -> [URL] {
         let names = (try? FileManager.default.contentsOfDirectory(atPath: commandDirectory.path)) ?? []
-        let queued = names
-            .filter { $0.hasPrefix("command-") && $0.hasSuffix(".json") }
-            .sorted()
-        let legacy = names.contains("command.json") ? ["command.json"] : []
-        return (legacy + queued).map { commandDirectory.appendingPathComponent($0) }
+        return FinderCommandFiles.pendingOrder(among: names).map { commandDirectory.appendingPathComponent($0) }
     }
 
     private func processOneCommand(at url: URL) {
@@ -234,13 +246,15 @@ final class HelperAppDelegate: NSObject, NSApplicationDelegate, UNUserNotificati
             flashStatusIcon(success: false)
             return
         }
-        if let ts = obj["ts"] as? TimeInterval {
-            let age = Date().timeIntervalSince1970 - ts
-            if age > Self.commandMaxAge {
-                ActivityLog.shared.warning(
-                    "Finder request dropped: \(action) request was \(Int(age))s old — likely orphaned by a helper exit, not re-run")
-                return
-            }
+        // Missing/garbled `ts` counts as stale — both extension formats always write it, so its
+        // absence means a file nobody just created. Same no-trace principle as the parse drop:
+        // warn AND flash, so a swallowed right-click is at least visibly a failure.
+        if FinderCommandFiles.isStale(ts: obj["ts"]) {
+            let age = (obj["ts"] as? TimeInterval).map { Int(Date().timeIntervalSince1970 - $0) }
+            ActivityLog.shared.warning(
+                "Finder request dropped: \(action) request was \(age.map { "\($0)s old" } ?? "missing its timestamp") — likely orphaned by a helper exit, not re-run")
+            flashStatusIcon(success: false)
+            return
         }
         let inputs = paths.map { URL(fileURLWithPath: $0) }
         // Captured on the main actor so the background work queue can record into the shared log
@@ -255,6 +269,7 @@ final class HelperAppDelegate: NSObject, NSApplicationDelegate, UNUserNotificati
             workQueue.async { [self] in
                 var revealed: [URL] = []
                 var failed: [String] = []
+                var firstFailure: String?
                 for input in inputs {
                     let output = Self.uniqueOutput(for: input, suffix: "compressed")
                     do {
@@ -263,10 +278,11 @@ final class HelperAppDelegate: NSObject, NSApplicationDelegate, UNUserNotificati
                         log.recordSaved(Tool.compress.title, to: output, bytes: Self.fileSize(of: output))
                     } catch {
                         failed.append(input.lastPathComponent)
+                        if firstFailure == nil { firstFailure = error.localizedDescription }
                         log.error("\(Tool.compress.title) failed for \(input.lastPathComponent): \(error.localizedDescription)")
                     }
                 }
-                finish(id: "pdfutils.compress", title: "Compress PDF", revealed: revealed, failed: failed)
+                finish(id: "pdfutils.compress", title: "Compress PDF", revealed: revealed, failed: failed, failureDetail: firstFailure)
             }
 
         case "merge":
@@ -280,7 +296,8 @@ final class HelperAppDelegate: NSObject, NSApplicationDelegate, UNUserNotificati
                     finish(id: "pdfutils.merge", title: "Merge PDFs", revealed: [output], failed: [])
                 } catch {
                     log.error("\(Tool.merge.title) failed: \(error.localizedDescription)")
-                    finish(id: "pdfutils.merge", title: "Merge PDFs", revealed: [], failed: ["merge"])
+                    finish(id: "pdfutils.merge", title: "Merge PDFs", revealed: [], failed: ["merge"],
+                           failureDetail: error.localizedDescription)
                 }
             }
 
@@ -290,6 +307,7 @@ final class HelperAppDelegate: NSObject, NSApplicationDelegate, UNUserNotificati
             workQueue.async { [self] in
                 var revealed: [URL] = []
                 var failed: [String] = []
+                var firstFailure: String?
                 for input in inputs {
                     let count = PDFToolkit.pageCount(at: input) ?? 0
                     let output = Self.uniqueOutput(for: input, suffix: "rotated")
@@ -299,17 +317,24 @@ final class HelperAppDelegate: NSObject, NSApplicationDelegate, UNUserNotificati
                         log.recordSaved(Tool.rotate.title, to: output, bytes: Self.fileSize(of: output))
                     } catch {
                         failed.append(input.lastPathComponent)
+                        if firstFailure == nil { firstFailure = error.localizedDescription }
                         log.error("\(Tool.rotate.title) failed for \(input.lastPathComponent): \(error.localizedDescription)")
                     }
                 }
-                finish(id: "pdfutils.rotate", title: "Rotate PDF", revealed: revealed, failed: failed)
+                finish(id: "pdfutils.rotate", title: "Rotate PDF", revealed: revealed, failed: failed, failureDetail: firstFailure)
             }
 
         case "extract":
-            if let input = inputs.first { runExtract(input, log: log) }
+            if let input = inputs.first {
+                // Immediate feedback at drain time: the page-count probe rides the work queue, so
+                // behind a long batch the prompt can be minutes away — silence until a modal
+                // steals focus read as a swallowed click.
+                notify(id: "pdfutils.extract", title: "Extract Pages", body: "Getting ready…")
+                enqueueInteractive { await self.runExtract(input, log: log) }
+            }
 
         case "unlock":
-            Task { await runUnlock(inputs) }
+            enqueueInteractive { await self.runUnlock(inputs) }
 
         default:
             break
@@ -317,7 +342,17 @@ final class HelperAppDelegate: NSObject, NSApplicationDelegate, UNUserNotificati
     }
 
     /// Hops back to the main actor to reveal results in Finder and post the completion notice.
-    private nonisolated func finish(id: String, title: String, revealed: [URL], failed: [String]) {
+    /// `failureDetail` is the first real error's message; when nothing succeeded it replaces the
+    /// old guessing body ("may be open elsewhere or damaged"), which actively misled for the most
+    /// common failure — a password-protected input whose precise, actionable message otherwise
+    /// reached only the Activity Log.
+    private nonisolated func finish(
+        id: String,
+        title: String,
+        revealed: [URL],
+        failed: [String],
+        failureDetail: String? = nil
+    ) {
         Task { @MainActor in
             if !revealed.isEmpty { NSWorkspace.shared.activateFileViewerSelecting(revealed) }
             flashStatusIcon(success: failed.isEmpty)
@@ -325,7 +360,7 @@ final class HelperAppDelegate: NSObject, NSApplicationDelegate, UNUserNotificati
             if failed.isEmpty {
                 body = revealed.count <= 1 ? "Done — revealed in Finder." : "Done — \(revealed.count) files revealed in Finder."
             } else if revealed.isEmpty {
-                body = "Couldn't complete. The file may be open elsewhere or damaged."
+                body = failureDetail ?? "Couldn't complete. The file may be open elsewhere or damaged."
             } else {
                 body = "\(revealed.count) done, \(failed.count) failed."
             }
@@ -429,30 +464,43 @@ final class HelperAppDelegate: NSObject, NSApplicationDelegate, UNUserNotificati
 
     // MARK: - Extract pages (interactive: needs a page-range prompt)
 
-    private func runExtract(_ input: URL, log: ActivityLog) {
-        // The page count needs PDFKit, and the work queue may be mid-operation on another document —
-        // reading it here on the main actor put two threads inside PDFKit at once, the exact crash
-        // class the serial queue exists to prevent. Count on the queue, then prompt back on main.
-        workQueue.async { [self] in
-            let count = PDFToolkit.pageCount(at: input) ?? 0
-            Task { @MainActor in
-                promptAndRunExtract(input, pageCount: count, log: log)
+    private func runExtract(_ input: URL, log: ActivityLog) async {
+        // Page count and lockedness in one queue visit: PDFKit stays off the main actor (the work
+        // queue may be mid-operation on another document — the crash class the serial queue exists
+        // to prevent), and a locked file is told the truth up front. It used to sail through this
+        // check (locked documents report their real page count), walk the user through the range
+        // prompt, and then fail with a generic notification.
+        let probe: (count: Int, locked: Bool) = await withCheckedContinuation { continuation in
+            workQueue.async {
+                let doc = PDFDocument(url: input)
+                continuation.resume(returning: (doc?.pageCount ?? 0, doc?.isLocked ?? false))
             }
         }
-    }
-
-    private func promptAndRunExtract(_ input: URL, pageCount count: Int, log: ActivityLog) {
-        guard count > 0 else {
-            showInfo(title: "Couldn't read “\(input.lastPathComponent)”",
-                     text: "The PDF may be damaged or password-protected.")
+        if probe.locked {
+            notify(id: "pdfutils.extract", title: "Extract Pages", body: "“\(input.lastPathComponent)” is password-protected.")
+            showInfo(title: "“\(input.lastPathComponent)” is password-protected",
+                     text: PDFOperationError.encryptedInput(input).errorDescription
+                        ?? "Remove its password first, then try again.")
             return
         }
-        guard let text = promptPageRange(for: input.lastPathComponent, pageCount: count) else { return } // cancelled
+        guard probe.count > 0 else {
+            notify(id: "pdfutils.extract", title: "Extract Pages", body: "Couldn't read “\(input.lastPathComponent)”.")
+            showInfo(title: "Couldn't read “\(input.lastPathComponent)”",
+                     text: "The PDF may be damaged.")
+            return
+        }
+        guard let text = promptPageRange(for: input.lastPathComponent, pageCount: probe.count) else {
+            // Cancelled — settle the "Getting ready…" notification so it doesn't linger as if work
+            // were still coming.
+            notify(id: "pdfutils.extract", title: "Extract Pages", body: "Cancelled — nothing was changed.")
+            return
+        }
         let indices: [Int]
         do {
             // Extract semantics: the whole entry is one output file, pages kept in the order typed.
-            indices = try PageRangeParser.parse(text, pageCount: count, emptyMeansAllPages: false, preserveOrder: true)
+            indices = try PageRangeParser.parse(text, pageCount: probe.count, emptyMeansAllPages: false, preserveOrder: true)
         } catch {
+            notify(id: "pdfutils.extract", title: "Extract Pages", body: "Couldn't extract those pages.")
             showInfo(title: "Couldn't extract those pages",
                      text: (error as? PDFOperationError)?.errorDescription ?? error.localizedDescription)
             return
@@ -469,7 +517,8 @@ final class HelperAppDelegate: NSObject, NSApplicationDelegate, UNUserNotificati
                 finish(id: "pdfutils.extract", title: "Extract Pages", revealed: [output], failed: [])
             } catch {
                 log.error("\(Tool.extract.title) failed for \(input.lastPathComponent): \(error.localizedDescription)")
-                finish(id: "pdfutils.extract", title: "Extract Pages", revealed: [], failed: ["extract"])
+                finish(id: "pdfutils.extract", title: "Extract Pages", revealed: [], failed: ["extract"],
+                       failureDetail: error.localizedDescription)
             }
         }
     }

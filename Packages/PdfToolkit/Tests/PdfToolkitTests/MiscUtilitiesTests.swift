@@ -65,7 +65,9 @@ import Foundation
         #expect(manager.pendingOperationsDescription.contains("\(name) (×2)")) // alert shows the stake
         manager.endOperation(name)
         #expect(manager.activeOperations.keys.contains(name)) // the second run is still going
-        #expect(!manager.pendingOperationsDescription.contains("×"))           // back to a bare name
+        // Scoped to THIS test's unique name: the manager is a shared singleton, and parallel
+        // tests (BatchRunner runs) legitimately hold their own ×N entries at the same time.
+        #expect(!manager.pendingOperationsDescription.contains("\(name) (×"))  // back to a bare name
 
         manager.endOperation(name)
         #expect(!manager.activeOperations.keys.contains(name))

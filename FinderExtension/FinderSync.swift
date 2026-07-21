@@ -1,5 +1,6 @@
 import Cocoa
 import FinderSync
+import PdfToolkit
 
 /// The Finder Sync principal class. macOS instantiates it (by the ObjC name declared in
 /// `NSExtensionPrincipalClass`) when the extension activates. We monitor the whole filesystem so
@@ -148,9 +149,9 @@ final class PdfUtilsFinderSync: FIFinderSync {
         // last-writer-wins mailbox: a second right-click while the helper was busy (cold-launching,
         // or blocked in its password/page-range prompt) overwrote the first request and one of the
         // two operations silently vanished — and the non-atomic in-place write could even be read
-        // torn by a racing ping. Unique names make requests queue up; the millisecond prefix keeps
-        // them draining in the order they were made.
-        let name = "command-\(UInt64(Date().timeIntervalSince1970 * 1000))-\(UUID().uuidString).json"
+        // torn by a racing ping. Unique names make requests queue up; the naming/order/staleness
+        // rules live in `FinderCommandFiles`, shared with the helper and unit-tested there.
+        let name = FinderCommandFiles.fileName()
         let cmdURL = URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent(name)
         if let data = try? JSONSerialization.data(withJSONObject: command, options: [.prettyPrinted]) {
             do { try data.write(to: cmdURL, options: .atomic) } catch { diag("\(name) write failed: \(error)") }

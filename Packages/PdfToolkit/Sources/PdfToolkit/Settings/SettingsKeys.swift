@@ -27,6 +27,9 @@ public enum SettingsKeys {
 
     /// How the dashboard arranges its tools (a ``DashboardLayout`` raw value): categories, grid, or list.
     public static let dashboardLayout = "pdfutils.settings.dashboardLayout"
+    /// The user's custom Categories-view section order (comma-joined ``ToolCategory`` raw values, via
+    /// ``ToolCategoryOrder``). Empty/absent means the default order.
+    public static let dashboardCategoryOrder = "pdfutils.settings.dashboardCategoryOrder"
 
     // MARK: Advanced tab
 

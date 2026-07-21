@@ -10,6 +10,8 @@ struct DashboardView: View {
     private var surfaceStyleRaw: String = SurfaceStyle.unified.rawValue
     @AppStorage(SettingsKeys.dashboardLayout)
     private var dashboardLayoutRaw: String = DashboardLayout.categories.rawValue
+    @AppStorage(SettingsKeys.dashboardCategoryOrder)
+    private var categoryOrderRaw: String = ""
 
     @State private var searchQuery = ""
 
@@ -27,6 +29,18 @@ struct DashboardView: View {
 
     private var isSearching: Bool { !trimmedQuery.isEmpty }
 
+    /// The Categories-view section order: the user's saved arrangement, always resolved to the full,
+    /// deduplicated set of categories (see ``ToolCategoryOrder``).
+    private var orderedCategories: [ToolCategory] {
+        ToolCategoryOrder.resolve(categoryOrderRaw)
+    }
+
+    /// Whether to offer "Reset order": only in the Categories view, not while searching, and only once
+    /// the order has actually been changed from the default.
+    private var canResetCategoryOrder: Bool {
+        dashboardLayout == .categories && !isSearching && !ToolCategoryOrder.isDefault(orderedCategories)
+    }
+
     private let columns = [
         GridItem(.adaptive(minimum: 200, maximum: 280), spacing: 20),
     ]
@@ -36,6 +50,21 @@ struct DashboardView: View {
     /// `isSearching`.
     private var matchedTools: [Tool] {
         rankedToolMatches(query: searchQuery)
+    }
+
+    // MARK: - Category reordering
+
+    private func moveCategory(_ category: ToolCategory, _ direction: ToolCategoryOrder.MoveDirection) {
+        let next = ToolCategoryOrder.moving(category, direction, in: orderedCategories)
+        withAnimation(.easeInOut(duration: 0.28)) {
+            categoryOrderRaw = ToolCategoryOrder.serialize(next)
+        }
+    }
+
+    private func resetCategoryOrder() {
+        withAnimation(.easeInOut(duration: 0.28)) {
+            categoryOrderRaw = ""
+        }
     }
 
     var body: some View {
@@ -100,9 +129,23 @@ struct DashboardView: View {
                     .lineSpacing(3)
                     .frame(maxWidth: 680, alignment: .leading)
             }
-            searchField
+            HStack(spacing: 12) {
+                searchField
+                if canResetCategoryOrder {
+                    Button {
+                        resetCategoryOrder()
+                    } label: {
+                        Label("Reset order", systemImage: "arrow.uturn.backward")
+                    }
+                    .controlSize(.regular)
+                    .help("Restore the default category order")
+                    .transition(.opacity.combined(with: .move(edge: .leading)))
+                }
+                Spacer(minLength: 0)
+            }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+        .animation(.easeInOut(duration: 0.2), value: canResetCategoryOrder)
     }
 
     /// A standard macOS search field: glyph + plain field + a clear button, on the shared
@@ -157,10 +200,11 @@ struct DashboardView: View {
     }
 
     private var categoriesContent: some View {
-        VStack(alignment: .leading, spacing: 32) {
-            ForEach(ToolCategory.allCases) { category in
+        let categories = orderedCategories
+        return VStack(alignment: .leading, spacing: 32) {
+            ForEach(Array(categories.enumerated()), id: \.element) { index, category in
                 VStack(alignment: .leading, spacing: 16) {
-                    categoryHeader(category)
+                    categoryHeader(category, index: index, count: categories.count)
                     toolGrid(category.tools)
                 }
             }
@@ -168,21 +212,54 @@ struct DashboardView: View {
     }
 
     /// A section label in the artifact's treatment — small, uppercase, letter-spaced — trailed by a
-    /// hairline rule that runs to the edge, in native SF type.
-    private func categoryHeader(_ category: ToolCategory) -> some View {
+    /// hairline rule that runs to the edge, in native SF type, with move-up/down controls so the
+    /// sections can be rearranged in place.
+    private func categoryHeader(_ category: ToolCategory, index: Int, count: Int) -> some View {
         HStack(spacing: 12) {
             Text(category.displayName.uppercased())
                 .font(.subheadline.weight(.semibold))
                 .tracking(0.8)
                 .foregroundStyle(.secondary)
                 .fixedSize()
+                .accessibilityAddTraits(.isHeader)
             Rectangle()
                 .fill(.primary.opacity(0.10))
                 .frame(height: 1)
+            reorderControls(category, index: index, count: count)
         }
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel(category.displayName)
-        .accessibilityAddTraits(.isHeader)
+    }
+
+    /// The up/down pair that moves a category's whole section. Grouped on a soft pill so they read as
+    /// one control; each end button disables at the edge it can't move past.
+    private func reorderControls(_ category: ToolCategory, index: Int, count: Int) -> some View {
+        HStack(spacing: 0) {
+            Button {
+                moveCategory(category, .up)
+            } label: {
+                Image(systemName: "chevron.up")
+                    .frame(width: 22, height: 20)
+                    .contentShape(Rectangle())
+            }
+            .disabled(index == 0)
+            .help("Move \(category.displayName) up")
+            .accessibilityLabel("Move \(category.displayName) up")
+
+            Button {
+                moveCategory(category, .down)
+            } label: {
+                Image(systemName: "chevron.down")
+                    .frame(width: 22, height: 20)
+                    .contentShape(Rectangle())
+            }
+            .disabled(index == count - 1)
+            .help("Move \(category.displayName) down")
+            .accessibilityLabel("Move \(category.displayName) down")
+        }
+        .buttonStyle(.plain)
+        .font(.caption.weight(.semibold))
+        .foregroundStyle(.secondary)
+        .background(.quaternary.opacity(0.6), in: Capsule())
+        .overlay(Capsule().strokeBorder(.primary.opacity(0.06), lineWidth: 1))
     }
 
     /// The flat adaptive tile grid — the app's original dashboard body, reused verbatim for Grid mode,

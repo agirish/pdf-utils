@@ -642,6 +642,7 @@ struct AdvancedSettingsTab: View {
             ListDensity.defaultsKey,
             SettingsKeys.mergePreviewBackground,
             SettingsKeys.dashboardLayout,
+            SettingsKeys.dashboardCategoryOrder,
             // Files
             SettingsKeys.saveLocation,
             SettingsKeys.afterExportAction,

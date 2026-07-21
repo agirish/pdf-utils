@@ -179,6 +179,7 @@ import Foundation
         #expect(SettingsKeys.stripMetadataOnExport == "pdfutils.settings.stripMetadataOnExport")
         #expect(SettingsKeys.defaultCompressionQuality == "pdfutils.settings.defaultCompressionQuality")
         #expect(SettingsKeys.dashboardLayout == "pdfutils.settings.dashboardLayout")
+        #expect(SettingsKeys.dashboardCategoryOrder == "pdfutils.settings.dashboardCategoryOrder")
     }
 
     // MARK: DashboardLayout

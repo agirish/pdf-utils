@@ -51,6 +51,31 @@ import Foundation
         }
     }
 
+    // MARK: - Grouping an ordered page list
+
+    @Test func groupsSlicePagesAlongCuts() {
+        let pages = ["a", "b", "c", "d", "e", "f", "g", "h"]
+        // Cuts after pages 3 and 6 → three consecutive files.
+        #expect(SplitCuts.groups(pages, cuts: [3, 6]) == [["a", "b", "c"], ["d", "e", "f"], ["g", "h"]])
+        // No cuts → one whole file.
+        #expect(SplitCuts.groups(pages, cuts: []) == [pages])
+    }
+
+    @Test func gridGroupingMatchesSegmentsForAnyCuts() {
+        // The visual grid's page groups are `segments` re-expressed over the page list — one source of
+        // truth, so the colored groups can never partition differently from what the export writes.
+        let pages = Array(1...8)
+        for cuts in [Set<Int>(), [3], [3, 6], [1, 2, 3], [4, 2], [2, 9]] {
+            let grouped = SplitCuts.groups(pages, cuts: cuts)
+            let segments = SplitCuts.segments(pageCount: pages.count, cuts: cuts)
+            #expect(grouped == segments.map { segment in segment.map { pages[$0] } })
+        }
+    }
+
+    @Test func groupsOfNoPagesIsEmpty() {
+        #expect(SplitCuts.groups([Int](), cuts: [1, 2]).isEmpty)
+    }
+
     // MARK: - Every-N reflection
 
     @Test func everyNCutsMatchPageRangeParserSegments() {

@@ -27,6 +27,13 @@ enum SplitCuts {
         return result
     }
 
+    /// Slices an ordered page list into per-file groups at the same boundaries ``segments(pageCount:cuts:)``
+    /// uses, so the visual grid renders exactly the partition the export writes — one derivation, no
+    /// second copy of the cut math. The i-th inner array is the i-th output file's pages, in order.
+    static func groups<Page>(_ pages: [Page], cuts: Set<Int>) -> [[Page]] {
+        segments(pageCount: pages.count, cuts: cuts).map { segment in segment.map { pages[$0] } }
+    }
+
     /// The cut set equivalent to "Every N pages" — a cut after every `chunkSize`-th page. Lets Visual
     /// mode and the every-N stepper draw the *same* colored groups from one derivation, and matches
     /// ``PageRangeParser/everyNPagesSegments(pageCount:chunkSize:)`` page-for-page. `chunkSize` is

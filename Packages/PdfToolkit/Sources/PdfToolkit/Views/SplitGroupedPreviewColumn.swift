@@ -54,22 +54,12 @@ struct SplitGroupedPreviewColumn: View {
 
     private var isInteractive: Bool { onToggleCut != nil }
 
-    /// The pages split into consecutive groups at the cut boundaries — one group per output file. Cells
-    /// keep their stable `spec.id`, so re-grouping after a cut is pure cache hits, never a re-render.
+    /// The pages split into consecutive groups at the cut boundaries — one group per output file,
+    /// sharing ``SplitCuts/segments(pageCount:cuts:)``' cut math so the grid can never disagree with
+    /// what the export writes. Cells keep their stable `spec.id`, so re-grouping after a cut is pure
+    /// cache hits, never a re-render.
     private var groups: [[PreviewPageSpec]] {
-        guard !pages.isEmpty else { return [] }
-        let boundaries = Set(cuts.filter { $0 >= 1 && $0 < pages.count })
-        var result: [[PreviewPageSpec]] = []
-        var current: [PreviewPageSpec] = []
-        for spec in pages {
-            current.append(spec)
-            if boundaries.contains(spec.id) {
-                result.append(current)
-                current = []
-            }
-        }
-        if !current.isEmpty { result.append(current) }
-        return result
+        SplitCuts.groups(pages, cuts: cuts)
     }
 
     var body: some View {

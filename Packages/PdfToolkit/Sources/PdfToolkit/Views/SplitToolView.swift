@@ -77,6 +77,13 @@ struct SplitToolView: View {
         return groups.isEmpty ? nil : groups.count
     }
 
+    /// The Run button gate: a file plus a split we can actually resolve. Custom-ranges mode leaves
+    /// `liveSegments` nil while the text is empty or half-typed, so this keeps a click from throwing
+    /// `pageRangeRequired`; Visual and every-N always resolve once the pages are known.
+    private var canRun: Bool {
+        inputURL != nil && liveSegments != nil
+    }
+
     /// Per-file page counts for the summary, e.g. "3 + 3 + 2 pages". Shown only when the segments are
     /// fully resolved and few enough to stay readable; a fine-grained split (many one-page files) drops
     /// to just the file count above.
@@ -230,7 +237,7 @@ struct SplitToolView: View {
 
             Divider()
 
-            RunActionButton(title: "Split & save…", busy: busy, canRun: inputURL != nil) {
+            RunActionButton(title: "Split & save…", busy: busy, canRun: canRun) {
                 Task { await runSplit() }
             }
             .padding(16)
@@ -458,7 +465,9 @@ struct SplitToolView: View {
             // neither install its stale result nor clear the spinner the newer load now owns.
             guard !Task.isCancelled else { return }
             pageSpecs = PreviewPageSpec.specs(forPDFAt: url, pageCount: count)
-            if chunkSize > max(1, pageSpecs.count) { chunkSize = 1 }
+            // A smaller document caps the chunk at its page count (every-N of a short file is one
+            // file) rather than snapping back to 1 — "every 8" on a 5-page doc becomes "every 5".
+            chunkSize = min(chunkSize, max(1, pageSpecs.count))
             isGeneratingPreviews = false
         } catch is CancellationError {
             // Superseded mid-load; the newer load owns the state.

@@ -12,7 +12,9 @@ private enum CompressMode: Hashable {
 /// A named compression-strength preset — the friendly front end to the quality slider. Each card seeds
 /// the quality value and advertises its own live projected output size, so the choice reads as an
 /// outcome ("~2.3 MB, still sharp") instead of an abstract 0…1 number.
-private struct CompressionStrength: Identifiable {
+///
+/// Not `private`: `selectedID(for:)`'s bucket boundaries are pinned directly in the unit tests.
+struct CompressionStrength: Identifiable {
     let id: String
     let title: String
     let subtitle: String
@@ -49,11 +51,18 @@ private enum SizeEstimate: Equatable {
     case unavailable
 
     var bytes: Int? { if case .ready(let b) = self { return b } else { return nil } }
+
+    /// A settled, reusable size — the only state the estimate cache may skip recomputing. A cache miss,
+    /// an `.estimating` marker stranded by a superseded task, and a (possibly transient) `.unavailable`
+    /// are all recomputed, so no card is left spinning and a one-off failure gets another try.
+    var isResolved: Bool { if case .ready = self { return true } else { return false } }
 }
 
 /// The payoff of a finished compression run: the real on-disk sizes before and after, plus where the
 /// output landed so it can be revealed in Finder.
-private struct CompressionResult: Equatable {
+///
+/// Not `private`: the reduction math (zero-byte and non-shrinking edge cases) is unit-tested directly.
+struct CompressionResult: Equatable {
     let inputBytes: Int64
     let outputBytes: Int64
     let url: URL
@@ -71,6 +80,9 @@ struct CompressToolView: View {
     // Starts on (and writes back to) the Advanced "Default compression quality" — so the slider is
     // pre-selected and sticky across launches. Same 0.2…1 range as that control.
     @AppStorage(SettingsKeys.defaultCompressionQuality) private var quality: Double = 0.72
+    // Mirrors the Files-tab "Strip metadata on export" toggle so estimates track it: the saved file is
+    // re-serialized post-strip when this is on, which shifts its size, so the projected sizes must too.
+    @AppStorage(SettingsKeys.stripMetadataOnExport) private var stripMetadataOnExport = false
     @State private var mode: CompressMode = .quality
     // Target file size in megabytes for `.targetSize` mode. A plain, friendly unit for the field.
     @State private var targetMB: Double = 2
@@ -95,6 +107,9 @@ struct CompressToolView: View {
     @State private var targetEstimates: [Int: SizeEstimate] = [:]
     /// The file the caches belong to; when the selected file changes they're dropped.
     @State private var estimatedPath: String?
+    /// The strip-metadata setting the cached sizes were computed under; a change to it invalidates them
+    /// all (every saved size shifts), exactly like a file change.
+    @State private var estimatedStripMetadata = false
 
     /// The before/after readout of the most recent run, cleared when the selected file changes.
     @State private var lastResult: CompressionResult?
@@ -470,7 +485,7 @@ struct CompressToolView: View {
     /// whenever any of these move, which both recomputes and — via the debounce inside — coalesces a
     /// storm of slider ticks into one computation on settle.
     private var estimateContext: String {
-        "\(singleFile?.path ?? "")|\(mode == .quality ? "q" : "t")|\(qKey(quality))|\(targetBytes)"
+        "\(singleFile?.path ?? "")|\(mode == .quality ? "q" : "t")|\(qKey(quality))|\(targetBytes)|\(stripMetadataOnExport ? "s" : "n")"
     }
 
     @MainActor
@@ -481,11 +496,15 @@ struct CompressToolView: View {
             estimatedPath = nil
             return
         }
-        // A new file invalidates every cached size.
-        if estimatedPath != url.path {
+        // A new file — or a change to whether export strips metadata, which re-serializes and so
+        // shifts every saved size — invalidates every cached estimate (the caches are keyed by
+        // quality/target alone, not by either of those inputs).
+        let strip = stripMetadataOnExport
+        if estimatedPath != url.path || estimatedStripMetadata != strip {
             qualityEstimates = [:]
             targetEstimates = [:]
             estimatedPath = url.path
+            estimatedStripMetadata = strip
         }
 
         // Debounce: a slider drag or a target keystroke restarts this task, so only a value that stays
@@ -502,50 +521,99 @@ struct CompressToolView: View {
             for strength in CompressionStrength.all where strength.id != selectedID {
                 keys.insert(qKey(strength.quality))
             }
-            let toCompute = keys.filter { qualityEstimates[$0] == nil }
+            // Recompute only keys without a settled size: a `.ready` entry is reusable across quality
+            // changes, while a `.estimating` stranded by a superseded task and a transient `.unavailable`
+            // are both retried (so no card stays spinning and a one-off failure recovers).
+            let toCompute = keys.filter { !(qualityEstimates[$0]?.isResolved ?? false) }
+            guard !toCompute.isEmpty else { return }
             for key in toCompute { qualityEstimates[key] = .estimating }
+
+            // All three cards in ONE enqueued queue slot, not one per card: three separate whole-document
+            // compressions would monopolize the serial PDF queue that also renders thumbnails and runs
+            // "Compress & save". The batch bails between passes when this task is superseded.
+            let path = url.path
+            let sizes = await computeQualityEstimates(url: url, keys: toCompute, stripMetadata: strip)
+            // If the selection (or strip setting) moved on while this ran, its caches were reset; writing
+            // file X's sizes into file Y's fresh cache would silently show stale numbers with no spinner.
+            // Drop the whole batch — the now-current task recomputes what it needs.
+            guard Self.shouldStoreEstimate(computedPath: path, currentPath: estimatedPath, isCancelled: Task.isCancelled)
+            else { return }
             for key in toCompute {
-                // No post-await cancellation check: `compressData` runs to completion regardless (it
-                // doesn't poll cancellation), and the result is keyed by quality — always a correct,
-                // reusable cache entry — so storing it even on a superseded task avoids a stuck spinner.
-                qualityEstimates[key] = await computeQualityEstimate(url: url, quality: Double(key) / 1000)
+                qualityEstimates[key] = sizes[key].map(SizeEstimate.ready) ?? .unavailable
             }
         case .targetSize:
             let key = targetBytes
-            guard targetEstimates[key] == nil else { return }
+            guard !(targetEstimates[key]?.isResolved ?? false) else { return }
             targetEstimates[key] = .estimating
-            targetEstimates[key] = await computeTargetEstimate(url: url, targetBytes: key)
+            let path = url.path
+            let estimate = await computeTargetEstimate(url: url, targetBytes: key, stripMetadata: strip)
+            guard Self.shouldStoreEstimate(computedPath: path, currentPath: estimatedPath, isCancelled: Task.isCancelled)
+            else { return }
+            targetEstimates[key] = estimate
         }
     }
 
-    /// Runs the real quality-mode compression in memory and returns just its byte count — the exact size
-    /// `runCompress`'s `.quality` path (which calls the same `compressData`) will write.
-    private func computeQualityEstimate(url: URL, quality: Double) async -> SizeEstimate {
+    /// Whether an estimate computed for `computedPath` should still be written into the cache: only when
+    /// the caches still belong to that file (the selection hasn't moved on and reset them) and the task
+    /// hasn't been superseded. Extracted as a pure static function so the cross-file guard that closes
+    /// the stale-estimate race is unit-testable without driving the SwiftUI view. `nonisolated` so it's
+    /// callable from a plain test (the view is inferred `@MainActor` via `View`).
+    nonisolated static func shouldStoreEstimate(computedPath: String, currentPath: String?, isCancelled: Bool) -> Bool {
+        !isCancelled && currentPath == computedPath
+    }
+
+    /// Measures the real `compressData` output size for each requested quality key — the exact bytes a
+    /// run at that quality writes — inside a *single* enqueued serial-queue slot rather than one slot per
+    /// card, so the badge estimates don't monopolize the queue that also renders thumbnails and runs the
+    /// save. Cancellable *between* keys (a superseded task stops before the next pass; a single
+    /// `compressData` pass itself doesn't poll), and strip-aware so the size matches the saved file when
+    /// "Strip metadata on export" is on. Returns key → byte count for the passes that completed; a key
+    /// absent from the result failed to compress and surfaces as `.unavailable`.
+    private func computeQualityEstimates(url: URL, keys: Set<Int>, stripMetadata: Bool) async -> [Int: Int] {
+        let sortedKeys = keys.sorted()
         do {
-            let bytes = try await PDFBackgroundWork.run {
+            return try await PDFBackgroundWork.run { isCancelled in
                 try url.withSecurityScopedAccess {
-                    try PDFToolkit.compressData(inputURL: url, quality: quality).count
+                    var sizes: [Int: Int] = [:]
+                    for key in sortedKeys {
+                        if isCancelled() { break }
+                        guard let data = try? PDFToolkit.compressData(inputURL: url, quality: Double(key) / 1000)
+                        else { continue }
+                        sizes[key] = Self.exportedByteCount(of: data, stripMetadata: stripMetadata)
+                    }
+                    return sizes
                 }
             }
-            return .ready(bytes)
         } catch {
-            return .unavailable
+            return [:]
         }
     }
 
     /// Runs the real target-size sweep in memory and returns just its byte count — the exact size the
     /// `.targetSize` run (same `compressToTargetData`) will write, which may sit under the target.
-    private func computeTargetEstimate(url: URL, targetBytes: Int) async -> SizeEstimate {
+    private func computeTargetEstimate(url: URL, targetBytes: Int, stripMetadata: Bool) async -> SizeEstimate {
         do {
             let bytes = try await PDFBackgroundWork.run {
                 try url.withSecurityScopedAccess {
-                    try PDFToolkit.compressToTargetData(inputURL: url, targetBytes: targetBytes).count
+                    let data = try PDFToolkit.compressToTargetData(inputURL: url, targetBytes: targetBytes)
+                    return Self.exportedByteCount(of: data, stripMetadata: stripMetadata)
                 }
             }
             return .ready(bytes)
         } catch {
             return .unavailable
         }
+    }
+
+    /// The size the estimate should report for produced `data`: the raw compressed bytes, or — when
+    /// export strips metadata — the re-serialized post-strip bytes, so the badge equals the file
+    /// `PDFExportCoordinator` actually writes. Must run on the PDF serial queue: `stripMetadata` builds
+    /// a `PDFDocument`. Mirrors `PDFExportCoordinator.route`'s finalize step exactly, so the default
+    /// (no-strip) estimate stays byte-for-byte equal to the saved output. `nonisolated` so it runs on
+    /// the calling PDF-queue thread rather than hopping to the main actor (the view is inferred
+    /// `@MainActor` via `View`) — PDFKit work must never leave that serial queue.
+    private nonisolated static func exportedByteCount(of data: Data, stripMetadata: Bool) -> Int {
+        stripMetadata ? PDFExportCoordinator.stripMetadata(data).count : data.count
     }
 
     // MARK: - Single-file run

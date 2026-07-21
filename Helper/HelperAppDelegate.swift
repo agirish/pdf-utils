@@ -177,16 +177,30 @@ final class HelperAppDelegate: NSObject, NSApplicationDelegate, UNUserNotificati
 
     @objc private func quit() { NSApp.terminate(nil) }
 
+    private var pendingWorkCount: Int {
+        activeBatches + interactiveJobs.count + (interactiveRunnerActive ? 1 : 0)
+    }
+
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
-        let pendingWork = activeBatches + interactiveJobs.count + (interactiveRunnerActive ? 1 : 0)
-        guard pendingWork > 0 else { return .terminateNow }
-        NSApp.activate(ignoringOtherApps: true)
-        let alert = NSAlert()
-        alert.messageText = "PDF work is still in progress"
-        alert.informativeText = "Quitting now abandons the remaining Finder requests — they won't re-run on the next launch."
-        alert.addButton(withTitle: "Quit Anyway")
-        alert.addButton(withTitle: "Keep Working")
-        return alert.runModal() == .alertFirstButtonReturn ? .terminateNow : .terminateCancel
+        // Loop, don't snapshot once: the alert's own nested run loop keeps delivering pings, so
+        // requests can be consumed WHILE it is up — work the user's "Quit Anyway" never covered.
+        // Re-check after each answer and only quit when nothing new appeared; the loop only
+        // repeats when new requests arrived mid-alert, so it terminates with the user's intent
+        // honestly informed.
+        var warnedAbout = pendingWorkCount
+        while warnedAbout > 0 {
+            NSApp.activate(ignoringOtherApps: true)
+            let alert = NSAlert()
+            alert.messageText = "PDF work is still in progress"
+            alert.informativeText = "Quitting now abandons the queued Finder requests — they won't re-run on the next launch — and can leave a half-written output from the file being processed."
+            alert.addButton(withTitle: "Quit Anyway")
+            alert.addButton(withTitle: "Keep Working")
+            guard alert.runModal() == .alertFirstButtonReturn else { return .terminateCancel }
+            let current = pendingWorkCount
+            if current <= warnedAbout { break }   // nothing new since the warning — honor the quit
+            warnedAbout = current                 // more arrived mid-alert: warn again, fresh count
+        }
+        return .terminateNow
     }
 
     // MARK: - Login item
@@ -385,10 +399,14 @@ final class HelperAppDelegate: NSObject, NSApplicationDelegate, UNUserNotificati
                 body = failureDetail ?? "Couldn't complete. The file may be open elsewhere or damaged."
                 // The notification below rides a channel that does not deliver for this nested
                 // helper (see flashStatusIcon's rationale and the Finder-integration notes) — so
-                // when the user's click produced NOTHING, say why in a channel that works. Partial
-                // results skip the modal: the Finder reveal + flash already show something
-                // happened, and the log has the per-file detail.
-                showInfo(title: title, text: body)
+                // when the user's click produced NOTHING, say why in a channel that works.
+                // Through the FIFO, not directly: a direct runModal here stacked this alert on
+                // top of an open unlock/extract prompt (where a Return aimed at the prompt
+                // dismissed the failure unread) and on other failure alerts — the exact LIFO
+                // shape the FIFO exists to prevent. Partial results skip the modal: the Finder
+                // reveal + flash already show something happened, and the log has the detail.
+                let alertBody = body
+                enqueueInteractive { self.showInfo(title: title, text: alertBody) }
             } else {
                 body = "\(revealed.count) done, \(failed.count) failed."
             }

@@ -52,7 +52,7 @@ public enum Tool: String, CaseIterable, Identifiable, Hashable {
         case .extract:
             return "Save selected pages as a new PDF"
         case .reorder:
-            return "Rearrange pages into a new order"
+            return "Rearrange pages, and drop any you don't need"
         case .deletePages:
             return "Remove unwanted pages"
         case .watermark:
@@ -88,7 +88,7 @@ public enum Tool: String, CaseIterable, Identifiable, Hashable {
         case .extract:
             return "Copy chosen pages into a new PDF in the order you type (for example 5,1,2). Handy for pulling chapters or attachments out of a larger document."
         case .reorder:
-            return "Drag pages into the order you want, then save a new PDF. The preview follows the arrangement so you can see the result before saving; the original file is untouched."
+            return "Drag pages into the order you want—and trash any you don't need—then save a new PDF. Removed pages are only left out of the copy; nothing changes on disk, and you can restore any of them before saving. The preview follows the arrangement so you can see the result before saving; the original file is untouched."
         case .deletePages:
             return "Produce a new PDF without the pages you specify. You must list which pages to drop—an empty field will not delete everything. At least one page must remain."
         case .watermark:

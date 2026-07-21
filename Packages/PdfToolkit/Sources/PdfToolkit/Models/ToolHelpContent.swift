@@ -201,21 +201,25 @@ extension Tool {
         case .reorder:
             return ToolHelpContent(
                 overview:
-                    "Reorder Pages lists every page of a PDF so you can rearrange them and save the result as a new file. The preview on the right always reflects the current arrangement, labeled with each page's original number.",
+                    "Reorder Pages lists every page of a PDF so you can rearrange them—and drop the ones you don't need—then save the result as a new file. Removing a page only leaves it out of the saved copy; your original file is never changed, and any removed page can be restored. The preview on the right always reflects the pages you're keeping, labeled with each page's original number.",
                 steps: [
                     "Choose or drop a PDF; its pages load as a draggable list.",
                     "Drag rows into the order you want, or nudge a row with its ↑ / ↓ buttons.",
-                    "Watch the preview reflow into the new order; use Reset to restore the original.",
+                    "Trash any page you don't want in the copy; restore it from the Removed area if you change your mind.",
+                    "Watch the preview reflow to the pages you're keeping; use Reset to restore the original order and bring every page back.",
                     "Click Save reordered PDF… and pick a name for the new file.",
                 ],
                 controls: [
-                    ("Page list", "One row per page. The leading number is the new position; “Page N” is where it came from."),
+                    ("Page list", "One row per kept page. The leading number is the new position; “Page N” is where it came from."),
                     ("↑ / ↓", "Moves a row up or down by one without dragging."),
-                    ("Reset", "Restores the original page order. Appears once you've moved something."),
-                    ("Save reordered PDF…", "Writes a new PDF whose pages follow the list order; the original file is unchanged."),
+                    ("Trash", "Leaves that page out of the saved copy. Nothing is written to disk, so it's easy to undo."),
+                    ("Removed (N) · Restore", "Lists the pages you've removed; Restore adds one back, Restore all brings every page back."),
+                    ("Reset", "Restores the original order and brings back every removed page. Appears once you've changed something."),
+                    ("Save reordered PDF…", "Writes a new PDF with only the kept pages, in the list order; the original file is unchanged."),
                 ],
                 tips: [
                     "Saving without changing anything just copies the document in its original order.",
+                    "Saving is blocked while every page is removed—restore at least one to write a file.",
                 ]
             )
         case .deletePages:

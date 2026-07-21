@@ -85,6 +85,42 @@ import PDFKit
         #expect(texts[1].contains("P2"))
     }
 
+    @Test func reorderCanDropPagesWhileReordering() throws {
+        // The Reorder tool's "remove page" affordance drops an index from the working order, so the
+        // order it hands the engine is a *reordered subset*: fewer pages than the source, in a new
+        // arrangement. Prove the output holds exactly the kept pages, in that order — the shape a
+        // user gets from dragging P4 to the top and trashing P2 and P3.
+        let dir = FixtureDir()
+        let src = dir.url("src.pdf"), out = dir.url("out.pdf")
+        try PDFFixtures.writePDF(markers: ["P1", "P2", "P3", "P4"], to: src)
+
+        try PDFToolkit.reorder(inputURL: src, outputURL: out, order: [3, 0])
+
+        let texts = try PDFFixtures.pageTexts(at: out)
+        #expect(texts.count == 2)
+        #expect(texts[0].contains("P4"))
+        #expect(texts[1].contains("P1"))
+    }
+
+    @Test func reorderPreservesEachKeptPagesRotation() throws {
+        // Page geometry has bitten this app before, so pin it: when a rotated page survives a
+        // drop-and-reorder, its /Rotate must travel with the correct page — not get reassigned to
+        // whatever now sits at that output position. Page 1 is turned 90°, page 3 turned 180°;
+        // keeping [page3, page1] must yield rotations [180, 90] with matching text identity.
+        let dir = FixtureDir()
+        let src = dir.url("src.pdf"), out = dir.url("out.pdf")
+        try PDFFixtures.writePDF(markers: ["P1", "P2", "P3"], rotations: [0: 90, 2: 180], to: src)
+
+        try PDFToolkit.reorder(inputURL: src, outputURL: out, order: [2, 0])
+
+        let texts = try PDFFixtures.pageTexts(at: out)
+        let rotations = try PDFFixtures.pageRotations(at: out)
+        #expect(texts.count == 2)
+        #expect(texts[0].contains("P3"))
+        #expect(texts[1].contains("P1"))
+        #expect(rotations == [180, 90])
+    }
+
     // MARK: - Delete
 
     @Test func deleteRemovesTheNamedPages() throws {

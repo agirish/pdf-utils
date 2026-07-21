@@ -16,7 +16,13 @@ private struct ReorderItem: Identifiable, Equatable {
 struct ReorderToolView: View {
     @Environment(\.toolAccent) private var accent
     @State private var inputURL: URL?
+    /// The pages that will be written, in output order. Removing a page moves it out of here and
+    /// into `removedItems`, so the list, the preview, and the exported copy all follow this array.
     @State private var items: [ReorderItem] = []
+    /// Pages the user has removed. They are only left out of the exported copy — the source file is
+    /// never touched — so they are kept here (with their rendered thumbnail) so any can be restored.
+    /// Held sorted by original index for a stable "Removed" list regardless of removal order.
+    @State private var removedItems: [ReorderItem] = []
     @State private var busy = false
     @State private var alertMessage: String?
     @State private var showImporter = false
@@ -32,8 +38,18 @@ struct ReorderToolView: View {
         inputURL?.standardizedFileURL.path ?? ""
     }
 
-    private var isReordered: Bool {
-        items.enumerated().contains { $0.offset != $0.element.originalIndex }
+    /// True once the working set differs from the untouched document — either a page was removed or
+    /// the kept pages are no longer in their original order. Drives the Reset affordance and the
+    /// "you've changed something" affordances; a fresh load with nothing moved reads as unmodified.
+    private var isModified: Bool {
+        if !removedItems.isEmpty { return true }
+        return items.enumerated().contains { $0.offset != $0.element.originalIndex }
+    }
+
+    /// Every page has been removed: there is nothing to write, so saving is blocked until at least
+    /// one page is restored.
+    private var allPagesRemoved: Bool {
+        items.isEmpty && !removedItems.isEmpty
     }
 
     /// The right-hand preview, in the current arrangement, each labeled with its original page number.
@@ -50,9 +66,11 @@ struct ReorderToolView: View {
                 isGenerating: isGeneratingPreviews,
                 thumbnailSize: $thumbnailSize,
                 accent: accent,
-                previewSubtitle: "Pages in the new order (labels show each page's original number).",
-                emptyTitle: "No PDF selected",
-                emptySubtitle: "Drop a PDF here or choose one to arrange its pages.",
+                previewSubtitle: "The pages you keep, in the new order (labels show each page's original number).",
+                emptyTitle: allPagesRemoved ? "All pages removed" : "No PDF selected",
+                emptySubtitle: allPagesRemoved
+                    ? "Restore a page on the left to preview it."
+                    : "Drop a PDF here or choose one to arrange its pages.",
                 emptySystemImage: "arrow.up.arrow.down.square"
             )
             .frame(minWidth: 360)
@@ -146,14 +164,14 @@ struct ReorderToolView: View {
                     .font(.title3.weight(.semibold))
                 Spacer(minLength: 8)
                 HStack(spacing: 10) {
-                    if inputURL != nil, isReordered {
+                    if inputURL != nil, isModified {
                         Button("Reset") { resetOrder() }
                             .buttonStyle(.borderless)
                             .font(.subheadline.weight(.medium))
                             .foregroundStyle(.secondary)
                             .lineLimit(1)
                             .fixedSize(horizontal: true, vertical: false)
-                            .help("Restore the original page order")
+                            .help("Restore the original order and bring back removed pages")
                     }
                     if inputURL != nil {
                         Button("Clear") { inputURL = nil }
@@ -180,9 +198,9 @@ struct ReorderToolView: View {
 
     private var sidebarSubtitle: String {
         if inputURL == nil {
-            return "Drop a PDF or add a file. Drag rows — or use the arrows — to set a new page order."
+            return "Drop a PDF or add a file. Drag rows — or use the arrows — to set a new page order, and drop any you don't need."
         }
-        return "Drag rows to rearrange, or use ↑ / ↓. The preview on the right follows the new order."
+        return "Drag rows to rearrange, or use ↑ / ↓. Trash a page to leave it out of the saved copy — your original file is untouched."
     }
 
     private var emptyDropZone: some View {
@@ -193,7 +211,7 @@ struct ReorderToolView: View {
                 .foregroundStyle(accent.opacity(0.85))
             Text("Drop a PDF here or add a file")
                 .font(.title3.weight(.semibold))
-            Text("Its pages appear as a list you can drag into any order.")
+            Text("Its pages appear as a list you can drag into any order — remove the ones you don't need.")
                 .font(.body)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
@@ -218,8 +236,8 @@ struct ReorderToolView: View {
     }
 
     private var pageListCard: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            if isGeneratingPreviews && items.isEmpty {
+        VStack(alignment: .leading, spacing: 12) {
+            if isGeneratingPreviews && items.isEmpty && removedItems.isEmpty {
                 HStack(spacing: 8) {
                     ProgressView().controlSize(.small)
                     Text("Reading pages…")
@@ -228,30 +246,153 @@ struct ReorderToolView: View {
                 }
                 .padding(.vertical, 12)
             } else {
-                Text("\(items.count) page\(items.count == 1 ? "" : "s") — drag to reorder")
-                    .font(.subheadline.weight(.medium))
-                    .foregroundStyle(.secondary)
-                    .padding(.horizontal, 4)
-
-                List(selection: $selectedItemID) {
-                    ForEach(items) { item in
-                        pageRow(for: item)
-                            .listRowInsets(EdgeInsets(top: 6, leading: 12, bottom: 6, trailing: 8))
-                            .listRowBackground(rowBackground)
-                            .tag(item.id)
-                    }
-                    .onMove(perform: moveItems)
+                if allPagesRemoved {
+                    allPagesRemovedNotice
+                } else {
+                    activePageList
                 }
-                .listStyle(.plain)
-                .scrollContentBackground(.hidden)
-                .frame(minHeight: 220, idealHeight: 320, maxHeight: 460)
-                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-                .overlay {
-                    RoundedRectangle(cornerRadius: 12, style: .continuous)
-                        .strokeBorder(Color.primary.opacity(0.06), lineWidth: 1)
+                if !removedItems.isEmpty {
+                    removedSection
                 }
             }
         }
+    }
+
+    private var activePageList: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("\(items.count) page\(items.count == 1 ? "" : "s") — drag to reorder")
+                .font(.subheadline.weight(.medium))
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 4)
+
+            List(selection: $selectedItemID) {
+                ForEach(items) { item in
+                    pageRow(for: item)
+                        .listRowInsets(EdgeInsets(top: 6, leading: 12, bottom: 6, trailing: 8))
+                        .listRowBackground(rowBackground)
+                        .tag(item.id)
+                }
+                .onMove(perform: moveItems)
+            }
+            .listStyle(.plain)
+            .scrollContentBackground(.hidden)
+            .frame(minHeight: 220, idealHeight: 320, maxHeight: 460)
+            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .strokeBorder(Color.primary.opacity(0.06), lineWidth: 1)
+            }
+        }
+    }
+
+    /// Shown when every page has been removed: saving is blocked, so point the user at the Restore
+    /// controls right below instead of leaving them staring at an empty list.
+    private var allPagesRemovedNotice: some View {
+        VStack(spacing: 10) {
+            Image(systemName: "tray")
+                .font(.system(size: 28, weight: .light))
+                .symbolRenderingMode(.hierarchical)
+                .foregroundStyle(.secondary)
+            Text("Every page is removed")
+                .font(.callout.weight(.semibold))
+            Text("Restore at least one page below to save. Nothing is written while the list is empty.")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 24)
+        .padding(.horizontal, 16)
+        .background {
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(Color.primary.opacity(0.025))
+        }
+        .overlay {
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .strokeBorder(Color.primary.opacity(0.06), lineWidth: 1)
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Every page is removed. Restore at least one page to save.")
+    }
+
+    /// The "Removed (N)" area: mirrors Delete Pages' "from a copy" framing so removal never reads as
+    /// touching the source, and offers a per-page and a bulk way back.
+    private var removedSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Label("Removed (\(removedItems.count))", systemImage: "trash")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                Spacer(minLength: 8)
+                Button("Restore all") { restoreAll() }
+                    .buttonStyle(.borderless)
+                    .font(.subheadline.weight(.medium))
+                    .lineLimit(1)
+                    .fixedSize(horizontal: true, vertical: false)
+                    .help("Bring every removed page back into the list")
+            }
+            Text("Left out of the saved copy only — your original file is untouched.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            let rows = VStack(spacing: 6) {
+                ForEach(removedItems) { item in
+                    removedRow(for: item)
+                }
+            }
+            // Bound the area so a document with many removed pages can't push the save bar off-screen.
+            if removedItems.count > 5 {
+                ScrollView { rows }
+                    .frame(maxHeight: 176)
+            } else {
+                rows
+            }
+        }
+        .padding(12)
+        .background {
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(Color.primary.opacity(0.025))
+        }
+        .overlay {
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .strokeBorder(Color.primary.opacity(0.06), lineWidth: 1)
+        }
+    }
+
+    private func removedRow(for item: ReorderItem) -> some View {
+        HStack(alignment: .center, spacing: 12) {
+            Image(nsImage: item.image)
+                .resizable()
+                .aspectRatio(contentMode: .fit)
+                .frame(width: 26, height: 34)
+                .background(Color.white)
+                .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
+                .overlay {
+                    RoundedRectangle(cornerRadius: 4, style: .continuous)
+                        .strokeBorder(Color.primary.opacity(0.12), lineWidth: 0.5)
+                }
+                .opacity(0.55)
+
+            Text("Page \(item.pageNumber)")
+                .font(.callout.weight(.medium))
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+            Button { restorePage(item) } label: {
+                Label("Restore", systemImage: "arrow.uturn.backward")
+                    .font(.subheadline.weight(.medium))
+            }
+            .buttonStyle(.borderless)
+            .tint(accent)
+            .help("Add page \(item.pageNumber) back to the list")
+        }
+        .padding(.vertical, 4)
+        .padding(.horizontal, 4)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Removed original page \(item.pageNumber)")
+        .accessibilityHint("Restores this page to the list")
     }
 
     private var rowBackground: some View {
@@ -299,6 +440,14 @@ struct ReorderToolView: View {
             .background {
                 Capsule().fill(Color(nsColor: .controlBackgroundColor).opacity(0.65))
             }
+
+            Button(role: .destructive) {
+                removePage(item)
+            } label: {
+                Image(systemName: "trash").font(.body.weight(.medium))
+            }
+            .buttonStyle(.borderless)
+            .help("Remove page \(item.pageNumber) — left out of the saved copy; your file is untouched")
         }
         .padding(.vertical, 4)
         .accessibilityElement(children: .combine)
@@ -318,7 +467,35 @@ struct ReorderToolView: View {
     }
 
     private func resetOrder() {
-        items.sort { $0.originalIndex < $1.originalIndex }
+        // Back to the untouched document: every page present, in original order.
+        items = (items + removedItems).sorted { $0.originalIndex < $1.originalIndex }
+        removedItems = []
+    }
+
+    // MARK: - Removal
+
+    /// Excludes a page from the exported copy. The rendered page is kept in `removedItems` (sorted by
+    /// original index) so it can be restored; nothing is written to disk.
+    private func removePage(_ item: ReorderItem) {
+        guard let index = items.firstIndex(of: item) else { return }
+        let removed = items.remove(at: index)
+        let insertAt = removedItems.firstIndex { $0.originalIndex > removed.originalIndex } ?? removedItems.count
+        removedItems.insert(removed, at: insertAt)
+        if selectedItemID == removed.id { selectedItemID = nil }
+    }
+
+    /// Puts a removed page back at the end of the working order; the user can drag it wherever they
+    /// want from there.
+    private func restorePage(_ item: ReorderItem) {
+        guard let index = removedItems.firstIndex(of: item) else { return }
+        items.append(removedItems.remove(at: index))
+    }
+
+    private func restoreAll() {
+        guard !removedItems.isEmpty else { return }
+        // Append in ascending original order so a bulk restore reads predictably.
+        items.append(contentsOf: removedItems.sorted { $0.originalIndex < $1.originalIndex })
+        removedItems = []
     }
 
     // MARK: - Thumbnails
@@ -326,14 +503,17 @@ struct ReorderToolView: View {
     private func loadThumbnails() async {
         guard let url = inputURL else {
             items = []
+            removedItems = []
             isGeneratingPreviews = false
             return
         }
         // Clear the old document's rows BEFORE the await: `items` is what "Reorder & save…"
         // applies to the current `inputURL`, so leaving them populated while the new file's
         // thumbnails render lets a click apply document A's page order (and count) to document B —
-        // silently truncating it to A's page count.
+        // silently truncating it to A's page count. Drop the removed set with it so removals typed
+        // against document A can't carry over and silently omit pages from document B.
         items = []
+        removedItems = []
         isGeneratingPreviews = true
         do {
             let thumbs = try await PDFPageThumbnailLoader.loadAllPages(from: url)
@@ -347,6 +527,7 @@ struct ReorderToolView: View {
         } catch {
             guard !Task.isCancelled else { return }
             items = []
+            removedItems = []
             isGeneratingPreviews = false
             if case PDFOperationError.encryptedInput = error {
                 // Locked selection: actionable message + back to the empty state (Metadata's pattern).

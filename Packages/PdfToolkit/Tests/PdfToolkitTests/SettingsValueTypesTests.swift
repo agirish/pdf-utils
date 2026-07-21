@@ -180,6 +180,8 @@ import Foundation
         #expect(SettingsKeys.defaultCompressionQuality == "pdfutils.settings.defaultCompressionQuality")
         #expect(SettingsKeys.dashboardLayout == "pdfutils.settings.dashboardLayout")
         #expect(SettingsKeys.dashboardCategoryOrder == "pdfutils.settings.dashboardCategoryOrder")
+        #expect(SettingsKeys.dashboardToolOrder == "pdfutils.settings.dashboardToolOrder")
+        #expect(SettingsKeys.dashboardPinnedTools == "pdfutils.settings.dashboardPinnedTools")
     }
 
     // MARK: DashboardLayout

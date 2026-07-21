@@ -30,6 +30,12 @@ public enum SettingsKeys {
     /// The user's custom Categories-view section order (comma-joined ``ToolCategory`` raw values, via
     /// ``ToolCategoryOrder``). Empty/absent means the default order.
     public static let dashboardCategoryOrder = "pdfutils.settings.dashboardCategoryOrder"
+    /// The user's custom within-category tool order (per-category segments, via ``ToolOrder``).
+    /// Empty/absent means every section keeps its curated ``ToolCategory/tools`` order.
+    public static let dashboardToolOrder = "pdfutils.settings.dashboardToolOrder"
+    /// The tools the user has pinned to the top of the dashboard (comma-joined ``Tool`` raw values, in
+    /// pin order, via ``PinnedTools``). Empty/absent means nothing is pinned.
+    public static let dashboardPinnedTools = "pdfutils.settings.dashboardPinnedTools"
 
     // MARK: Advanced tab
 

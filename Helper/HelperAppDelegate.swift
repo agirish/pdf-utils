@@ -30,6 +30,12 @@ final class HelperAppDelegate: NSObject, NSApplicationDelegate, UNUserNotificati
     private var interactiveJobs: [() async -> Void] = []
     private var interactiveRunnerActive = false
 
+    /// Work-queue batches dispatched but not yet finished (compress/merge/rotate/extract writes).
+    /// Together with the interactive FIFO state this is "work the user asked for that hasn't
+    /// happened yet" — the request files are already consumed, so quitting abandons it silently
+    /// and the staleness cutoff stops any replay. `applicationShouldTerminate` warns first.
+    private var activeBatches = 0
+
     private func enqueueInteractive(_ job: @escaping () async -> Void) {
         interactiveJobs.append(job)
         guard !interactiveRunnerActive else { return }
@@ -171,6 +177,18 @@ final class HelperAppDelegate: NSObject, NSApplicationDelegate, UNUserNotificati
 
     @objc private func quit() { NSApp.terminate(nil) }
 
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        let pendingWork = activeBatches + interactiveJobs.count + (interactiveRunnerActive ? 1 : 0)
+        guard pendingWork > 0 else { return .terminateNow }
+        NSApp.activate(ignoringOtherApps: true)
+        let alert = NSAlert()
+        alert.messageText = "PDF work is still in progress"
+        alert.informativeText = "Quitting now abandons the remaining Finder requests — they won't re-run on the next launch."
+        alert.addButton(withTitle: "Quit Anyway")
+        alert.addButton(withTitle: "Keep Working")
+        return alert.runModal() == .alertFirstButtonReturn ? .terminateNow : .terminateCancel
+    }
+
     // MARK: - Login item
 
     /// Launch-at-login is done through a bundled LaunchAgent the helper registers for itself
@@ -266,6 +284,7 @@ final class HelperAppDelegate: NSObject, NSApplicationDelegate, UNUserNotificati
         switch action {
         case "compress":
             notify(id: "pdfutils.compress", title: "Compress PDF", body: startBody(inputs.count))
+            activeBatches += 1
             workQueue.async { [self] in
                 var revealed: [URL] = []
                 var failed: [String] = []
@@ -287,6 +306,7 @@ final class HelperAppDelegate: NSObject, NSApplicationDelegate, UNUserNotificati
 
         case "merge":
             notify(id: "pdfutils.merge", title: "Merge PDFs", body: startBody(inputs.count))
+            activeBatches += 1
             workQueue.async { [self] in
                 // Combined in Finder's selection order, into the first file's folder.
                 let output = Self.uniqueOutput(inDirectory: inputs[0].deletingLastPathComponent(), name: "Merged")
@@ -304,6 +324,7 @@ final class HelperAppDelegate: NSObject, NSApplicationDelegate, UNUserNotificati
         case "rotate":
             let turns = obj["quarterTurns"] as? Int ?? 1
             notify(id: "pdfutils.rotate", title: "Rotate PDF", body: startBody(inputs.count))
+            activeBatches += 1
             workQueue.async { [self] in
                 var revealed: [URL] = []
                 var failed: [String] = []
@@ -356,11 +377,18 @@ final class HelperAppDelegate: NSObject, NSApplicationDelegate, UNUserNotificati
         Task { @MainActor in
             if !revealed.isEmpty { NSWorkspace.shared.activateFileViewerSelecting(revealed) }
             flashStatusIcon(success: failed.isEmpty)
+            activeBatches = max(0, activeBatches - 1)
             let body: String
             if failed.isEmpty {
                 body = revealed.count <= 1 ? "Done — revealed in Finder." : "Done — \(revealed.count) files revealed in Finder."
             } else if revealed.isEmpty {
                 body = failureDetail ?? "Couldn't complete. The file may be open elsewhere or damaged."
+                // The notification below rides a channel that does not deliver for this nested
+                // helper (see flashStatusIcon's rationale and the Finder-integration notes) — so
+                // when the user's click produced NOTHING, say why in a channel that works. Partial
+                // results skip the modal: the Finder reveal + flash already show something
+                // happened, and the log has the per-file detail.
+                showInfo(title: title, text: body)
             } else {
                 body = "\(revealed.count) done, \(failed.count) failed."
             }
@@ -506,6 +534,7 @@ final class HelperAppDelegate: NSObject, NSApplicationDelegate, UNUserNotificati
             return
         }
         notify(id: "pdfutils.extract", title: "Extract Pages", body: startBody(1))
+        activeBatches += 1
         workQueue.async { [self] in
             // Named at write time like compress/rotate/merge, not at prompt time: a name probed
             // while earlier queued work was still running could collide with the output that work

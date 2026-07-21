@@ -16,7 +16,11 @@ struct CropToolView: View {
     @State private var inputURL: URL?
     @State private var mode: CropMode = .auto
     @State private var padding: Double = 12
+    /// Auto-detect only: unify the detected trim into one uniform crop across all pages.
     @State private var unified = true
+    /// Drag-to-crop only: apply the dragged box to every page, or just the page being viewed. Kept
+    /// separate from `unified` so switching modes never carries one lever's meaning into the other.
+    @State private var dragAllPages = true
     @State private var topInset: Double = 0
     @State private var leftInset: Double = 0
     @State private var bottomInset: Double = 0
@@ -477,10 +481,10 @@ struct CropToolView: View {
             Text("Trim from each edge")
                 .font(.subheadline.weight(.semibold))
             edgeInsetGrid
-            Toggle("Use the same crop on every page", isOn: $unified)
+            Toggle("Use the same crop on every page", isOn: $dragAllPages)
                 .toggleStyle(.checkbox)
                 .font(.subheadline)
-            Text(unified
+            Text(dragAllPages
                  ? "Drag the box on the page at right; the same trim applies to every page. The fields track the box—type to nudge it to the point."
                  : "Only the page you’re viewing is cropped to the box. Every other page is left exactly as it is.")
                 .font(.subheadline)
@@ -595,6 +599,7 @@ struct CropToolView: View {
         let insetsSnapshot = customInsets
         let paddingSnapshot = CGFloat(max(0, padding))
         let unifiedSnapshot = unified
+        let dragAllPagesSnapshot = dragAllPages
         // For "this page only" in drag mode, clamp the viewed page to the document's real range.
         let dragPageSnapshot = min(max(dragPageIndex, 0), max(0, (pdfDocument?.pageCount ?? 1) - 1))
 
@@ -611,7 +616,7 @@ struct CropToolView: View {
                     case .custom:
                         return try PDFToolkit.cropData(inputURL: fileURL, insets: insetsSnapshot)
                     case .drag:
-                        let indices: Set<Int>? = unifiedSnapshot ? nil : [dragPageSnapshot]
+                        let indices: Set<Int>? = dragAllPagesSnapshot ? nil : [dragPageSnapshot]
                         return try PDFToolkit.cropData(inputURL: fileURL, insets: insetsSnapshot, pageIndices: indices)
                     }
                 }

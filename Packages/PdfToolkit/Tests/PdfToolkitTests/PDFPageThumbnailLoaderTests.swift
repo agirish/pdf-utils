@@ -58,22 +58,27 @@ import PDFKit
         #expect(box == NSSize(width: 200, height: 100))
     }
 
-    @Test func loadAllPagesRefusesALockedDocument() async throws {
+    @Test func demandLoaderRefusesALockedDocument() async throws {
         // The gate lives in the loader itself — a locked document reports a real page count and
         // renders blanks, and three review rounds found call sites that missed a caller-side
-        // check. Every preview grid inherits this refusal.
+        // check. Every preview grid inherits this refusal through `pageCount(of:)`, the entry
+        // point each grid calls before any cell exists.
         let dir = FixtureDir()
         let plain = dir.url("plain.pdf"), locked = dir.url("locked.pdf")
         try PDFFixtures.writePDF(pageCount: 2, to: plain)
         try PDFToolkit.encrypt(inputURL: plain, outputURL: locked, password: "secret")
 
-        await #expect(throws: PDFOperationError.self) {
-            _ = try await PDFPageThumbnailLoader.loadAllPages(from: locked)
+        let error = await #expect(throws: PDFOperationError.self) {
+            _ = try await PDFPageThumbnailLoader.pageCount(of: locked)
         }
-        // And an owner-restricted (encrypted but NOT locked) document still previews fine.
+        #expect(error?.kind == "encryptedInput")
+        // And an owner-restricted (encrypted but NOT locked) document still previews fine —
+        // counting and demand-rendering its pages both pass the gate.
         let restricted = dir.url("restricted.pdf")
         try PDFFixtures.writeOwnerRestrictedPDF(markers: ["MARKERPAGE1"], to: restricted)
-        let thumbs = try await PDFPageThumbnailLoader.loadAllPages(from: restricted)
-        #expect(thumbs.count == 1)
+        let count = try await PDFPageThumbnailLoader.pageCount(of: restricted)
+        #expect(count == 1)
+        let thumb = try await PDFPageThumbnailLoader.loadPage(from: restricted, pageIndex: 0)
+        #expect(thumb != nil)
     }
 }

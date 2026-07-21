@@ -26,7 +26,7 @@ struct CropToolView: View {
     @State private var exportDoc: PDFFileDocument?
     @State private var suggestedName = "cropped.pdf"
     @State private var isDropTargeted = false
-    @State private var thumbnails: [PDFPageThumbnail] = []
+    @State private var pageSpecs: [PreviewPageSpec] = []
     @State private var isGeneratingPreviews = false
     @State private var thumbnailSize: CGFloat = 120
 
@@ -48,14 +48,18 @@ struct CropToolView: View {
             sidebarColumn
                 .toolSidebarWidth()
             SinglePDFPreviewColumn(
-                thumbnails: thumbnails,
+                pages: pageSpecs,
                 isGenerating: isGeneratingPreviews,
                 thumbnailSize: $thumbnailSize,
                 accent: accent,
                 previewSubtitle: "Pages before cropping. The trim applies to every page when you save.",
                 emptyTitle: "No PDF selected",
                 emptySubtitle: "Drop a PDF here or choose one to trim its margins.",
-                emptySystemImage: "crop"
+                emptySystemImage: "crop",
+                render: { spec in
+                    guard let url = inputURL else { return nil }
+                    return (try? await PDFPageThumbnailLoader.loadPage(from: url, pageIndex: spec.id - 1))?.image
+                }
             )
             .frame(minWidth: 360)
         }
@@ -236,8 +240,8 @@ struct CropToolView: View {
                     Text("Loading preview…")
                         .font(.subheadline)
                         .foregroundStyle(.tertiary)
-                } else if !thumbnails.isEmpty {
-                    Text("\(thumbnails.count) page\(thumbnails.count == 1 ? "" : "s")")
+                } else if !pageSpecs.isEmpty {
+                    Text("\(pageSpecs.count) page\(pageSpecs.count == 1 ? "" : "s")")
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
                 }
@@ -347,22 +351,23 @@ struct CropToolView: View {
 
     private func loadThumbnails() async {
         guard let url = inputURL else {
-            thumbnails = []
+            pageSpecs = []
             isGeneratingPreviews = false
             return
         }
-        thumbnails = []
+        pageSpecs = []
         isGeneratingPreviews = true
         do {
-            let loaded = try await PDFPageThumbnailLoader.loadAllPages(from: url)
+            // Only the page count loads up front; cells render on demand as they appear.
+            let count = try await PDFPageThumbnailLoader.pageCount(of: url)
             guard !Task.isCancelled else { return }
-            thumbnails = loaded
+            pageSpecs = PreviewPageSpec.specs(forPDFAt: url, pageCount: count)
             isGeneratingPreviews = false
         } catch is CancellationError {
-            // Superseded mid-render; the newer load owns the state.
+            // Superseded mid-load; the newer load owns the state.
         } catch {
             guard !Task.isCancelled else { return }
-            thumbnails = []
+            pageSpecs = []
             isGeneratingPreviews = false
             if case PDFOperationError.encryptedInput = error {
                 // Locked selection: actionable message + back to the empty state (Metadata's pattern).

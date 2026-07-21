@@ -17,7 +17,7 @@ struct MetadataToolView: View {
     @State private var exportDoc: PDFFileDocument?
     @State private var suggestedName = "cleaned.pdf"
     @State private var isDropTargeted = false
-    @State private var thumbnails: [PDFPageThumbnail] = []
+    @State private var pageSpecs: [PreviewPageSpec] = []
     @State private var isGeneratingPreviews = false
     @State private var thumbnailSize: CGFloat = 120
 
@@ -30,14 +30,18 @@ struct MetadataToolView: View {
             sidebarColumn
                 .toolSidebarWidth()
             SinglePDFPreviewColumn(
-                thumbnails: thumbnails,
+                pages: pageSpecs,
                 isGenerating: isGeneratingPreviews,
                 thumbnailSize: $thumbnailSize,
                 accent: accent,
                 previewSubtitle: "Pages in the file whose info you’re editing. Cleaning never changes them.",
                 emptyTitle: "No PDF selected",
                 emptySubtitle: "Drop a PDF here or choose one to see what it says about itself.",
-                emptySystemImage: "tag.slash"
+                emptySystemImage: "tag.slash",
+                render: { spec in
+                    guard let url = inputURL else { return nil }
+                    return (try? await PDFPageThumbnailLoader.loadPage(from: url, pageIndex: spec.id - 1))?.image
+                }
             )
             .frame(minWidth: 360)
         }
@@ -218,8 +222,8 @@ struct MetadataToolView: View {
                     Text("Loading preview…")
                         .font(.subheadline)
                         .foregroundStyle(.tertiary)
-                } else if !thumbnails.isEmpty {
-                    Text("\(thumbnails.count) page\(thumbnails.count == 1 ? "" : "s")")
+                } else if !pageSpecs.isEmpty {
+                    Text("\(pageSpecs.count) page\(pageSpecs.count == 1 ? "" : "s")")
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
                 }
@@ -341,13 +345,13 @@ struct MetadataToolView: View {
 
     private func loadFile() async {
         guard let url = inputURL else {
-            thumbnails = []
+            pageSpecs = []
             isGeneratingPreviews = false
             loadedFields = PDFMetadataFields()
             fields = PDFMetadataFields()
             return
         }
-        thumbnails = []
+        pageSpecs = []
         isGeneratingPreviews = true
         do {
             let read = try await PDFBackgroundWork.run {
@@ -366,15 +370,16 @@ struct MetadataToolView: View {
             return
         }
         do {
-            let loaded = try await PDFPageThumbnailLoader.loadAllPages(from: url)
+            // Only the page count loads up front; cells render on demand as they appear.
+            let count = try await PDFPageThumbnailLoader.pageCount(of: url)
             guard !Task.isCancelled else { return }
-            thumbnails = loaded
+            pageSpecs = PreviewPageSpec.specs(forPDFAt: url, pageCount: count)
             isGeneratingPreviews = false
         } catch is CancellationError {
-            // Superseded mid-render; the newer load owns the state.
+            // Superseded mid-load; the newer load owns the state.
         } catch {
             guard !Task.isCancelled else { return }
-            thumbnails = []
+            pageSpecs = []
             isGeneratingPreviews = false
         }
     }

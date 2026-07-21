@@ -2,11 +2,16 @@ import SwiftUI
 
 /// Right-hand preview column for tools that show page thumbnails (Merge, Compress, Rotate, Extract, Delete).
 ///
+/// **Virtualized**: callers describe pages as ``PreviewPageSpec``s (cheap — a number and a cache
+/// key) and supply a `render` closure; each cell renders on demand as it appears and the images
+/// live only in the shared ``PreviewThumbnailCache`` LRU, so a 500-page document costs a screenful
+/// of thumbnails, not 500. Reordering rows reuses cached cells by key instead of re-rendering.
+///
 /// Page selection is opt-in and additive: pass `selectedPages` + `onTogglePage` (Split's custom
 /// ranges, Extract) to turn each thumbnail into a click-to-toggle target with a selection check.
 /// Both default to nil, so every other caller renders and behaves exactly as before.
 struct SinglePDFPreviewColumn: View {
-    let thumbnails: [PDFPageThumbnail]
+    let pages: [PreviewPageSpec]
     let isGenerating: Bool
     @Binding var thumbnailSize: CGFloat
     let accent: Color
@@ -24,9 +29,13 @@ struct SinglePDFPreviewColumn: View {
     /// Optional one-line hint shown under the subtitle while selecting, explaining what a click does.
     var selectionPrompt: String? = nil
 
+    /// Produces one cell's image off the main actor (PDF pages via the loader's serial queue,
+    /// image files via ImageIO). Runs when a cell appears and its key misses the shared cache.
+    var render: (PreviewPageSpec) async -> NSImage?
+
     var body: some View {
         Group {
-            if !thumbnails.isEmpty || isGenerating {
+            if !pages.isEmpty || isGenerating {
                 VStack(alignment: .leading, spacing: 0) {
                     VStack(alignment: .leading, spacing: 14) {
                         HStack(alignment: .center) {
@@ -93,8 +102,8 @@ struct SinglePDFPreviewColumn: View {
                             columns: [GridItem(.adaptive(minimum: thumbnailSize), spacing: 16)],
                             spacing: 16
                         ) {
-                            ForEach(thumbnails) { page in
-                                pageCell(page)
+                            ForEach(pages) { spec in
+                                pageCell(spec)
                             }
                         }
                         .padding(16)
@@ -120,30 +129,28 @@ struct SinglePDFPreviewColumn: View {
     /// One thumbnail. When selection is opted into, it becomes a click-to-toggle button carrying a
     /// selection check and accent ring; otherwise it renders exactly as the plain preview always has.
     @ViewBuilder
-    private func pageCell(_ page: PDFPageThumbnail) -> some View {
+    private func pageCell(_ spec: PreviewPageSpec) -> some View {
         if let selectedPages, let onTogglePage {
-            let isSelected = selectedPages.contains(page.pageNumber)
+            let isSelected = selectedPages.contains(spec.id)
             Button {
-                onTogglePage(page.pageNumber)
+                onTogglePage(spec.id)
             } label: {
-                thumbnail(page, selectable: true, isSelected: isSelected)
+                thumbnail(spec, selectable: true, isSelected: isSelected)
             }
             .buttonStyle(.plain)
             .accessibilityElement(children: .combine)
-            .accessibilityLabel("Page \(page.pageNumber)")
+            .accessibilityLabel("Page \(spec.id)")
             .accessibilityValue(isSelected ? "Selected" : "Not selected")
             .accessibilityAddTraits(.isButton)
             .accessibilityHint("Toggles whether this page is included")
         } else {
-            thumbnail(page, selectable: false, isSelected: false)
+            thumbnail(spec, selectable: false, isSelected: false)
         }
     }
 
-    private func thumbnail(_ page: PDFPageThumbnail, selectable: Bool, isSelected: Bool) -> some View {
+    private func thumbnail(_ spec: PreviewPageSpec, selectable: Bool, isSelected: Bool) -> some View {
         ZStack(alignment: .bottomTrailing) {
-            Image(nsImage: page.image)
-                .resizable()
-                .aspectRatio(contentMode: .fit)
+            PreviewCellImage(spec: spec, render: render)
                 .frame(width: thumbnailSize)
                 .background(Color.white)
                 .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
@@ -161,7 +168,7 @@ struct SinglePDFPreviewColumn: View {
                     }
                 }
 
-            Text("\(page.pageNumber)")
+            Text("\(spec.id)")
                 .font(.caption.weight(.bold))
                 .foregroundStyle(.white)
                 .padding(.horizontal, 6)
@@ -190,6 +197,53 @@ struct SinglePDFPreviewColumn: View {
                 .foregroundStyle(.white)
                 .padding(3)
                 .background(Circle().fill(.black.opacity(0.3)))
+        }
+    }
+}
+
+/// One cell's image, read straight from the shared LRU in `body` — the cell holds NO image state
+/// of its own, which is what keeps a long document's resident cost at the cache's cap instead of
+/// one image per created cell. On a cache miss the task renders off-main, stores, and bumps `tick`
+/// to repaint. Visible cells touch the LRU every body pass, so eviction only ever takes offscreen
+/// entries.
+private struct PreviewCellImage: View {
+    let spec: PreviewPageSpec
+    let render: (PreviewPageSpec) async -> NSImage?
+    /// Repaint trigger after a store; the image itself deliberately lives only in the cache.
+    @State private var tick = 0
+    /// True once a render attempt finished — a page that can't render (a damaged or locked entry)
+    /// shows a plain blank sheet instead of an eternal spinner.
+    @State private var attempted = false
+
+    var body: some View {
+        Group {
+            if let image = PreviewThumbnailCache.shared.image(for: spec.cacheKey) {
+                Image(nsImage: image)
+                    .resizable()
+                    .aspectRatio(contentMode: .fit)
+            } else {
+                // US Letter aspect placeholder; the cell reflows to the true aspect when loaded.
+                Color.white
+                    .aspectRatio(8.5 / 11, contentMode: .fit)
+                    .overlay {
+                        if !attempted {
+                            ProgressView()
+                                .controlSize(.small)
+                        }
+                    }
+            }
+        }
+        .id(tick)
+        .task(id: spec.cacheKey) {
+            guard PreviewThumbnailCache.shared.image(for: spec.cacheKey) == nil else { return }
+            attempted = false
+            let rendered = await render(spec)
+            guard !Task.isCancelled else { return }
+            if let rendered {
+                PreviewThumbnailCache.shared.store(rendered, for: spec.cacheKey)
+            }
+            attempted = true
+            tick += 1
         }
     }
 }

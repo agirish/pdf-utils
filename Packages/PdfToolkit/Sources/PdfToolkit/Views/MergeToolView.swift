@@ -30,10 +30,12 @@ struct MergeToolView: View {
     @State private var totalPages = 0
     @State private var pageSummaryLoading = false
 
-    @State private var previewPages: [PDFPageThumbnail] = []
     @State private var thumbnailSize: CGFloat = 120
-    @State private var isGeneratingPreviews = false
-    @State private var previewTask: Task<Void, Never>?
+    /// The merged document's pages in visual order, derived from (entries, page counts) whenever
+    /// the summary refreshes. Cells render on demand; a pure reorder of entries is cache hits.
+    @State private var previewSpecs: [PreviewPageSpec] = []
+    /// Global page number → (file, local page index) for the render closure.
+    @State private var previewPageLookup: [Int: (URL, Int)] = [:]
 
     @State private var mergeResult: MergeResult?
 
@@ -51,8 +53,8 @@ struct MergeToolView: View {
                     sidebarColumn
                         .toolSidebarWidth()
                     SinglePDFPreviewColumn(
-                        thumbnails: previewPages,
-                        isGenerating: isGeneratingPreviews,
+                        pages: previewSpecs,
+                        isGenerating: pageSummaryLoading,
                         thumbnailSize: $thumbnailSize,
                         accent: accent,
                         previewSubtitle: "Visual order of the merged pages (matches the list on the left).",
@@ -62,7 +64,11 @@ struct MergeToolView: View {
                         emptySubtitle: entries.isEmpty
                             ? "Add PDFs in the sidebar or drop PDFs onto the list."
                             : "These files can't be previewed or merged until their passwords are removed (Password Protect → Remove password).",
-                        emptySystemImage: entries.isEmpty ? "doc.on.doc" : "lock.fill"
+                        emptySystemImage: entries.isEmpty ? "doc.on.doc" : "lock.fill",
+                        render: { spec in
+                            guard let target = previewPageLookup[spec.id] else { return nil }
+                            return (try? await PDFPageThumbnailLoader.loadPage(from: target.0, pageIndex: target.1))?.image
+                        }
                     )
                     .frame(minWidth: 360)
                 }
@@ -95,9 +101,6 @@ struct MergeToolView: View {
         .task(id: entriesSignature) {
             await refreshPageSummary()
         }
-        .onChange(of: entries) { _, _ in
-            generatePreviews()
-        }
         .onChange(of: entries.isEmpty) { _, isEmpty in
             if isEmpty { selectedEntryID = nil }
         }
@@ -120,9 +123,9 @@ struct MergeToolView: View {
             },
             onDoAnother: {
                 withAnimation {
-                    previewTask?.cancel()
                     entries.removeAll()
-                    previewPages.removeAll()
+                    previewSpecs = []
+                    previewPageLookup = [:]
                     pagesByEntryID = [:]
                     totalPages = 0
                     mergeResult = nil
@@ -181,9 +184,9 @@ struct MergeToolView: View {
                 HStack(spacing: 10) {
                     if !entries.isEmpty {
                         Button("Clear all") {
-                            previewTask?.cancel()
                             entries.removeAll()
-                            previewPages.removeAll()
+                            previewSpecs = []
+                            previewPageLookup = [:]
                             pagesByEntryID = [:]
                             totalPages = 0
                             selectedEntryID = nil
@@ -456,69 +459,45 @@ struct MergeToolView: View {
             pagesByEntryID = summary.counts
             lockedEntryIDs = summary.locked
             totalPages = summary.counts.values.reduce(0, +)
+            // Locked entries carry no count, so the layout skips them by construction — the strip,
+            // the header total, and the run's refusal all tell the same story.
+            (previewSpecs, previewPageLookup) = Self.previewLayout(entries: snapshot, pages: summary.counts)
             pageSummaryLoading = false
         } catch {
             guard !Task.isCancelled else { return }
             pagesByEntryID = [:]
             lockedEntryIDs = []
             totalPages = 0
+            previewSpecs = []
+            previewPageLookup = [:]
             pageSummaryLoading = false
         }
     }
 
-    private func generatePreviews() {
-        previewTask?.cancel()
-        guard !entries.isEmpty else {
-            previewPages = []
-            isGeneratingPreviews = false
-            return
-        }
-
-        isGeneratingPreviews = true
-        let urlsSnapshot = entries.map(\.url)
-
-        previewTask = Task {
-            do {
-                // One loader for policy AND sizing. The inline sweep this replaces was a second
-                // copy of both, and diverged twice: it missed the rotation-sizing fix in one
-                // round and hand-rolled the locked-document skip in another. Per-file calls keep
-                // the strip's behavior identical to every other preview grid by construction;
-                // cancellation still propagates (loadAllPages probes the calling task's
-                // cancellation inside the PDF queue).
-                var pages: [PDFPageThumbnail] = []
-                var globalPageNum = 1
-                for url in urlsSnapshot {
-                    try Task.checkCancellation()
-                    do {
-                        let thumbs = try await PDFPageThumbnailLoader.loadAllPages(from: url)
-                        for thumb in thumbs {
-                            pages.append(PDFPageThumbnail(pageNumber: globalPageNum, image: thumb.image))
-                            globalPageNum += 1
-                        }
-                    } catch is CancellationError {
-                        throw CancellationError()
-                    } catch {
-                        // Locked (encryptedInput) or unreadable: no pages in the strip. The row
-                        // badge and header summary carry the explanation; the run itself
-                        // surfaces the hard error.
-                        continue
-                    }
-                }
-
-                let loadedPages = pages
-                await MainActor.run {
-                    guard !Task.isCancelled else { return }
-                    previewPages = loadedPages
-                    isGeneratingPreviews = false
-                }
-            } catch {
-                await MainActor.run {
-                    if !Task.isCancelled {
-                        isGeneratingPreviews = false
-                    }
-                }
+    /// The preview strip as a pure function of the queue and its page counts: global page numbers
+    /// run top to bottom across entries, and each cell's cache key is content-addressed to its own
+    /// file + local page — so reordering (or re-adding) entries re-maps positions to already
+    /// rendered cells instead of re-rendering, and a duplicate entry's pages share their renders.
+    /// Locked entries have no count and therefore no cells — the row's lock badge and the header
+    /// summary carry the explanation, and the run itself surfaces the hard error.
+    private static func previewLayout(
+        entries: [MergeEntry],
+        pages: [UUID: Int]
+    ) -> ([PreviewPageSpec], [Int: (URL, Int)]) {
+        var specs: [PreviewPageSpec] = []
+        var lookup: [Int: (URL, Int)] = [:]
+        var globalPage = 1
+        for entry in entries {
+            let count = pages[entry.id] ?? 0
+            guard count > 0 else { continue }
+            let base = PreviewPageSpec.fileKey(for: entry.url)
+            for local in 0..<count {
+                specs.append(PreviewPageSpec(id: globalPage, cacheKey: "\(base)#\(local)"))
+                lookup[globalPage] = (entry.url, local)
+                globalPage += 1
             }
         }
+        return (specs, lookup)
     }
 
     @MainActor

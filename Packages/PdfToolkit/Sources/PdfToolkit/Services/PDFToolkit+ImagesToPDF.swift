@@ -83,28 +83,32 @@ extension PDFToolkit {
         return pdfData as Data
     }
 
-    /// Row thumbnails plus displayed pixel sizes for the queued images, in queue order.
+    /// Displayed pixel sizes for the queued images, keyed by path — header reads only, no bitmaps.
     ///
     /// Deliberately NOT `PDFBackgroundWork`: this is pure ImageIO with no PDFKit object in sight,
     /// and running a big image queue on the single PDF serial queue starved every tool's page
     /// previews behind it. Nonisolated async runs on the global concurrent executor (off the main
-    /// actor); cancellation is honored between files, and per-file scratch drains per iteration.
-    static func imagePreviews(for urls: [URL]) async throws -> ([PDFPageThumbnail], [String: CGSize]) {
-        var thumbnails: [PDFPageThumbnail] = []
+    /// actor); cancellation is honored between files (the partial result is discarded by the
+    /// caller's own cancellation guard).
+    static func imagePixelSizes(for urls: [URL]) async -> [String: CGSize] {
         var sizes: [String: CGSize] = [:]
-        for (i, url) in urls.enumerated() {
-            try Task.checkCancellation()
-            autoreleasepool {
-                let loaded = (try? url.withSecurityScopedAccess {
-                    (imageThumbnail(at: url), imagePixelSize(at: url))
-                }) ?? (nil, nil)
-                if let size = loaded.1 { sizes[url.path] = size }
-                if let image = loaded.0 {
-                    thumbnails.append(PDFPageThumbnail(pageNumber: i + 1, image: image))
-                }
+        for url in urls {
+            if Task.isCancelled { break }
+            if let size = (try? url.withSecurityScopedAccess { imagePixelSize(at: url) }) ?? nil {
+                sizes[url.path] = size
             }
         }
-        return (thumbnails, sizes)
+        return sizes
+    }
+
+    /// One image's preview render for a demand-loaded grid cell — orientation-correct, nil when
+    /// the file isn't a readable image. Nonisolated async so the ImageIO decode runs off the main
+    /// actor (and never touches the PDF serial queue, which pure image work has no business on);
+    /// the pool drains the decode scratch with the call.
+    static func imagePreview(at url: URL) async -> NSImage? {
+        autoreleasepool {
+            (try? url.withSecurityScopedAccess { imageThumbnail(at: url) }) ?? nil
+        }
     }
 
     /// A small, orientation-correct preview of an image for the tool's page list — nil when the

@@ -14,7 +14,7 @@ struct ExtractToolView: View {
     @State private var exportDoc: PDFFileDocument?
     @State private var suggestedName = "extracted.pdf"
     @State private var isDropTargeted = false
-    @State private var thumbnails: [PDFPageThumbnail] = []
+    @State private var pageSpecs: [PreviewPageSpec] = []
     @State private var isGeneratingPreviews = false
     @State private var thumbnailSize: CGFloat = 120
 
@@ -27,7 +27,7 @@ struct ExtractToolView: View {
             sidebarColumn
                 .toolSidebarWidth()
             SinglePDFPreviewColumn(
-                thumbnails: thumbnails,
+                pages: pageSpecs,
                 isGenerating: isGeneratingPreviews,
                 thumbnailSize: $thumbnailSize,
                 accent: accent,
@@ -35,9 +35,13 @@ struct ExtractToolView: View {
                 emptyTitle: "No PDF selected",
                 emptySubtitle: "Drop a PDF here, choose one, or use Add PDF… to see thumbnails.",
                 emptySystemImage: "doc.on.clipboard",
-                selectedPages: VisualPageSelection.pages(from: rangeText, pageCount: thumbnails.count, emptyMeansAllPages: true),
+                selectedPages: VisualPageSelection.pages(from: rangeText, pageCount: pageSpecs.count, emptyMeansAllPages: true),
                 onTogglePage: togglePage,
-                selectionPrompt: "Click pages to choose what to extract, or type them on the left."
+                selectionPrompt: "Click pages to choose what to extract, or type them on the left.",
+                render: { spec in
+                    guard let url = inputURL else { return nil }
+                    return (try? await PDFPageThumbnailLoader.loadPage(from: url, pageIndex: spec.id - 1))?.image
+                }
             )
             .frame(minWidth: 360)
         }
@@ -217,8 +221,8 @@ struct ExtractToolView: View {
                     Text("Loading preview…")
                         .font(.subheadline)
                         .foregroundStyle(.tertiary)
-                } else if !thumbnails.isEmpty {
-                    Text("\(thumbnails.count) page\(thumbnails.count == 1 ? "" : "s")")
+                } else if !pageSpecs.isEmpty {
+                    Text("\(pageSpecs.count) page\(pageSpecs.count == 1 ? "" : "s")")
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
                 }
@@ -260,7 +264,7 @@ struct ExtractToolView: View {
 
     private func loadThumbnails() async {
         guard let url = inputURL else {
-            thumbnails = []
+            pageSpecs = []
             isGeneratingPreviews = false
             return
         }
@@ -268,21 +272,22 @@ struct ExtractToolView: View {
         // against thumbnails of a file that is no longer loaded — and the typed range with them:
         // stale text (or a leftover out-of-range typo) made the next thumbnail click silently
         // replace the whole field with just the clicked page.
-        thumbnails = []
+        pageSpecs = []
         rangeText = ""
         isGeneratingPreviews = true
         do {
-            let loaded = try await PDFPageThumbnailLoader.loadAllPages(from: url)
+            // Only the page count loads up front; cells render on demand as they appear.
+            let count = try await PDFPageThumbnailLoader.pageCount(of: url)
             // `.task(id:)` cancelled this load if the file changed again; a superseded load must
             // neither install its stale result nor clear the spinner the newer load now owns.
             guard !Task.isCancelled else { return }
-            thumbnails = loaded
+            pageSpecs = PreviewPageSpec.specs(forPDFAt: url, pageCount: count)
             isGeneratingPreviews = false
         } catch is CancellationError {
-            // Superseded mid-render; the newer load owns the state.
+            // Superseded mid-load; the newer load owns the state.
         } catch {
             guard !Task.isCancelled else { return }
-            thumbnails = []
+            pageSpecs = []
             isGeneratingPreviews = false
             if case PDFOperationError.encryptedInput = error {
                 // Locked selection: actionable message + back to the empty state (Metadata's pattern).
@@ -312,7 +317,7 @@ struct ExtractToolView: View {
     private func togglePage(_ page: Int) {
         // Same blank-field semantics as the highlight layer: blank = all pages, so the first click
         // on a fully-selected document deselects that page rather than starting from nothing.
-        var pages = VisualPageSelection.pages(from: rangeText, pageCount: thumbnails.count, emptyMeansAllPages: true)
+        var pages = VisualPageSelection.pages(from: rangeText, pageCount: pageSpecs.count, emptyMeansAllPages: true)
         if pages.contains(page) {
             pages.remove(page)
         } else {

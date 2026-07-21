@@ -32,7 +32,7 @@ struct SplitToolView: View {
     @State private var alertMessage: String?
     @State private var showImporter = false
     @State private var isDropTargeted = false
-    @State private var thumbnails: [PDFPageThumbnail] = []
+    @State private var pageSpecs: [PreviewPageSpec] = []
     @State private var isGeneratingPreviews = false
     @State private var thumbnailSize: CGFloat = 120
     @State private var result: SplitResult?
@@ -41,7 +41,7 @@ struct SplitToolView: View {
         inputURL?.standardizedFileURL.path ?? ""
     }
 
-    private var pageCount: Int { thumbnails.count }
+    private var pageCount: Int { pageSpecs.count }
 
     /// Number of output files the current settings would produce (for the live hint).
     private var estimatedParts: Int? {
@@ -66,7 +66,7 @@ struct SplitToolView: View {
                     sidebarColumn
                         .toolSidebarWidth()
                     SinglePDFPreviewColumn(
-                        thumbnails: thumbnails,
+                        pages: pageSpecs,
                         isGenerating: isGeneratingPreviews,
                         thumbnailSize: $thumbnailSize,
                         accent: accent,
@@ -76,7 +76,11 @@ struct SplitToolView: View {
                         emptySystemImage: "scissors",
                         selectedPages: visualSelection,
                         onTogglePage: visualTogglePage,
-                        selectionPrompt: visualSelectionPrompt
+                        selectionPrompt: visualSelectionPrompt,
+                        render: { spec in
+                            guard let url = inputURL else { return nil }
+                            return (try? await PDFPageThumbnailLoader.loadPage(from: url, pageIndex: spec.id - 1))?.image
+                        }
                     )
                     .frame(minWidth: 360)
                 }
@@ -327,7 +331,7 @@ struct SplitToolView: View {
 
     private func loadThumbnails() async {
         guard let url = inputURL else {
-            thumbnails = []
+            pageSpecs = []
             isGeneratingPreviews = false
             return
         }
@@ -335,22 +339,23 @@ struct SplitToolView: View {
         // against thumbnails of a file that is no longer loaded — and the typed range with them:
         // stale text (or a leftover out-of-range typo) made the next thumbnail click silently
         // replace the whole field with just the clicked page.
-        thumbnails = []
+        pageSpecs = []
         rangeText = ""
         isGeneratingPreviews = true
         do {
-            let loaded = try await PDFPageThumbnailLoader.loadAllPages(from: url)
+            // Only the page count loads up front; cells render on demand as they appear.
+            let count = try await PDFPageThumbnailLoader.pageCount(of: url)
             // `.task(id:)` cancelled this load if the file changed again; a superseded load must
             // neither install its stale result nor clear the spinner the newer load now owns.
             guard !Task.isCancelled else { return }
-            thumbnails = loaded
-            if chunkSize > max(1, thumbnails.count) { chunkSize = 1 }
+            pageSpecs = PreviewPageSpec.specs(forPDFAt: url, pageCount: count)
+            if chunkSize > max(1, pageSpecs.count) { chunkSize = 1 }
             isGeneratingPreviews = false
         } catch is CancellationError {
-            // Superseded mid-render; the newer load owns the state.
+            // Superseded mid-load; the newer load owns the state.
         } catch {
             guard !Task.isCancelled else { return }
-            thumbnails = []
+            pageSpecs = []
             isGeneratingPreviews = false
             if case PDFOperationError.encryptedInput = error {
                 // The loader refuses locked documents (their pages render blank). Surface the
@@ -379,7 +384,7 @@ struct SplitToolView: View {
     /// choice to make, so it renders the plain, non-interactive preview (selection nil).
     private var visualSelection: Set<Int>? {
         guard mode == .customRanges else { return nil }
-        return VisualPageSelection.pages(from: rangeText, pageCount: thumbnails.count)
+        return VisualPageSelection.pages(from: rangeText, pageCount: pageSpecs.count)
     }
 
     private var visualTogglePage: ((Int) -> Void)? {
@@ -396,7 +401,7 @@ struct SplitToolView: View {
     /// can't be drawn by clicking — that stays a text-field capability, matching custom ranges' own
     /// "each comma group is a file" rule.
     private func togglePage(_ page: Int) {
-        var pages = VisualPageSelection.pages(from: rangeText, pageCount: thumbnails.count)
+        var pages = VisualPageSelection.pages(from: rangeText, pageCount: pageSpecs.count)
         if pages.contains(page) {
             pages.remove(page)
         } else {

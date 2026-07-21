@@ -21,10 +21,13 @@ struct ImagesToPDFToolView: View {
     @State private var exportDoc: PDFFileDocument?
     @State private var suggestedName = "images.pdf"
     @State private var isDropTargeted = false
-    @State private var thumbnails: [PDFPageThumbnail] = []
-    /// Displayed pixel dimensions per file path, resolved on the background queue alongside the
-    /// thumbnails — the rows must never do ImageIO reads inside `body` (once per row per re-render,
-    /// on the main thread, was a real hitch with a long queue).
+    @State private var pageSpecs: [PreviewPageSpec] = []
+    /// Cache key → file for the render closure. Duplicate rows of one file share a key (intended:
+    /// they are the same picture, so they share one cached render).
+    @State private var previewURLsByKey: [String: URL] = [:]
+    /// Displayed pixel dimensions per file path, resolved on the background executor — the rows
+    /// must never do ImageIO reads inside `body` (once per row per re-render, on the main thread,
+    /// was a real hitch with a long queue).
     @State private var pixelSizes: [String: CGSize] = [:]
     @State private var isGeneratingPreviews = false
     @State private var thumbnailSize: CGFloat = 120
@@ -39,14 +42,18 @@ struct ImagesToPDFToolView: View {
             sidebarColumn
                 .toolSidebarWidth()
             SinglePDFPreviewColumn(
-                thumbnails: thumbnails,
+                pages: pageSpecs,
                 isGenerating: isGeneratingPreviews,
                 thumbnailSize: $thumbnailSize,
                 accent: accent,
                 previewSubtitle: "Each image becomes one page, in list order.",
                 emptyTitle: "No images yet",
                 emptySubtitle: "Drop JPG, PNG, or HEIC files here, or click Add Images…",
-                emptySystemImage: "photo.on.rectangle.angled"
+                emptySystemImage: "photo.on.rectangle.angled",
+                render: { spec in
+                    guard let url = previewURLsByKey[spec.cacheKey] else { return nil }
+                    return await PDFToolkit.imagePreview(at: url)
+                }
             )
             .frame(minWidth: 360)
         }
@@ -308,29 +315,33 @@ struct ImagesToPDFToolView: View {
 
     private func loadThumbnails() async {
         guard !items.isEmpty else {
-            thumbnails = []
+            pageSpecs = []
+            previewURLsByKey = [:]
             pixelSizes = [:]
             isGeneratingPreviews = false
             return
         }
         let urls = items.map(\.url)
-        thumbnails = []
         isGeneratingPreviews = true
-        do {
-            // Pure ImageIO — runs on the global executor via the nonisolated helper, NOT the PDF
-            // serial queue, so a big image queue can't starve other tools' page previews.
-            let loaded = try await PDFToolkit.imagePreviews(for: urls)
-            guard !Task.isCancelled else { return }
-            thumbnails = loaded.0
-            pixelSizes = loaded.1
-            isGeneratingPreviews = false
-        } catch is CancellationError {
-            // Superseded mid-render; the newer load owns the state.
-        } catch {
-            guard !Task.isCancelled else { return }
-            thumbnails = []
-            isGeneratingPreviews = false
+        // Specs are cheap (one stat per row), so the grid appears immediately and each cell
+        // decodes its image on demand through the shared LRU.
+        var specs: [PreviewPageSpec] = []
+        var byKey: [String: URL] = [:]
+        for (index, item) in items.enumerated() {
+            let key = PreviewPageSpec.fileKey(for: item.url)
+            specs.append(PreviewPageSpec(id: index + 1, cacheKey: key))
+            byKey[key] = item.url
         }
+        pageSpecs = specs
+        previewURLsByKey = byKey
+        // Pure ImageIO header reads — run on the global executor via the nonisolated helper, NOT
+        // the PDF serial queue, so a big image queue can't starve other tools' page previews.
+        let sizes = await PDFToolkit.imagePixelSizes(for: urls)
+        // `.task(id:)` cancelled this load if the queue changed again; a superseded load must
+        // neither install its stale sizes nor clear the spinner the newer load now owns.
+        guard !Task.isCancelled else { return }
+        pixelSizes = sizes
+        isGeneratingPreviews = false
     }
 
     private func consumeDroppedProviders(_ providers: [NSItemProvider]) {

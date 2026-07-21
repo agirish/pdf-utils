@@ -32,36 +32,64 @@ enum PDFPageThumbnailLoader {
         )
     }
 
-    static func loadAllPages(from url: URL) async throws -> [PDFPageThumbnail] {
-        try await PDFBackgroundWork.run { isCancelled in
+    // MARK: Demand loading
+
+    /// Documents kept open across per-page loads, keyed by path + modification date so an
+    /// externally edited file misses. Accessed ONLY on the PDF serial queue (PDFBackgroundWork) —
+    /// that queue is the sole executor for every closure that touches this, which is what makes
+    /// the unsynchronized static safe. Tiny cap: the preview grids show at most a few documents.
+    private nonisolated(unsafe) static var openDocuments: [(key: String, doc: PDFDocument)] = []
+    private static let openDocumentCapacity = 4
+
+    /// On-queue only. Opens (or reuses) the document and applies the locked-document gate.
+    ///
+    /// The gate lives HERE, not per call site: a locked document reports a real page count and
+    /// renders every page as a blank placeholder, so an ungated caller shows a normal-looking grid
+    /// of empty pages. Three separate rounds of review found call sites that missed a caller-side
+    /// check — putting the refusal inside the one loader they all share is the only shape a future
+    /// call site can't get wrong.
+    private static func cachedDocument(at url: URL) throws -> PDFDocument {
+        let modified = (try? url.resourceValues(forKeys: [.contentModificationDateKey])
+            .contentModificationDate)?.timeIntervalSince1970 ?? 0
+        let key = "\(url.path)@\(modified)"
+        if let hit = openDocuments.first(where: { $0.key == key }) {
+            return hit.doc
+        }
+        guard let doc = PDFDocument(url: url) else {
+            throw PDFOperationError.couldNotOpen(url)
+        }
+        guard !doc.isLocked else {
+            throw PDFOperationError.encryptedInput(url)
+        }
+        openDocuments.append((key, doc))
+        if openDocuments.count > openDocumentCapacity {
+            openDocuments.removeFirst()
+        }
+        return doc
+    }
+
+    /// The page count a preview grid should build cells for — fast (no rendering), and the
+    /// entry point that surfaces the locked-document refusal before any cell exists.
+    static func pageCount(of url: URL) async throws -> Int {
+        try await PDFBackgroundWork.run {
             try url.withSecurityScopedAccess {
-                guard let doc = PDFDocument(url: url) else {
-                    throw PDFOperationError.couldNotOpen(url)
+                try cachedDocument(at: url).pageCount
+            }
+        }
+    }
+
+    /// One page's thumbnail, rendered on demand — the unit the virtualized preview grid loads as
+    /// cells appear, instead of sweeping every page of the document up front.
+    static func loadPage(from url: URL, pageIndex: Int) async throws -> PDFPageThumbnail? {
+        try await PDFBackgroundWork.run {
+            try url.withSecurityScopedAccess {
+                let doc = try cachedDocument(at: url)
+                // Per-render pool: page-sized scratch drains with the call, not the queue's lifetime.
+                return autoreleasepool {
+                    guard let page = doc.page(at: pageIndex) else { return nil }
+                    let image = page.thumbnail(of: thumbnailBox(for: page), for: .mediaBox)
+                    return PDFPageThumbnail(pageNumber: pageIndex + 1, image: image)
                 }
-                // Gate HERE, not per call site: a locked document reports a real page count and
-                // renders every page as a blank placeholder, so an ungated caller shows a
-                // normal-looking grid of empty pages. Three separate rounds of review found
-                // call sites that missed a caller-side check (Merge's inline sweep, then six
-                // direct-loading tool views) — putting the refusal inside the one loader they
-                // all share is the only shape a future call site can't get wrong.
-                guard !doc.isLocked else {
-                    throw PDFOperationError.encryptedInput(url)
-                }
-                var items: [PDFPageThumbnail] = []
-                for i in 0..<doc.pageCount {
-                    // Task.checkCancellation() is inert on the GCD queue; only this probe can see
-                    // the caller's cancellation and stop a superseded sweep early.
-                    if isCancelled() { throw CancellationError() }
-                    // Per-page pool: thumbnail rendering leaves page-sized autoreleased scratch
-                    // that otherwise accumulates for the whole sweep on long documents. The kept
-                    // NSImage survives the drain — the items array owns it.
-                    autoreleasepool {
-                        guard let page = doc.page(at: i) else { return }
-                        let image = page.thumbnail(of: thumbnailBox(for: page), for: .mediaBox)
-                        items.append(PDFPageThumbnail(pageNumber: i + 1, image: image))
-                    }
-                }
-                return items
             }
         }
     }

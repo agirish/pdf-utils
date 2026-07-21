@@ -14,7 +14,7 @@ struct DeletePagesToolView: View {
     @State private var exportDoc: PDFFileDocument?
     @State private var suggestedName = "edited.pdf"
     @State private var isDropTargeted = false
-    @State private var thumbnails: [PDFPageThumbnail] = []
+    @State private var pageSpecs: [PreviewPageSpec] = []
     @State private var isGeneratingPreviews = false
     @State private var thumbnailSize: CGFloat = 120
 
@@ -32,14 +32,18 @@ struct DeletePagesToolView: View {
             sidebarColumn
                 .toolSidebarWidth()
             SinglePDFPreviewColumn(
-                thumbnails: thumbnails,
+                pages: pageSpecs,
                 isGenerating: isGeneratingPreviews,
                 thumbnailSize: $thumbnailSize,
                 accent: accent,
                 previewSubtitle: "Full document preview; only the page numbers you list are removed from the saved copy.",
                 emptyTitle: "No PDF selected",
                 emptySubtitle: "Drop a PDF here, choose one, or use Add PDF… to see thumbnails.",
-                emptySystemImage: Tool.deletePages.symbolName
+                emptySystemImage: Tool.deletePages.symbolName,
+                render: { spec in
+                    guard let url = inputURL else { return nil }
+                    return (try? await PDFPageThumbnailLoader.loadPage(from: url, pageIndex: spec.id - 1))?.image
+                }
             )
             .frame(minWidth: 360)
         }
@@ -219,8 +223,8 @@ struct DeletePagesToolView: View {
                     Text("Loading preview…")
                         .font(.subheadline)
                         .foregroundStyle(.tertiary)
-                } else if !thumbnails.isEmpty {
-                    Text("\(thumbnails.count) page\(thumbnails.count == 1 ? "" : "s")")
+                } else if !pageSpecs.isEmpty {
+                    Text("\(pageSpecs.count) page\(pageSpecs.count == 1 ? "" : "s")")
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
                 }
@@ -260,7 +264,7 @@ struct DeletePagesToolView: View {
 
     private func loadThumbnails() async {
         guard let url = inputURL else {
-            thumbnails = []
+            pageSpecs = []
             isGeneratingPreviews = false
             return
         }
@@ -268,21 +272,22 @@ struct DeletePagesToolView: View {
         // against thumbnails of a file that is no longer loaded — and the typed spec with them
         // (same rationale as Extract/Split): "2, 4-6" typed for document A silently deleted those
         // pages from a swapped-in document B with one click.
-        thumbnails = []
+        pageSpecs = []
         rangeText = ""
         isGeneratingPreviews = true
         do {
-            let loaded = try await PDFPageThumbnailLoader.loadAllPages(from: url)
+            // Only the page count loads up front; cells render on demand as they appear.
+            let count = try await PDFPageThumbnailLoader.pageCount(of: url)
             // `.task(id:)` cancelled this load if the file changed again; a superseded load must
             // neither install its stale result nor clear the spinner the newer load now owns.
             guard !Task.isCancelled else { return }
-            thumbnails = loaded
+            pageSpecs = PreviewPageSpec.specs(forPDFAt: url, pageCount: count)
             isGeneratingPreviews = false
         } catch is CancellationError {
-            // Superseded mid-render; the newer load owns the state.
+            // Superseded mid-load; the newer load owns the state.
         } catch {
             guard !Task.isCancelled else { return }
-            thumbnails = []
+            pageSpecs = []
             isGeneratingPreviews = false
             if case PDFOperationError.encryptedInput = error {
                 // Locked selection: actionable message + back to the empty state (Metadata's pattern).

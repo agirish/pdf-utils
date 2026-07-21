@@ -49,7 +49,7 @@ struct UnifiedFilePanel<Config: View>: View {
     @State private var showImporter = false
     @State private var isDropTargeted = false
     @State private var alertMessage: String?
-    @State private var thumbnails: [PDFPageThumbnail] = []
+    @State private var pageSpecs: [PreviewPageSpec] = []
     @State private var isGeneratingPreviews = false
     @State private var thumbnailSize: CGFloat = 120
     /// The one loaded file is password-locked and can't be previewed until unlocked.
@@ -235,8 +235,8 @@ struct UnifiedFilePanel<Config: View>: View {
                     Text("Loading preview…")
                         .font(.subheadline)
                         .foregroundStyle(.tertiary)
-                } else if !thumbnails.isEmpty {
-                    Text("\(thumbnails.count) page\(thumbnails.count == 1 ? "" : "s")")
+                } else if !pageSpecs.isEmpty {
+                    Text("\(pageSpecs.count) page\(pageSpecs.count == 1 ? "" : "s")")
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
                 }
@@ -396,14 +396,18 @@ struct UnifiedFilePanel<Config: View>: View {
                 .background(ToolPreviewPaneBackground())
             } else if fileCount == 1 {
                 SinglePDFPreviewColumn(
-                    thumbnails: thumbnails,
+                    pages: pageSpecs,
                     isGenerating: isGeneratingPreviews,
                     thumbnailSize: $thumbnailSize,
                     accent: accent,
                     previewSubtitle: previewSubtitle,
                     emptyTitle: "No PDF selected",
                     emptySubtitle: "Drop a PDF here or choose one to see its pages.",
-                    emptySystemImage: tool.symbolName
+                    emptySystemImage: tool.symbolName,
+                    render: { spec in
+                        guard let url = firstURL else { return nil }
+                        return (try? await PDFPageThumbnailLoader.loadPage(from: url, pageIndex: spec.id - 1))?.image
+                    }
                 )
             } else {
                 queueColumn
@@ -570,12 +574,12 @@ struct UnifiedFilePanel<Config: View>: View {
 
     private func loadThumbnails() async {
         guard fileCount == 1, let url = firstURL else {
-            thumbnails = []
+            pageSpecs = []
             isGeneratingPreviews = false
             previewLocked = false
             return
         }
-        thumbnails = []
+        pageSpecs = []
         // Loading state set SYNCHRONOUSLY, before any await: the old shape ran a separate lock
         // probe first (serialized behind whatever the PDF queue was doing), during which the pane
         // showed "No PDF selected" for a file that was selected — and a stale locked placeholder
@@ -584,15 +588,16 @@ struct UnifiedFilePanel<Config: View>: View {
         previewLocked = false
         isGeneratingPreviews = true
         do {
-            let loaded = try await PDFPageThumbnailLoader.loadAllPages(from: url)
+            // Only the page count loads up front; cells render on demand as they appear.
+            let count = try await PDFPageThumbnailLoader.pageCount(of: url)
             guard !Task.isCancelled else { return }
-            thumbnails = loaded
+            pageSpecs = PreviewPageSpec.specs(forPDFAt: url, pageCount: count)
             isGeneratingPreviews = false
         } catch is CancellationError {
-            // Superseded mid-render; the newer load owns the state.
+            // Superseded mid-load; the newer load owns the state.
         } catch {
             guard !Task.isCancelled else { return }
-            thumbnails = []
+            pageSpecs = []
             isGeneratingPreviews = false
             if case PDFOperationError.encryptedInput = error {
                 previewLocked = true

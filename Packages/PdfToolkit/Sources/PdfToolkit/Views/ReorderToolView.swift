@@ -4,13 +4,11 @@ import SwiftUI
 import UniformTypeIdentifiers
 
 private struct ReorderItem: Identifiable, Equatable {
-    /// Stable identity = the page's position in the original document (zero-based).
+    /// Stable identity = the page's position in the original document (zero-based). No image:
+    /// rows and preview cells both demand-render through the shared LRU, keyed by this index.
     let id: Int
     var originalIndex: Int { id }
     var pageNumber: Int { id + 1 }
-    let image: NSImage
-
-    static func == (lhs: ReorderItem, rhs: ReorderItem) -> Bool { lhs.id == rhs.id }
 }
 
 struct ReorderToolView: View {
@@ -33,6 +31,9 @@ struct ReorderToolView: View {
     @State private var isGeneratingPreviews = false
     @State private var thumbnailSize: CGFloat = 120
     @State private var selectedItemID: Int?
+    /// `<path>@<mtime>` of the loaded file, captured once per load — the prefix every row's and
+    /// preview cell's cache key shares.
+    @State private var fileKeyBase = ""
 
     private var selectionPathKey: String {
         inputURL?.standardizedFileURL.path ?? ""
@@ -52,9 +53,15 @@ struct ReorderToolView: View {
         items.isEmpty && !removedItems.isEmpty
     }
 
-    /// The right-hand preview, in the current arrangement, each labeled with its original page number.
-    private var previewThumbnails: [PDFPageThumbnail] {
-        items.map { PDFPageThumbnail(pageNumber: $0.pageNumber, image: $0.image) }
+    /// The right-hand preview, in the current arrangement. The spec id is the page's ORIGINAL
+    /// 1-based number — the badge the drop-pages design promises ("labels show each page's
+    /// original number"), unique within any arrangement, and a stable SwiftUI identity so a drag
+    /// moves cells instead of rebuilding them. The cache key carries the same original index, so
+    /// reordering (or restoring a dropped page) is pure cache hits — no re-render.
+    private var previewSpecs: [PreviewPageSpec] {
+        items.map { item in
+            PreviewPageSpec(id: item.originalIndex + 1, cacheKey: "\(fileKeyBase)#\(item.originalIndex)")
+        }
     }
 
     var body: some View {
@@ -62,7 +69,7 @@ struct ReorderToolView: View {
             sidebarColumn
                 .toolSidebarWidth()
             SinglePDFPreviewColumn(
-                thumbnails: previewThumbnails,
+                pages: previewSpecs,
                 isGenerating: isGeneratingPreviews,
                 thumbnailSize: $thumbnailSize,
                 accent: accent,
@@ -71,7 +78,16 @@ struct ReorderToolView: View {
                 emptySubtitle: allPagesRemoved
                     ? "Restore a page on the left to preview it."
                     : "Drop a PDF here or choose one to arrange its pages.",
-                emptySystemImage: "arrow.up.arrow.down.square"
+                emptySystemImage: "arrow.up.arrow.down.square",
+                render: { spec in
+                    guard let url = inputURL else { return nil }
+                    // The key's `#<n>` suffix is the ORIGINAL page index (position-independent),
+                    // so a render started just before a drag still fetches its own cell's page.
+                    guard let index = spec.cacheKey.split(separator: "#").last.flatMap({ Int($0) }) else {
+                        return nil
+                    }
+                    return (try? await PDFPageThumbnailLoader.loadPage(from: url, pageIndex: index))?.image
+                }
             )
             .frame(minWidth: 360)
         }
@@ -363,17 +379,20 @@ struct ReorderToolView: View {
 
     private func removedRow(for item: ReorderItem) -> some View {
         HStack(alignment: .center, spacing: 12) {
-            Image(nsImage: item.image)
-                .resizable()
-                .aspectRatio(contentMode: .fit)
-                .frame(width: 26, height: 34)
-                .background(Color.white)
-                .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
-                .overlay {
-                    RoundedRectangle(cornerRadius: 4, style: .continuous)
-                        .strokeBorder(Color.primary.opacity(0.12), lineWidth: 0.5)
-                }
-                .opacity(0.55)
+            // Same demand-loaded thumbnail (and cache key) as the kept rows and the preview cells
+            // — a page dropped after rendering once is a pure cache hit here.
+            ReorderRowThumbnail(cacheKey: "\(fileKeyBase)#\(item.originalIndex)") {
+                guard let url = inputURL else { return nil }
+                return (try? await PDFPageThumbnailLoader.loadPage(from: url, pageIndex: item.originalIndex))?.image
+            }
+            .frame(width: 26, height: 34)
+            .background(Color.white)
+            .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: 4, style: .continuous)
+                    .strokeBorder(Color.primary.opacity(0.12), lineWidth: 0.5)
+            }
+            .opacity(0.55)
 
             Text("Page \(item.pageNumber)")
                 .font(.callout.weight(.medium))
@@ -405,16 +424,17 @@ struct ReorderToolView: View {
         return HStack(alignment: .center, spacing: 12) {
             RowIndexBadge(number: position + 1, accent: accent)
 
-            Image(nsImage: item.image)
-                .resizable()
-                .aspectRatio(contentMode: .fit)
-                .frame(width: 34, height: 44)
-                .background(Color.white)
-                .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
-                .overlay {
-                    RoundedRectangle(cornerRadius: 4, style: .continuous)
-                        .strokeBorder(Color.primary.opacity(0.12), lineWidth: 0.5)
-                }
+            ReorderRowThumbnail(cacheKey: "\(fileKeyBase)#\(item.originalIndex)") {
+                guard let url = inputURL else { return nil }
+                return (try? await PDFPageThumbnailLoader.loadPage(from: url, pageIndex: item.originalIndex))?.image
+            }
+            .frame(width: 34, height: 44)
+            .background(Color.white)
+            .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: 4, style: .continuous)
+                    .strokeBorder(Color.primary.opacity(0.12), lineWidth: 0.5)
+            }
 
             Text("Page \(item.pageNumber)")
                 .font(.callout.weight(.medium))
@@ -516,14 +536,16 @@ struct ReorderToolView: View {
         removedItems = []
         isGeneratingPreviews = true
         do {
-            let thumbs = try await PDFPageThumbnailLoader.loadAllPages(from: url)
+            // Only the page count loads up front; row and preview cells render on demand.
+            let count = try await PDFPageThumbnailLoader.pageCount(of: url)
             // `.task(id:)` cancelled this load if the user switched files again; a superseded load
             // must neither install its stale rows nor clear the spinner the newer load now owns.
             guard !Task.isCancelled else { return }
-            items = thumbs.map { ReorderItem(id: $0.pageNumber - 1, image: $0.image) }
+            fileKeyBase = PreviewPageSpec.fileKey(for: url)
+            items = (0..<count).map { ReorderItem(id: $0) }
             isGeneratingPreviews = false
         } catch is CancellationError {
-            // Superseded mid-render; the newer load owns the state.
+            // Superseded mid-load; the newer load owns the state.
         } catch {
             guard !Task.isCancelled else { return }
             items = []
@@ -590,6 +612,35 @@ struct ReorderToolView: View {
         } catch {
             alertMessage = error.localizedDescription
             ActivityLog.shared.error("\(Tool.reorder.title) failed: \(error.localizedDescription)")
+        }
+    }
+}
+
+/// The 34×44 page image in one sidebar row, read from the shared LRU on demand — the same key the
+/// preview column uses for that page, so a row and its preview cell share one render. The row holds
+/// no image state of its own; a long document's rows stay as cheap as its preview cells.
+private struct ReorderRowThumbnail: View {
+    let cacheKey: String
+    let render: () async -> NSImage?
+    /// Repaint trigger after a store; the image itself deliberately lives only in the cache.
+    @State private var tick = 0
+
+    var body: some View {
+        Group {
+            if let image = PreviewThumbnailCache.shared.image(for: cacheKey) {
+                Image(nsImage: image)
+                    .resizable()
+                    .aspectRatio(contentMode: .fit)
+            } else {
+                Color.white
+            }
+        }
+        .id(tick)
+        .task(id: cacheKey) {
+            guard PreviewThumbnailCache.shared.image(for: cacheKey) == nil else { return }
+            guard let rendered = await render(), !Task.isCancelled else { return }
+            PreviewThumbnailCache.shared.store(rendered, for: cacheKey)
+            tick += 1
         }
     }
 }

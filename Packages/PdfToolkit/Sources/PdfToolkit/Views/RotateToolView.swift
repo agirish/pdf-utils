@@ -63,14 +63,7 @@ struct RotateToolView: View {
                 ActivityLog.shared.error("\(Tool.rotate.title) failed: \(err.localizedDescription)")
             }
         }
-        .alert(AppBrand.displayName, isPresented: Binding(
-            get: { alertMessage != nil },
-            set: { if !$0 { alertMessage = nil } }
-        )) {
-            Button("OK", role: .cancel) { alertMessage = nil }
-        } message: {
-            Text(alertMessage ?? "")
-        }
+        .toolErrorAlert($alertMessage)
     }
 
     // MARK: - Config (count-aware: page range for one file, all-pages note for many)

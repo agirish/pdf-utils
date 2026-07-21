@@ -56,6 +56,20 @@ extension View {
     func toolActionBar() -> some View {
         self.background(.ultraThinMaterial)
     }
+
+    /// The app's standard error alert: the error string under the app name with a single OK button,
+    /// cleared on dismiss. Every tool view carried a byte-identical hand-rolled copy of this block;
+    /// they now share one call. A non-nil `message` presents the alert.
+    func toolErrorAlert(_ message: Binding<String?>) -> some View {
+        alert(AppBrand.displayName, isPresented: Binding(
+            get: { message.wrappedValue != nil },
+            set: { if !$0 { message.wrappedValue = nil } }
+        )) {
+            Button("OK", role: .cancel) { message.wrappedValue = nil }
+        } message: {
+            Text(message.wrappedValue ?? "")
+        }
+    }
 }
 
 /// Reads the live appearance settings so every `formCard()` tracks the Glass effect level and accent

@@ -90,14 +90,7 @@ struct ImagesToPDFToolView: View {
                 ActivityLog.shared.error("\(Tool.imagesToPdf.title) failed: \(err.localizedDescription)")
             }
         }
-        .alert(AppBrand.displayName, isPresented: Binding(
-            get: { alertMessage != nil },
-            set: { if !$0 { alertMessage = nil } }
-        )) {
-            Button("OK", role: .cancel) { alertMessage = nil }
-        } message: {
-            Text(alertMessage ?? "")
-        }
+        .toolErrorAlert($alertMessage)
         .task(id: itemsKey) {
             await loadThumbnails()
         }

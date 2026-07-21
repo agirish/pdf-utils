@@ -87,14 +87,7 @@ struct UnifiedFilePanel<Config: View>: View {
             case .failure(let err): alertMessage = err.localizedDescription
             }
         }
-        .alert(AppBrand.displayName, isPresented: Binding(
-            get: { alertMessage != nil },
-            set: { if !$0 { alertMessage = nil } }
-        )) {
-            Button("OK", role: .cancel) { alertMessage = nil }
-        } message: {
-            Text(alertMessage ?? "")
-        }
+        .toolErrorAlert($alertMessage)
         .task(id: previewPathKey) {
             await loadThumbnails()
         }

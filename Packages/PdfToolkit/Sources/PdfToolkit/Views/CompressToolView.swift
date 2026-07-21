@@ -173,14 +173,7 @@ struct CompressToolView: View {
             }
             pendingInputBytes = nil
         }
-        .alert(AppBrand.displayName, isPresented: Binding(
-            get: { alertMessage != nil },
-            set: { if !$0 { alertMessage = nil } }
-        )) {
-            Button("OK", role: .cancel) { alertMessage = nil }
-        } message: {
-            Text(alertMessage ?? "")
-        }
+        .toolErrorAlert($alertMessage)
         .task(id: singleSourcePath) {
             // A different file (or none): the previous run's readout no longer describes what's loaded.
             lastResult = nil

@@ -74,14 +74,7 @@ struct ExtractToolView: View {
                 ActivityLog.shared.error("\(Tool.extract.title) failed: \(err.localizedDescription)")
             }
         }
-        .alert(AppBrand.displayName, isPresented: Binding(
-            get: { alertMessage != nil },
-            set: { if !$0 { alertMessage = nil } }
-        )) {
-            Button("OK", role: .cancel) { alertMessage = nil }
-        } message: {
-            Text(alertMessage ?? "")
-        }
+        .toolErrorAlert($alertMessage)
         .task(id: selectionPathKey) {
             await loadThumbnails()
         }

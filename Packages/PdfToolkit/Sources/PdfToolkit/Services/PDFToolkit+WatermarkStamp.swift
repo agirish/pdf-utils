@@ -177,24 +177,39 @@ extension PDFToolkit {
         return redrawUpright(base, orientation: orientation)
     }
 
+    /// The largest side, in pixels, a decoded raster logo is kept at. A watermark is only ever
+    /// aspect-fit into a fraction of a page and often tiled/faded, so a 48MP phone photo carried at
+    /// full resolution would bloat the by-value ``WatermarkOptions`` batch snapshot (~190MB) and be
+    /// redrawn per page and per tile for no visible gain. Capping the uprighted output here keeps a
+    /// logo crisp for print (well above 300 dpi at any sane on-page size) while bounding it to ~16MB.
+    private static let maxUprightRasterDimension = 2000
+
     /// Redraws `image` upright (per its EXIF orientation) into a fresh premultiplied-alpha RGBA
-    /// bitmap. Orientations 5–8 swap the displayed axes.
+    /// bitmap, downscaled so its longest side fits ``maxUprightRasterDimension``. Orientations 5–8
+    /// swap the displayed axes.
     private static func redrawUpright(_ image: CGImage, orientation: UInt32) -> CGImage? {
         let w = image.width, h = image.height
         let swapsAxes = orientation >= 5 && orientation <= 8
-        let outW = swapsAxes ? h : w
-        let outH = swapsAxes ? w : h
-        guard outW > 0, outH > 0,
-              let ctx = CGContext(
-                data: nil, width: outW, height: outH, bitsPerComponent: 8, bytesPerRow: 0,
-                space: CGColorSpaceCreateDeviceRGB(),
-                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
-              )
-        else { return nil }
+        // The upright logical size (source axes, swapped for 5–8) before any downscale.
+        let uprightW = swapsAxes ? h : w
+        let uprightH = swapsAxes ? w : h
+        guard uprightW > 0, uprightH > 0 else { return nil }
+
+        // Fit the longest upright side to the cap; the bitmap is allocated at the capped size so the
+        // full-resolution source is never materialized as an intermediate.
+        let fit = min(1, CGFloat(maxUprightRasterDimension) / CGFloat(max(uprightW, uprightH)))
+        let outW = max(1, Int((CGFloat(uprightW) * fit).rounded()))
+        let outH = max(1, Int((CGFloat(uprightH) * fit).rounded()))
+        guard let ctx = CGContext(
+            data: nil, width: outW, height: outH, bitsPerComponent: 8, bytesPerRow: 0,
+            space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        ) else { return nil }
         ctx.interpolationQuality = .high
-        // Map the output bitmap's axes to the source pixels for each EXIF orientation, then draw the
-        // sensor-oriented image into the unit rect the transform now describes.
-        ctx.concatenate(orientationTransform(orientation, width: CGFloat(w), height: CGFloat(h), outW: CGFloat(outW), outH: CGFloat(outH)))
+        // Scale the capped bitmap up to the upright logical size, apply the EXIF transform (expressed
+        // in that logical space), then draw the sensor pixels into the unit rect it describes.
+        ctx.scaleBy(x: CGFloat(outW) / CGFloat(uprightW), y: CGFloat(outH) / CGFloat(uprightH))
+        ctx.concatenate(orientationTransform(orientation, width: CGFloat(w), height: CGFloat(h), outW: CGFloat(uprightW), outH: CGFloat(uprightH)))
         ctx.draw(image, in: CGRect(x: 0, y: 0, width: w, height: h))
         return ctx.makeImage()
     }
@@ -204,7 +219,9 @@ extension PDFToolkit {
     private static func orientationTransform(_ orientation: UInt32, width: CGFloat, height: CGFloat, outW: CGFloat, outH: CGFloat) -> CGAffineTransform {
         // CoreGraphics contexts are y-up; EXIF orientation is described top-down. These map each
         // case into the y-up context. 1 = up (identity). 3 = 180°. 6/8 = 90° rotations. 2/4/5/7 add
-        // a mirror. Derived so the drawn image fills [0,0,width,height] correctly post-transform.
+        // a mirror. Derived so the drawn image fills [0,0,width,height] correctly post-transform, and
+        // verified pairwise against Apple's own baking (`CGImageSourceCreateThumbnailAtIndex` with
+        // `kCGImageSourceCreateThumbnailWithTransform`) for all eight orientations.
         switch orientation {
         case 2: // mirrored horizontal
             return CGAffineTransform(a: -1, b: 0, c: 0, d: 1, tx: width, ty: 0)
@@ -212,14 +229,14 @@ extension PDFToolkit {
             return CGAffineTransform(a: -1, b: 0, c: 0, d: -1, tx: width, ty: height)
         case 4: // mirrored vertical
             return CGAffineTransform(a: 1, b: 0, c: 0, d: -1, tx: 0, ty: height)
-        case 5: // mirrored horizontal, 90° CCW  (axes swap: out is height×width)
-            return CGAffineTransform(a: 0, b: 1, c: 1, d: 0, tx: 0, ty: 0)
-        case 6: // 90° CW
-            return CGAffineTransform(a: 0, b: 1, c: -1, d: 0, tx: height, ty: 0)
-        case 7: // mirrored horizontal, 90° CW
+        case 5: // mirrored horizontal, 90° CCW = transpose  (axes swap: out is height×width)
             return CGAffineTransform(a: 0, b: -1, c: -1, d: 0, tx: height, ty: width)
-        case 8: // 90° CCW
+        case 6: // 90° CW (the common portrait-phone capture)
             return CGAffineTransform(a: 0, b: -1, c: 1, d: 0, tx: 0, ty: width)
+        case 7: // mirrored horizontal, 90° CW = transverse
+            return CGAffineTransform(a: 0, b: 1, c: 1, d: 0, tx: 0, ty: 0)
+        case 8: // 90° CCW
+            return CGAffineTransform(a: 0, b: 1, c: -1, d: 0, tx: height, ty: 0)
         default: // 1 = up
             return .identity
         }

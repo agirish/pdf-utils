@@ -325,4 +325,144 @@ import UniformTypeIdentifiers
         #expect(try PDFFixtures.brightnessSampler(at: out, page: 0)(280, 396) < 0.8)   // stamped
         #expect(try PDFFixtures.brightnessSampler(at: out, page: 1)(280, 396) > 0.95)  // untouched
     }
+
+    @Test func imageWatermarkOnACroppedPageCentersOnTheVisibleBox() throws {
+        // The image branch through the displayed-size / crop-box path (its text-watermark siblings
+        // above are covered; this pins the logo branch too). The logo centers on the *cropped* page,
+        // and the emitted page is the crop's visible size — not the full media box.
+        let dir = FixtureDir()
+        let src = dir.url("src.pdf"), out = dir.url("out.pdf"), logo = dir.url("logo.png")
+        try PDFFixtures.writePDF(
+            markers: ["ONLY"], cropFirstPageTo: CGRect(x: 50, y: 50, width: 500, height: 600), to: src
+        )
+        try writeHalfTransparentPNG(to: logo)
+        let decoded = try #require(PDFToolkit.watermarkImageSource(at: logo))
+
+        try PDFToolkit.watermark(inputURL: src, outputURL: out, options: imageOptions(decoded, opacity: 1, scale: 0.5))
+
+        #expect(try PDFFixtures.pageSize(at: out) == CGSize(width: 500, height: 600))
+        // Cropped page center = (250, 300); the 100×100 logo aspect-fits to 250×250 there, so its
+        // opaque red half sits left of center and its transparent half lets the page show through.
+        let b = try PDFFixtures.brightnessSampler(at: out)
+        #expect(b(190, 300) < 0.8)   // opaque red half stamped left of the visible-box center
+        #expect(b(320, 300) > 0.9)   // transparent half → white page through, on the cropped page
+    }
+
+    // MARK: - EXIF orientation baking
+
+    /// Renders a decoded logo into a straight-RGBA buffer (row 0 = top) and classifies the dominant
+    /// primary at a fractional point measured from the TOP-LEFT — so a test can read off exactly
+    /// where each corner of the sensor image landed after the EXIF orientation was applied.
+    private struct Quadrants {
+        let width: Int, height: Int
+        private let px: [UInt8]
+        private let bytesPerRow: Int
+
+        init(_ image: CGImage) throws {
+            width = image.width
+            height = image.height
+            let ctx = try #require(CGContext(
+                data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: 0,
+                space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+            ))
+            ctx.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
+            bytesPerRow = ctx.bytesPerRow
+            let data = try #require(ctx.data)
+            let ptr = data.bindMemory(to: UInt8.self, capacity: bytesPerRow * height)
+            px = Array(UnsafeBufferPointer(start: ptr, count: bytesPerRow * height))
+        }
+
+        /// The fixture's four quadrants use well-separated primaries, so a sample at a quadrant
+        /// center resolves to exactly one label — a robust identity for "which corner is here?"
+        /// that survives the gamma/color-management differences between two decode pipelines.
+        func label(atX fx: CGFloat, y fy: CGFloat) -> String {
+            let col = min(width - 1, max(0, Int(fx * CGFloat(width))))
+            let row = min(height - 1, max(0, Int(fy * CGFloat(height))))
+            let o = row * bytesPerRow + col * 4
+            let r = CGFloat(px[o]) / 255, g = CGFloat(px[o + 1]) / 255, b = CGFloat(px[o + 2]) / 255
+            if r > 0.5 && g > 0.5 { return "yellow" }
+            if r > 0.5 { return "red" }
+            if g > 0.5 { return "green" }
+            if b > 0.5 { return "blue" }
+            return "other"
+        }
+    }
+
+    /// The four quadrant-center sample points (fx, fy from top-left), in TL, TR, BL, BR order.
+    private static let quadrantSamples: [(CGFloat, CGFloat)] = [(0.25, 0.25), (0.75, 0.25), (0.25, 0.75), (0.75, 0.75)]
+
+    /// Writes a non-square 4-quadrant PNG — sensor top-left red, top-right green, bottom-left blue,
+    /// bottom-right yellow — tagged with the given EXIF orientation. Four distinct primaries and a
+    /// non-square shape make every one of the eight orientations land the corners distinguishably,
+    /// so a decoder that gets the transform wrong is caught. The pixels are the raw sensor content;
+    /// only the metadata carries the orientation, exactly like a real camera file.
+    private func writeQuadrantPNG(to url: URL, orientation: UInt32, w: Int = 80, h: Int = 120) throws {
+        let ctx = try #require(CGContext(
+            data: nil, width: w, height: h, bitsPerComponent: 8, bytesPerRow: 0,
+            space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        ))
+        // y-up context: the top half is high y, so fill display-top quadrants at y = h/2…h.
+        ctx.setFillColor(CGColor(red: 0.9, green: 0.1, blue: 0.1, alpha: 1)); ctx.fill(CGRect(x: 0, y: h / 2, width: w / 2, height: h / 2))     // TL red
+        ctx.setFillColor(CGColor(red: 0.1, green: 0.8, blue: 0.1, alpha: 1)); ctx.fill(CGRect(x: w / 2, y: h / 2, width: w / 2, height: h / 2)) // TR green
+        ctx.setFillColor(CGColor(red: 0.1, green: 0.1, blue: 0.9, alpha: 1)); ctx.fill(CGRect(x: 0, y: 0, width: w / 2, height: h / 2))         // BL blue
+        ctx.setFillColor(CGColor(red: 0.9, green: 0.9, blue: 0.1, alpha: 1)); ctx.fill(CGRect(x: w / 2, y: 0, width: w / 2, height: h / 2))     // BR yellow
+        let image = try #require(ctx.makeImage())
+        let dest = try #require(CGImageDestinationCreateWithURL(url as CFURL, UTType.png.identifier as CFString, 1, nil))
+        CGImageDestinationAddImage(dest, image, [kCGImagePropertyOrientation: orientation] as CFDictionary)
+        #expect(CGImageDestinationFinalize(dest))
+    }
+
+    /// Apple's own orientation-baking, used as the independent oracle: the full-size thumbnail with
+    /// `kCGImageSourceCreateThumbnailWithTransform` applies the file's EXIF orientation to the pixels.
+    private func appleUprighted(at url: URL) throws -> CGImage {
+        let source = try #require(CGImageSourceCreateWithURL(url as CFURL, nil))
+        let options: [CFString: Any] = [
+            kCGImageSourceCreateThumbnailWithTransform: true,
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceThumbnailMaxPixelSize: 1024,   // ≥ the fixture's longest side → no downscale
+        ]
+        return try #require(CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary))
+    }
+
+    @Test func orientationSixDecodesUprightNotUpsideDown() throws {
+        // The advertised feature — "EXIF orientation baked in" — was backwards for the common
+        // portrait-phone capture (orientation 6 = rotate 90° CW): the sensor was uprighted 90° CCW,
+        // stamping such a logo upside-down. Rotating the sensor 90° CW moves its corners
+        // TL→TR, TR→BR, BR→BL, BL→TL, so the uprighted quadrants read blue/red at the top and
+        // yellow/green at the bottom. These four labels fail loudly on the pre-fix transform.
+        let dir = FixtureDir()
+        let logo = dir.url("logo6.png")
+        try writeQuadrantPNG(to: logo, orientation: 6)
+
+        let decoded = try #require(PDFToolkit.watermarkImageSource(at: logo))
+        let q = try Quadrants(decoded.cgImage)
+        #expect(q.label(atX: 0.25, y: 0.25) == "blue")     // TL ← sensor bottom-left
+        #expect(q.label(atX: 0.75, y: 0.25) == "red")      // TR ← sensor top-left
+        #expect(q.label(atX: 0.25, y: 0.75) == "yellow")   // BL ← sensor bottom-right
+        #expect(q.label(atX: 0.75, y: 0.75) == "green")    // BR ← sensor top-right
+    }
+
+    @Test(arguments: [1, 2, 3, 4, 5, 6, 7, 8] as [UInt32])
+    func decodeMatchesApplesOrientationBaking(orientation: UInt32) throws {
+        // The general oracle: our decode (`CGImageSourceCreateImageAtIndex` + `redrawUpright`) must
+        // agree with Apple's baking for every orientation, at all four quadrant centers. This is the
+        // exact comparison that would have caught the shipped 5↔7 / 6↔8 swap.
+        let dir = FixtureDir()
+        let logo = dir.url("logo\(orientation).png")
+        try writeQuadrantPNG(to: logo, orientation: orientation)
+
+        // Guard the fixture's own validity: PNG must carry the tag, or both paths would just see an
+        // untagged (orientation 1) image and agree vacuously.
+        let source = try #require(CGImageSourceCreateWithURL(logo as CFURL, nil))
+        let tag = (CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any])?[kCGImagePropertyOrientation] as? UInt32
+        try #require(tag == orientation)
+
+        let mine = try Quadrants(try #require(PDFToolkit.watermarkImageSource(at: logo)).cgImage)
+        let apple = try Quadrants(try appleUprighted(at: logo))
+        #expect(mine.width == apple.width && mine.height == apple.height)
+        for (fx, fy) in Self.quadrantSamples {
+            #expect(mine.label(atX: fx, y: fy) == apple.label(atX: fx, y: fy),
+                    "orientation \(orientation) disagrees with Apple at (\(fx), \(fy))")
+        }
+    }
 }

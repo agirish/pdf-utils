@@ -1,6 +1,15 @@
 import CoreGraphics
 import Foundation
 
+/// Where a redaction mark came from — a hand-drawn ⇧-drag or an auto-detected Find & redact match.
+/// Only affects presentation (auto-marks draw a dashed outline and can be cleared as a group); both
+/// kinds redact identically and are edited/removed the same way.
+enum RedactionMarkOrigin: Hashable, Sendable {
+    case manual
+    /// Placed by a Find & redact search over the document text.
+    case autoMatch
+}
+
 /// One rectangular redaction region in a document page’s PDF user space (the space `PDFView`'s
 /// view→page conversion produces). The editor clips captured marks to the page's crop box — the
 /// visible region — and the export clips against the same box before filling.
@@ -10,11 +19,15 @@ struct RedactionMark: Identifiable, Hashable, Sendable {
     var pageIndex: Int
     /// Rectangle in PDF user space, clipped to the page's crop box at capture.
     var rect: CGRect
+    /// How the mark was created. Defaults to `.manual` so hand-drawn marks and every existing call
+    /// site are unaffected; Find & redact stamps `.autoMatch`.
+    var origin: RedactionMarkOrigin
 
-    init(id: UUID = UUID(), pageIndex: Int, rect: CGRect) {
+    init(id: UUID = UUID(), pageIndex: Int, rect: CGRect, origin: RedactionMarkOrigin = .manual) {
         self.id = id
         self.pageIndex = pageIndex
         self.rect = rect
+        self.origin = origin
     }
 }
 

@@ -19,6 +19,33 @@ struct RedactToolView: View {
     @State private var suggestedName = "redacted.pdf"
     @State private var isDropTargeted = false
 
+    // MARK: Find & redact
+    @State private var searchText = ""
+    @State private var searching = false
+    /// The in-flight scan, so Cancel and leaving the screen can abort it — a text sweep holds the
+    /// shared PDF serial queue the same way OCR does.
+    @State private var searchTask: Task<Void, Never>?
+    @State private var searchProgressPage = 0
+    @State private var searchProgressTotal = 0
+    /// Bumped at every scan start and end; progress hops to the main actor out of order, so the
+    /// generation check drops stragglers from a finished scan (OCR's pattern).
+    @State private var searchGeneration = 0
+    @State private var lastFindSummary: FindSummary?
+
+    /// A finished scan's numbers, for the "N matches on M pages" line.
+    private struct FindSummary {
+        let target: String
+        let matchCount: Int
+        let pageCount: Int
+        /// Marks actually added after de-duping against ones already present.
+        let addedCount: Int
+        let pagesWithoutText: Int
+    }
+
+    private var autoMarkCount: Int {
+        marks.reduce(0) { $0 + ($1.origin == .autoMatch ? 1 : 0) }
+    }
+
     private var selectionPathKey: String {
         inputURL?.standardizedFileURL.path ?? ""
     }
@@ -70,6 +97,10 @@ struct RedactToolView: View {
         .task(id: selectionPathKey) {
             await reloadDocumentForSelection()
         }
+        // Leaving the screen must free the PDF serial queue rather than let a scan finish unseen.
+        .onDisappear {
+            searchTask?.cancel()
+        }
     }
 
     // MARK: - Sidebar
@@ -92,6 +123,10 @@ struct RedactToolView: View {
                         return true
                     }
 
+                    if pdfDocument != nil {
+                        findRedactSection
+                    }
+
                     securitySection
 
                     if !marks.isEmpty {
@@ -108,7 +143,7 @@ struct RedactToolView: View {
             RunActionButton(
                 title: "Redact & save…",
                 busy: busy,
-                canRun: inputURL != nil && pdfDocument != nil && !marks.isEmpty
+                canRun: inputURL != nil && pdfDocument != nil && !marks.isEmpty && !searching
             ) {
                 Task { await runRedact() }
             }
@@ -131,9 +166,11 @@ struct RedactToolView: View {
                 HStack(spacing: 10) {
                     if inputURL != nil {
                         Button("Clear") {
+                            searchTask?.cancel()
                             inputURL = nil
                             pdfDocument = nil
                             marks = []
+                            resetFindState()
                         }
                         .buttonStyle(.borderless)
                         .font(.subheadline.weight(.medium))
@@ -284,16 +321,41 @@ struct RedactToolView: View {
                 Spacer()
                 Button("Clear all") {
                     marks = []
+                    lastFindSummary = nil
                 }
                 .buttonStyle(.borderless)
                 .font(.subheadline.weight(.medium))
                 .foregroundStyle(accent)
             }
-            ForEach(marks) { mark in
+            if autoMarkCount > 0 {
                 HStack {
+                    Text("\(autoMarkCount) from Find & redact")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    Button("Clear auto-marks") {
+                        marks.removeAll { $0.origin == .autoMatch }
+                        lastFindSummary = nil
+                    }
+                    .buttonStyle(.borderless)
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(accent)
+                }
+            }
+            ForEach(marks) { mark in
+                HStack(spacing: 8) {
                     Text("Page \(mark.pageIndex + 1)")
                         .font(.subheadline.monospacedDigit())
                     Spacer()
+                    if mark.origin == .autoMatch {
+                        Text("Auto")
+                            .font(.caption2.weight(.semibold))
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(Capsule().fill(accent.opacity(0.14)))
+                            .foregroundStyle(accent)
+                            .accessibilityLabel("Auto-detected match")
+                    }
                     Button {
                         marks.removeAll { $0.id == mark.id }
                     } label: {
@@ -313,6 +375,144 @@ struct RedactToolView: View {
         }
         .padding(16)
         .formCard()
+    }
+
+    // MARK: - Find & redact
+
+    private var findRedactSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Find & redact")
+                .font(.subheadline.weight(.semibold))
+            Text("Search the text, and every match is added as a redaction region you can review, adjust, or delete. Nothing is removed until you export.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            HStack(spacing: 8) {
+                TextField("Find text — e.g. an email or name", text: $searchText)
+                    .textFieldStyle(.roundedBorder)
+                    .onSubmit(submitLiteralSearch)
+                    .disabled(searching || busy)
+                Button(action: submitLiteralSearch) {
+                    Image(systemName: "magnifyingglass")
+                }
+                .buttonStyle(.bordered)
+                .disabled(trimmedSearch.isEmpty || searching || busy)
+                .help("Mark every occurrence of this text")
+            }
+
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Patterns")
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(.secondary)
+                LazyVGrid(
+                    columns: [GridItem(.adaptive(minimum: 116), spacing: 8)],
+                    alignment: .leading,
+                    spacing: 8
+                ) {
+                    ForEach(FindRedactPattern.allCases) { pattern in
+                        presetChip(pattern)
+                    }
+                }
+            }
+
+            if searching {
+                findProgressView
+            } else if let summary = lastFindSummary {
+                findSummaryView(summary)
+            }
+        }
+        .padding(16)
+        .formCard()
+    }
+
+    private func presetChip(_ pattern: FindRedactPattern) -> some View {
+        Button {
+            runFindTask(.pattern(pattern))
+        } label: {
+            HStack(spacing: 6) {
+                Image(systemName: pattern.symbolName)
+                    .font(.caption)
+                Text(pattern.displayName)
+                    .font(.caption.weight(.medium))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.85)
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 6)
+            .padding(.horizontal, 8)
+            .background {
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .fill(accent.opacity(0.12))
+            }
+            .overlay {
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .strokeBorder(accent.opacity(0.28), lineWidth: 1)
+            }
+            .foregroundStyle(accent)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .disabled(searching || busy)
+        .help("Mark every \(pattern.displayName.lowercased()) match")
+    }
+
+    private var findProgressView: some View {
+        VStack(spacing: 6) {
+            if searchProgressTotal > 0 {
+                ProgressView(value: Double(searchProgressPage), total: Double(searchProgressTotal))
+            } else {
+                ProgressView().controlSize(.small)
+            }
+            HStack {
+                Text(searchProgressTotal > 0
+                     ? "Scanning page \(searchProgressPage) of \(searchProgressTotal)…"
+                     : "Scanning…")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Spacer(minLength: 8)
+                Button("Cancel") { searchTask?.cancel() }
+                    .buttonStyle(.borderless)
+                    .font(.caption.weight(.medium))
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func findSummaryView(_ summary: FindSummary) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            if summary.matchCount == 0 {
+                Label("No matches for \(summary.target).", systemImage: "magnifyingglass")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            } else {
+                Label(matchSummaryText(summary), systemImage: "checkmark.circle")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            if summary.pagesWithoutText > 0 {
+                Label(
+                    "\(summary.pagesWithoutText) page\(summary.pagesWithoutText == 1 ? "" : "s") have no searchable text — a scan search can't read. Mark those by hand.",
+                    systemImage: "exclamationmark.triangle"
+                )
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
+                .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .fixedSize(horizontal: false, vertical: true)
+    }
+
+    private func matchSummaryText(_ summary: FindSummary) -> String {
+        let matchPart = "\(summary.matchCount) match\(summary.matchCount == 1 ? "" : "es")"
+        let pagePart = "\(summary.pageCount) page\(summary.pageCount == 1 ? "" : "s")"
+        var text = "\(matchPart) for \(summary.target) on \(pagePart)."
+        if summary.addedCount == 0 {
+            text += " Already marked."
+        } else if summary.addedCount < summary.matchCount {
+            text += " \(summary.addedCount) new."
+        }
+        return text
     }
 
     // MARK: - Editor
@@ -342,8 +542,10 @@ struct RedactToolView: View {
     // MARK: - Data
 
     private func reloadDocumentForSelection() async {
+        searchTask?.cancel()
         marks = []
         pdfDocument = nil
+        resetFindState()
         guard let url = inputURL else { return }
         do {
             // Load off the main thread AND on the shared PDFKit serial queue: constructing
@@ -386,6 +588,108 @@ struct RedactToolView: View {
                 }
             }
         }
+    }
+
+    // MARK: - Find & redact logic
+
+    private var trimmedSearch: String {
+        searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private func submitLiteralSearch() {
+        let needle = trimmedSearch
+        guard !needle.isEmpty else { return }
+        runFindTask(.literal(needle))
+    }
+
+    private func runFindTask(_ query: FindRedactQuery) {
+        guard inputURL != nil, !searching, !busy else { return }
+        searchTask = Task { await runFind(query) }
+    }
+
+    private func resetFindState() {
+        searchText = ""
+        lastFindSummary = nil
+        searchProgressPage = 0
+        searchProgressTotal = 0
+    }
+
+    /// Runs one scan on the serial queue and folds the found regions into `marks` as reviewable
+    /// auto-marks. It never applies anything — redaction still waits for the explicit Redact & save.
+    @MainActor
+    private func runFind(_ query: FindRedactQuery) async {
+        guard let fileURL = inputURL else { return }
+
+        searching = true
+        searchProgressPage = 0
+        searchProgressTotal = 0
+        searchGeneration += 1
+        let generation = searchGeneration
+        defer {
+            searching = false
+            searchProgressTotal = 0
+            // Invalidate stragglers still queued on the main actor from this scan.
+            searchGeneration += 1
+            searchTask = nil
+        }
+
+        do {
+            let result = try await PDFBackgroundWork.run { isCancelled in
+                try fileURL.withSecurityScopedAccess {
+                    try PDFToolkit.findRedactionMarks(
+                        inputURL: fileURL,
+                        query: query,
+                        progress: { page, total in
+                            Task { @MainActor in
+                                guard generation == searchGeneration, page > searchProgressPage else { return }
+                                searchProgressPage = page
+                                searchProgressTotal = total
+                            }
+                        },
+                        isCancelled: isCancelled
+                    )
+                }
+            }
+
+            let added = appendAutoMarks(result.marks())
+            lastFindSummary = FindSummary(
+                target: query.describedTarget,
+                matchCount: result.matchCount,
+                pageCount: result.pageCount,
+                addedCount: added,
+                pagesWithoutText: result.pagesWithoutText.count
+            )
+            ActivityLog.shared.info(
+                "\(Tool.redact.title): found \(result.matchCount) match\(result.matchCount == 1 ? "" : "es") for \(query.describedTarget); \(added) region\(added == 1 ? "" : "s") marked for review."
+            )
+        } catch is CancellationError {
+            // Cancelled deliberately (Cancel button or leaving the screen); nothing to report.
+        } catch {
+            alertMessage = error.localizedDescription
+            ActivityLog.shared.error("\(Tool.redact.title) search failed: \(error.localizedDescription)")
+        }
+    }
+
+    /// Appends new auto-marks, skipping any that duplicate a region already present (same page, same
+    /// rectangle within half a point) so re-running a search doesn't stack identical boxes. Returns
+    /// how many were actually added.
+    private func appendAutoMarks(_ newMarks: [RedactionMark]) -> Int {
+        var added = 0
+        for mark in newMarks {
+            let duplicate = marks.contains { existing in
+                existing.pageIndex == mark.pageIndex && Self.rectsNearlyEqual(existing.rect, mark.rect)
+            }
+            guard !duplicate else { continue }
+            marks.append(mark)
+            added += 1
+        }
+        return added
+    }
+
+    private static func rectsNearlyEqual(_ a: CGRect, _ b: CGRect) -> Bool {
+        let tol: CGFloat = 0.5
+        return abs(a.minX - b.minX) < tol && abs(a.minY - b.minY) < tol
+            && abs(a.width - b.width) < tol && abs(a.height - b.height) < tol
     }
 
     @MainActor

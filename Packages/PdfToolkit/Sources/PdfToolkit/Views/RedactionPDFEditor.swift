@@ -155,6 +155,11 @@ fileprivate final class RedactionOverlayView: PDFViewSyncedOverlay {
             strokeColor.setStroke()
             let path = NSBezierPath(rect: viewRect)
             path.lineWidth = 1.5
+            // Auto-detected matches wear a dashed outline so they read as "suggested — review me,"
+            // while hand-drawn marks stay solid. Both fill and redact identically.
+            if mark.origin == .autoMatch {
+                path.setLineDash([4, 3], count: 2, phase: 0)
+            }
             path.stroke()
         }
 

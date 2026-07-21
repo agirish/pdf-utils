@@ -272,14 +272,16 @@ extension Tool {
                 steps: [
                     "Choose or drop a PDF.",
                     "Hold ⇧ Shift, then drag on the preview to draw each redaction rectangle (stay on one page per drag).",
-                    "Review the region list on the left; remove mistakes with the trash button or Clear all.",
+                    "Or use Find & redact: type text (an email, a name) or tap a pattern chip (Emails, SSNs, Phone numbers, Card numbers) to auto-mark every match across the document.",
+                    "Review the region list on the left — auto-marks are tagged “Auto” and outlined with a dash; remove any with the trash button, Clear auto-marks, or Clear all.",
                     "Optional: raise Redacted page sharpness for crisper bitmap pages on the pages you marked.",
                     "Optional: enable removing annotations from pages you did not redact to avoid leaking hidden comments.",
                     "Click Redact & save… and pick a new filename for the sanitized PDF.",
                 ],
                 controls: [
                     ("⇧ Shift-drag", "Required modifier so normal scrolling and selection still work. Each drag must begin and end on the same page."),
-                    ("Regions list", "Lists page numbers for each mark. Delete individual marks or use Clear all."),
+                    ("Find & redact", "Searches the document text and adds a redaction region over every match — for review, never applied automatically. Pattern chips match emails, US SSNs, phone numbers, and card numbers. Pages with no text layer (unrecognized scans) are reported so you can mark them by hand."),
+                    ("Regions list", "Lists page numbers for each mark and tags auto-detected ones. Delete individual marks, Clear auto-marks, or Clear all."),
                     ("Redacted page sharpness", "More pixels on the longest edge when rasterizing only the pages you marked—helps text stay readable after export."),
                     ("Remove highlights & notes from other pages", "Strips all PDF annotations from pages that were not rasterized—stronger hygiene for sharing."),
                     ("Redact & save…", "Builds a new PDF on disk; work stays on your Mac."),

@@ -94,7 +94,7 @@ public enum Tool: String, CaseIterable, Identifiable, Hashable {
         case .watermark:
             return "Overlay text—DRAFT, CONFIDENTIAL, a name—or your own logo image. Pick the font, color, size, angle, and opacity; choose a single centered stamp or a tiled pattern; and apply it to every page, the first page, or a range you type. The underlying page stays vector (text stays selectable); your original file is untouched."
         case .redact:
-            return "Draw rectangles over names, account numbers, or images you want gone for good. Marked regions are rebuilt as solid black—text there can’t be copied or searched. Everything runs on your Mac; review marks before exporting."
+            return "Draw rectangles over names, account numbers, or images you want gone for good—or use Find & redact to auto-mark every match of a word or pattern. Marked regions are rebuilt as solid black—text there can’t be copied or searched. Everything runs on your Mac; review marks before exporting."
         case .fillSign:
             return "Drop typed text onto a non-interactive form, then draw or type a signature and place it on the page. Text stays selectable; the signature is baked in as vector ink. Your original file is untouched until you save the new PDF."
         case .protect:

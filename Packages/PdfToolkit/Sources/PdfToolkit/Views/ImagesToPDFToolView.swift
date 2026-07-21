@@ -317,20 +317,9 @@ struct ImagesToPDFToolView: View {
         thumbnails = []
         isGeneratingPreviews = true
         do {
-            let loaded = try await PDFBackgroundWork.run { isCancelled -> ([PDFPageThumbnail], [String: CGSize]) in
-                var out: [PDFPageThumbnail] = []
-                var sizes: [String: CGSize] = [:]
-                for (i, url) in urls.enumerated() {
-                    if isCancelled() { throw CancellationError() }
-                    let loaded = (try? url.withSecurityScopedAccess {
-                        (PDFToolkit.imageThumbnail(at: url), PDFToolkit.imagePixelSize(at: url))
-                    }) ?? (nil, nil)
-                    if let size = loaded.1 { sizes[url.path] = size }
-                    guard let image = loaded.0 else { continue }
-                    out.append(PDFPageThumbnail(pageNumber: i + 1, image: image))
-                }
-                return (out, sizes)
-            }
+            // Pure ImageIO — runs on the global executor via the nonisolated helper, NOT the PDF
+            // serial queue, so a big image queue can't starve other tools' page previews.
+            let loaded = try await PDFToolkit.imagePreviews(for: urls)
             guard !Task.isCancelled else { return }
             thumbnails = loaded.0
             pixelSizes = loaded.1

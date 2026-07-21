@@ -82,6 +82,30 @@ extension PDFToolkit {
         }
     }
 
+    /// Row thumbnails plus displayed pixel sizes for the queued images, in queue order.
+    ///
+    /// Deliberately NOT `PDFBackgroundWork`: this is pure ImageIO with no PDFKit object in sight,
+    /// and running a big image queue on the single PDF serial queue starved every tool's page
+    /// previews behind it. Nonisolated async runs on the global concurrent executor (off the main
+    /// actor); cancellation is honored between files, and per-file scratch drains per iteration.
+    static func imagePreviews(for urls: [URL]) async throws -> ([PDFPageThumbnail], [String: CGSize]) {
+        var thumbnails: [PDFPageThumbnail] = []
+        var sizes: [String: CGSize] = [:]
+        for (i, url) in urls.enumerated() {
+            try Task.checkCancellation()
+            autoreleasepool {
+                let loaded = (try? url.withSecurityScopedAccess {
+                    (imageThumbnail(at: url), imagePixelSize(at: url))
+                }) ?? (nil, nil)
+                if let size = loaded.1 { sizes[url.path] = size }
+                if let image = loaded.0 {
+                    thumbnails.append(PDFPageThumbnail(pageNumber: i + 1, image: image))
+                }
+            }
+        }
+        return (thumbnails, sizes)
+    }
+
     /// A small, orientation-correct preview of an image for the tool's page list — nil when the
     /// file isn't a readable image. Runs ImageIO directly, so call it off the main thread.
     static func imageThumbnail(at url: URL, maxPixelSize: CGFloat = 400) -> NSImage? {

@@ -50,10 +50,18 @@ enum PDFExportCoordinator {
 
         let directory = source.deletingLastPathComponent()
         let destination = uniqueURL(inDirectory: directory, filename: filename)
-        try await PDFBackgroundWork.run { try finalized.write(to: destination, options: .atomic) }
+        try await writeOffMain(finalized, to: destination)
         ActivityLog.shared.recordSaved(toolTitle, to: destination, bytes: finalized.count)
         AfterExportAction.current().perform(on: [destination])
         return .savedBeside(destination)
+    }
+
+    /// Pure disk I/O, deliberately NOT `PDFBackgroundWork`: a plain `Data` write touches no PDFKit
+    /// object, and parking it on the single PDF serial queue made every "beside original" export
+    /// queue behind — and block — rendering work. Nonisolated async runs on the global concurrent
+    /// executor, off the main actor and off the PDF queue.
+    private nonisolated static func writeOffMain(_ data: Data, to url: URL) async throws {
+        try data.write(to: url, options: .atomic)
     }
 
     /// Records the save and runs the after-export action for a file the caller just wrote through its

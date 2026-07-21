@@ -48,6 +48,15 @@ struct VisualPageSelectionTests {
         #expect(VisualPageSelection.pages(from: "1-3, 2-4", pageCount: 10) == [1, 2, 3, 4])
     }
 
+    @Test func blankFieldHighlightsAllPagesWhenTheToolExportsAll() {
+        // Extract's blank field exports every page, so its highlight layer passes
+        // emptyMeansAllPages: true and a blank field must select everything — the highlight and
+        // the export can never disagree. Split keeps the default: blank means nothing yet.
+        #expect(VisualPageSelection.pages(from: "", pageCount: 4, emptyMeansAllPages: true) == [1, 2, 3, 4])
+        #expect(VisualPageSelection.pages(from: "   ", pageCount: 4, emptyMeansAllPages: true) == [1, 2, 3, 4])
+        #expect(VisualPageSelection.pages(from: "", pageCount: 4) == [])
+    }
+
     @Test func toggleRoundTripThroughTheTextField() {
         // The behavior the views rely on: read the set from the text, flip one page, write it back.
         let pageCount = 10

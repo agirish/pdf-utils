@@ -35,9 +35,15 @@ enum VisualPageSelection {
     /// Reuses `PageRangeParser` (so it matches exactly what an export would select) but swallows every
     /// error: while the user is mid-type (`"1-"`) or has typed something invalid, nothing is
     /// highlighted rather than the field fighting back. Pages outside `1...pageCount` are dropped.
-    static func pages(from text: String, pageCount: Int) -> Set<Int> {
+    ///
+    /// `emptyMeansAllPages` must mirror what the tool's *export* does with a blank field — Extract
+    /// exports every page, so it passes true and a blank field highlights everything; Split's blank
+    /// field means "no custom ranges yet", so it keeps the default. Without the flag, Extract's
+    /// blank field highlighted nothing while exporting everything — the one case where the
+    /// "matches exactly what an export would select" promise above was false.
+    static func pages(from text: String, pageCount: Int, emptyMeansAllPages: Bool = false) -> Set<Int> {
         guard pageCount > 0,
-              let indices = try? PageRangeParser.parse(text, pageCount: pageCount, emptyMeansAllPages: false) else {
+              let indices = try? PageRangeParser.parse(text, pageCount: pageCount, emptyMeansAllPages: emptyMeansAllPages) else {
             return []
         }
         return Set(indices.map { $0 + 1 })

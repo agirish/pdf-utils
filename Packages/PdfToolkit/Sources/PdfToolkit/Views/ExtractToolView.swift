@@ -35,7 +35,7 @@ struct ExtractToolView: View {
                 emptyTitle: "No PDF selected",
                 emptySubtitle: "Drop a PDF here, choose one, or use Add PDF… to see thumbnails.",
                 emptySystemImage: "doc.on.clipboard",
-                selectedPages: VisualPageSelection.pages(from: rangeText, pageCount: thumbnails.count),
+                selectedPages: VisualPageSelection.pages(from: rangeText, pageCount: thumbnails.count, emptyMeansAllPages: true),
                 onTogglePage: togglePage,
                 selectionPrompt: "Click pages to choose what to extract, or type them on the left."
             )
@@ -305,7 +305,9 @@ struct ExtractToolView: View {
     /// Clicking canonicalizes the text to ascending runs (e.g. `5,1,2` typed, then a click, becomes
     /// `1-2, 5`); custom order remains available by typing and leaving the thumbnails alone.
     private func togglePage(_ page: Int) {
-        var pages = VisualPageSelection.pages(from: rangeText, pageCount: thumbnails.count)
+        // Same blank-field semantics as the highlight layer: blank = all pages, so the first click
+        // on a fully-selected document deselects that page rather than starting from nothing.
+        var pages = VisualPageSelection.pages(from: rangeText, pageCount: thumbnails.count, emptyMeansAllPages: true)
         if pages.contains(page) {
             pages.remove(page)
         } else {

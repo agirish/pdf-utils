@@ -5,7 +5,6 @@ import Foundation
 /// Every string here is a persisted contract: renaming one silently resets that preference for
 /// existing users, so `SettingsValueTypesTests` pins the literals.
 public enum SettingsKeys {
-    public static let mainWindowBackground = "pdfutils.settings.mainWindowBackground"
     public static let mergePreviewBackground = "pdfutils.settings.mergePreviewBackground"
     /// Longest edge in pixels when rasterizing redacted pages (persisted for Redact PDF).
     public static let redactRasterLongEdge = "pdfutils.settings.redactRasterLongEdge"

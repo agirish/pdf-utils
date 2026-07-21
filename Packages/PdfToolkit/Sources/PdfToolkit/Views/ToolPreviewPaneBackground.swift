@@ -6,9 +6,6 @@ struct ToolPreviewPaneBackground: View {
     @AppStorage(SettingsKeys.mergePreviewBackground)
     private var mergeRaw: String = MergePreviewBackgroundStyle.matchMain.rawValue
 
-    @AppStorage(SettingsKeys.mainWindowBackground)
-    private var mainRaw: String = MainWindowBackgroundStyle.liquidGlass.rawValue
-
     @AppStorage(LiquidGlass.levelKey)
     private var glassLevelRaw: String = GlassLevel.frosted.rawValue
 
@@ -18,10 +15,6 @@ struct ToolPreviewPaneBackground: View {
     private var mergeStyle: MergePreviewBackgroundStyle {
         MergePreviewBackgroundStyle(rawValue: mergeRaw) ?? .matchMain
     }
-
-    // The main-window background is always liquid glass now (see DashboardBackground), so "Match main
-    // background" mirrors the glass rather than a since-removed window-background style.
-    private var mainStyle: MainWindowBackgroundStyle { .liquidGlass }
 
     private var glassLevel: GlassLevel {
         GlassLevel(rawValue: glassLevelRaw) ?? .frosted
@@ -40,7 +33,6 @@ struct ToolPreviewPaneBackground: View {
                 Color(nsColor: .windowBackgroundColor)
             case .matchMain:
                 MainWindowBackgroundLayer(
-                    style: mainStyle,
                     glassLevel: glassLevel,
                     glassHue: glassHue,
                     liquidGlassRespectsTopSafeArea: false

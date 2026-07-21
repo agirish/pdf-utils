@@ -131,8 +131,8 @@ struct RunActionButton: View {
     let action: () -> Void
 
     // The primary CTA wears the tool's own accent (orange for Compress, green for Protect, …) so each
-    // screen reads as that tool. Read from the environment rather than a parameter so all twelve tool
-    // views inherit it for free; falls back to the system accent outside a tool context.
+    // screen reads as that tool. Read from the environment rather than a parameter so every tool
+    // view inherits it for free; falls back to the system accent outside a tool context.
     @Environment(\.toolAccent) private var accent
 
     var body: some View {

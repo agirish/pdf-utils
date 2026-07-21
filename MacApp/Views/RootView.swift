@@ -65,12 +65,6 @@ struct RootView: View {
         .animation(.easeOut(duration: 0.15), value: quickActions.isPresented)
         .animation(.easeOut(duration: 0.15), value: help.isPresented)
         .onAppear {
-            if UserDefaults.standard.string(forKey: SettingsKeys.mainWindowBackground) == "accentGradient" {
-                UserDefaults.standard.set(
-                    MainWindowBackgroundStyle.liquidGlass.rawValue,
-                    forKey: SettingsKeys.mainWindowBackground
-                )
-            }
             AppAppearance.applyPersisted()
         }
         // The Theme picker lives in the overlay; re-applying here keeps NSApp and every window in

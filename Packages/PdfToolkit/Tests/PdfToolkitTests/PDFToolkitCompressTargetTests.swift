@@ -3,43 +3,12 @@ import Foundation
 import PDFKit
 @testable import PdfToolkit
 
-/// Target-size compression sweeps a bounded ladder of qualities and keeps the best-fitting result.
-/// The `selectBestAttempt` tests pin the pure decision (highest quality that fits, else smallest
-/// file) with no file IO; the `compressToTarget` tests confirm the loop wires that decision into a
-/// real, openable PDF — including the "target impossible" fallback and the unreadable-source guard.
+/// Target-size compression binary-searches a bounded ladder of qualities in `compressToTargetData`
+/// and keeps the best-fitting result. These end-to-end tests exercise the real shipped sweep against
+/// live PDFs: a generous target produces a valid file, an impossible target still emits the smallest
+/// result, the output never exceeds the source, an already-small source passes through untouched, and
+/// the guard/error cases (self-overwrite, unreadable source) throw.
 @Suite struct PDFToolkitCompressTargetTests {
-
-    private func attempt(_ quality: Double, _ bytes: Int) -> CompressionAttempt {
-        CompressionAttempt(quality: quality, byteCount: bytes)
-    }
-
-    // MARK: - Pure selection
-
-    @Test func picksHighestQualityThatFitsUnderTarget() {
-        let attempts = [attempt(0.9, 5000), attempt(0.6, 2500), attempt(0.3, 1200)]
-        #expect(PDFToolkit.selectBestAttempt(from: attempts, targetBytes: 3000) == attempt(0.6, 2500))
-    }
-
-    @Test func picksHighestQualityWhenEveryAttemptFits() {
-        let attempts = [attempt(0.9, 800), attempt(0.6, 500), attempt(0.3, 300)]
-        #expect(PDFToolkit.selectBestAttempt(from: attempts, targetBytes: 5000) == attempt(0.9, 800))
-    }
-
-    @Test func treatsAttemptEqualToTargetAsFitting() {
-        let attempts = [attempt(0.9, 4000), attempt(0.6, 3000)]
-        #expect(PDFToolkit.selectBestAttempt(from: attempts, targetBytes: 3000) == attempt(0.6, 3000))
-    }
-
-    @Test func fallsBackToSmallestFileWhenNothingFits() {
-        let attempts = [attempt(0.9, 9000), attempt(0.6, 7000), attempt(0.3, 6000)]
-        #expect(PDFToolkit.selectBestAttempt(from: attempts, targetBytes: 3000) == attempt(0.3, 6000))
-    }
-
-    @Test func returnsNilWhenNoAttemptsWereMade() {
-        #expect(PDFToolkit.selectBestAttempt(from: [], targetBytes: 1000) == nil)
-    }
-
-    // MARK: - End-to-end
 
     @Test func generousTargetProducesAValidPDF() throws {
         let dir = FixtureDir()

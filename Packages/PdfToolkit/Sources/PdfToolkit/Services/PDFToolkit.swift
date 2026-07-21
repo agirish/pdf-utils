@@ -71,14 +71,6 @@ struct WatermarkOptions: Sendable {
     var pageScope: PageScope = .all
 }
 
-/// One measured compression attempt: the `quality` it was produced at and the resulting file size.
-/// Kept as a plain value so the "which attempt do we keep for this target?" decision can be unit
-/// tested without any file IO.
-struct CompressionAttempt: Equatable, Sendable {
-    let quality: Double
-    let byteCount: Int
-}
-
 public enum PDFToolkit {
     /// Quick page count for UI summaries; the URL must already be readable (e.g. under active security scope).
     public static func pageCount(at url: URL) -> Int? {
@@ -440,8 +432,9 @@ public enum PDFToolkit {
     /// so an unreachable target still yields the most-compressed result rather than an error.
     ///
     /// The sweep rebuilds the document a handful of times at most (the ladder is short), trading a
-    /// few extra rasterizations for a size the caller can actually promise. The pure "which attempt
-    /// wins?" decision lives in `selectBestAttempt` so it can be unit tested without file IO.
+    /// few extra rasterizations for a size the caller can actually promise. ``compressToTargetData``
+    /// binary-searches the quality ladder for the highest rung that fits, falling back to the smallest
+    /// result when none do; its end-to-end behavior is pinned by `PDFToolkitCompressTargetTests`.
     static func compressToTarget(inputURL: URL, outputURL: URL, targetBytes: Int) throws {
         try requireDistinctOutput(outputURL, from: [inputURL])
         guard let sourceBytes = try? inputURL.resourceValues(forKeys: [.fileSizeKey]).fileSize else {
@@ -494,7 +487,6 @@ public enum PDFToolkit {
         // up to all 6. Memory holds at most one fitting payload OR the running smallest — once any
         // rung fits, the smallest-so-far fallback can never be needed and is released.
         let ladder: [Double] = [0.9, 0.75, 0.6, 0.45, 0.3, 0.2]
-        var attempts: [CompressionAttempt] = []
         var fittingBest: Data?
         var smallest: Data?
         var lo = 0
@@ -504,7 +496,6 @@ public enum PDFToolkit {
             // Per-attempt pool: each rung rebuilds the whole document; its scratch must not stack
             // across rungs. The returned Data survives the drain — it's retained, not autoreleased.
             let data = try autoreleasepool { try compressedData(from: source, quality: ladder[mid]) }
-            attempts.append(CompressionAttempt(quality: ladder[mid], byteCount: data.count))
             if data.count <= targetBytes {
                 fittingBest = data      // fits — hunt a higher-quality rung
                 smallest = nil
@@ -532,17 +523,6 @@ public enum PDFToolkit {
         }
 
         return chosen
-    }
-
-    /// Chooses which measured attempt to keep for a target size: the **highest-quality** attempt whose
-    /// file fits under `targetBytes`, or — when even the smallest overshoots — the **smallest** file
-    /// produced. Pure and IO-free so the target-size loop's decision is directly testable.
-    static func selectBestAttempt(from attempts: [CompressionAttempt], targetBytes: Int) -> CompressionAttempt? {
-        let fitting = attempts.filter { $0.byteCount <= targetBytes }
-        if !fitting.isEmpty {
-            return fitting.max { $0.quality < $1.quality }
-        }
-        return attempts.min { $0.byteCount < $1.byteCount }
     }
 
     /// JPEG factor for rebuilt compress pages, driven by the quality lever. The top of the range stays

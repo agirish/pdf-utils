@@ -62,16 +62,6 @@ import Foundation
 
     // MARK: Background styles
 
-    @Test func mainWindowBackgroundStylesHaveCopyAndStableRawValues() {
-        #expect(Set(MainWindowBackgroundStyle.allCases.map(\.rawValue))
-            == ["liquidGlass", "systemWindow", "paperWhite", "softNeutral"])
-        for style in MainWindowBackgroundStyle.allCases {
-            #expect(style.id == style.rawValue)
-            #expect(!style.title.isEmpty)
-            #expect(!style.detail.isEmpty)
-        }
-    }
-
     @Test func mergePreviewBackgroundStylesHaveCopyAndStableRawValues() {
         #expect(Set(MergePreviewBackgroundStyle.allCases.map(\.rawValue))
             == ["white", "systemWindow", "matchMain"])
@@ -168,7 +158,6 @@ import Foundation
     // MARK: Persisted key contract
 
     @Test func settingsKeyStringsAreStable() {
-        #expect(SettingsKeys.mainWindowBackground == "pdfutils.settings.mainWindowBackground")
         #expect(SettingsKeys.mergePreviewBackground == "pdfutils.settings.mergePreviewBackground")
         #expect(SettingsKeys.redactRasterLongEdge == "pdfutils.settings.redactRasterLongEdge")
         #expect(SettingsKeys.afterExportAction == "pdfutils.settings.afterExportAction")

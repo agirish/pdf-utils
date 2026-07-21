@@ -252,10 +252,15 @@ struct DashboardView: View {
     }
 }
 
+/// Identity for keyboard focus among the two reorder buttons, so the pill can reveal itself when either
+/// end takes Full-Keyboard-Access focus — not only under the pointer.
+private enum ReorderButton: Hashable { case up, down }
+
 /// One category section in the Categories view: its header (small uppercase label + hairline rule)
 /// above the section's tile grid. Owns its own hover state so the move-up/down controls stay hidden
-/// until the pointer is over this section — keeping the dashboard clean when you're not rearranging.
-/// The whole section (header + tiles) is the hover target, so the controls are easy to reach.
+/// until the pointer is over this section — or one of them takes keyboard focus — keeping the dashboard
+/// clean when you're not rearranging. The whole section (header + tiles) is the hover target, so the
+/// controls are easy to reach.
 private struct CategorySectionView<Grid: View>: View {
     let category: ToolCategory
     let index: Int
@@ -264,6 +269,11 @@ private struct CategorySectionView<Grid: View>: View {
     @ViewBuilder let grid: () -> Grid
 
     @State private var hovered = false
+    @FocusState private var focusedButton: ReorderButton?
+
+    /// Reveal the reorder pill under the pointer or when either button holds keyboard focus, so
+    /// Full-Keyboard-Access users can tab to and use controls a hover-only reveal would hide from them.
+    private var controlsRevealed: Bool { hovered || focusedButton != nil }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -286,12 +296,13 @@ private struct CategorySectionView<Grid: View>: View {
             Rectangle()
                 .fill(.primary.opacity(0.10))
                 .frame(height: 1)
-            // Kept in the layout at zero opacity (rather than removed) so revealing it on hover doesn't
-            // reflow the hairline; hit-testing is off while hidden so an unseen control can't be clicked.
+            // Kept in the layout at zero opacity (rather than removed) so revealing it doesn't reflow the
+            // hairline; hit-testing follows visibility so an unseen control can't be clicked, while
+            // keyboard focus still reaches it (opacity, unlike `.hidden()`, leaves it in the focus order).
             reorderControls
-                .opacity(hovered ? 1 : 0)
-                .allowsHitTesting(hovered)
-                .animation(.easeOut(duration: 0.15), value: hovered)
+                .opacity(controlsRevealed ? 1 : 0)
+                .allowsHitTesting(controlsRevealed)
+                .animation(.easeOut(duration: 0.15), value: controlsRevealed)
         }
     }
 
@@ -306,6 +317,7 @@ private struct CategorySectionView<Grid: View>: View {
                     .frame(width: 22, height: 20)
                     .contentShape(Rectangle())
             }
+            .focused($focusedButton, equals: .up)
             .disabled(index == 0)
             .help("Move \(category.displayName) up")
             .accessibilityLabel("Move \(category.displayName) up")
@@ -317,6 +329,7 @@ private struct CategorySectionView<Grid: View>: View {
                     .frame(width: 22, height: 20)
                     .contentShape(Rectangle())
             }
+            .focused($focusedButton, equals: .down)
             .disabled(index == count - 1)
             .help("Move \(category.displayName) down")
             .accessibilityLabel("Move \(category.displayName) down")

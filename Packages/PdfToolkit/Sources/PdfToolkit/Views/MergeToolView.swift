@@ -180,15 +180,41 @@ struct MergeToolView: View {
 
             Divider()
 
-            // Disabled while page counts are still loading: resolving a typed range against a
-            // not-yet-known count (`pagesByEntryID[...] ?? 0`) would throw a bogus out-of-bounds error.
-            RunActionButton(title: "Merge & save…", busy: busy, canRun: !entries.isEmpty && !pageSummaryLoading) {
-                Task { await runMerge() }
+            VStack(spacing: 10) {
+                // A locked file can't be read, so it can't be merged — and merging "the rest" would
+                // silently drop a file the user added on purpose. Block the run and say why, rather
+                // than fail mid-merge with a bare encryption error, until they remove or unlock it.
+                if !lockedEntryIDs.isEmpty {
+                    lockedFilesNotice
+                }
+                // Also disabled while page counts are still loading: resolving a typed range against
+                // a not-yet-known count (`pagesByEntryID[...] ?? 0`) would throw a bogus out-of-bounds error.
+                RunActionButton(
+                    title: "Merge & save…",
+                    busy: busy,
+                    canRun: !entries.isEmpty && !pageSummaryLoading && lockedEntryIDs.isEmpty
+                ) {
+                    Task { await runMerge() }
+                }
             }
             .padding(16)
             .toolActionBar()
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    /// Shown above the disabled Merge button when the queue holds password-protected files: names how
+    /// many and points at the tool that unlocks them, so "why can't I merge?" is answered in place.
+    private var lockedFilesNotice: some View {
+        let n = lockedEntryIDs.count
+        return Label(
+            "\(n) file\(n == 1 ? " is" : "s are") password-protected and can't be merged. Remove \(n == 1 ? "it" : "them"), or unlock first with Password Protect → Remove password.",
+            systemImage: "lock.trianglebadge.exclamationmark"
+        )
+        .font(.subheadline)
+        .foregroundStyle(.secondary)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .fixedSize(horizontal: false, vertical: true)
     }
 
     /// Title + actions on one row; subtitle full-width below so buttons never wrap mid-label (e.g. “Clear” / “all”).

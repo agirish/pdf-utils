@@ -493,11 +493,18 @@ struct CropToolView: View {
     }
 
     private func insetField(_ label: String, value: Binding<Double>) -> some View {
-        HStack(spacing: 6) {
+        // A margin is a trim inward, so it can't be negative — a negative value flips the sign in
+        // `insetRect` and *grows* the crop box past the page. Clamp on commit so the field can only
+        // hold a non-negative trim; over-trimming is still caught later by cropData's cropTooSmall guard.
+        let nonNegative = Binding<Double>(
+            get: { value.wrappedValue },
+            set: { value.wrappedValue = max(0, $0) }
+        )
+        return HStack(spacing: 6) {
             Text(label)
                 .font(.callout)
                 .frame(width: 52, alignment: .leading)
-            TextField("0", value: value, format: .number.precision(.fractionLength(0)))
+            TextField("0", value: nonNegative, format: .number.precision(.fractionLength(0)))
                 .textFieldStyle(.roundedBorder)
                 .frame(width: 56)
                 .multilineTextAlignment(.trailing)

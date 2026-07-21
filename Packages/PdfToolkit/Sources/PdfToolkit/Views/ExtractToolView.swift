@@ -6,7 +6,9 @@ import UniformTypeIdentifiers
 struct ExtractToolView: View {
     @Environment(\.toolAccent) private var accent
     @State private var inputURL: URL?
-    @State private var rangeText = "1"
+    // Blank means "all pages" (see the field's hint). Loading a file also resets this to "" in
+    // loadThumbnails, so seeding it to "1" only made the field visibly flip 1 → blank on first load.
+    @State private var rangeText = ""
     @State private var busy = false
     @State private var alertMessage: String?
     @State private var showImporter = false

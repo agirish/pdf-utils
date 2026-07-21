@@ -324,60 +324,68 @@ public enum PDFToolkit {
     /// wins?" decision lives in `selectBestAttempt` so it can be unit tested without file IO.
     static func compressToTarget(inputURL: URL, outputURL: URL, targetBytes: Int) throws {
         try requireDistinctOutput(outputURL, from: [inputURL])
-        let sourceData: Data
-        do {
-            sourceData = try Data(contentsOf: inputURL)
-        } catch {
+        // The byte count, not the bytes: pinning the whole source Data across a multi-rung sweep
+        // doubled peak memory on exactly the scan-heavy files this operation exists for. The full
+        // bytes are read only in the rare inflation fallback at the end.
+        guard let sourceBytes = try? inputURL.resourceValues(forKeys: [.fileSizeKey]).fileSize else {
             throw PDFOperationError.couldNotOpen(inputURL)
         }
-        guard let source = PDFDocument(data: sourceData) else {
-            throw PDFOperationError.couldNotOpen(inputURL)
-        }
-        // Before the pass-through below, so a locked file errors clearly instead of being copied
-        // under a "-compressed" name when it happens to fit the target.
-        guard !source.isLocked else {
-            throw PDFOperationError.encryptedInput(inputURL)
-        }
+        // Guarded open before the pass-through below, so a locked file errors clearly instead of
+        // being copied under a "-compressed" name when it happens to fit the target.
+        let source = try openUnlockedDocument(at: inputURL)
 
         // Already at or under the target: rasterizing can only lose quality, so pass the source
         // through unchanged instead of walking the ladder for a worse, possibly larger file.
-        if sourceData.count <= targetBytes {
+        if sourceBytes <= targetBytes {
             do {
-                try sourceData.write(to: outputURL)
+                try? FileManager.default.removeItem(at: outputURL)
+                try FileManager.default.copyItem(at: inputURL, to: outputURL)
             } catch {
                 throw PDFOperationError.couldNotWrite(outputURL)
             }
             return
         }
 
-        // Highest first so the loop can stop the moment an attempt fits — a generous target then
-        // costs a single rebuild instead of walking the whole ladder. Only the running best is
-        // retained: holding every rung's whole document ballooned peak memory to the sum of all
-        // attempts on scan-heavy files. The kept payload always matches `selectBestAttempt`'s
-        // decision — every attempt before the first fitting one overshot the target, so the first
-        // fit is also the smallest so far, and when nothing fits the smallest is what remains.
+        // Attempt size is monotone in quality (a lower rung rasterizes fewer pixels), so binary-
+        // search the ladder for the highest rung that fits: at most 3 rebuilds instead of walking
+        // up to all 6. Memory holds at most one fitting payload OR the running smallest — once any
+        // rung fits, the smallest-so-far fallback can never be needed and is released.
         let ladder: [Double] = [0.9, 0.75, 0.6, 0.45, 0.3, 0.2]
         var attempts: [CompressionAttempt] = []
-        var best: Data?
-        for q in ladder {
+        var fittingBest: Data?
+        var smallest: Data?
+        var lo = 0
+        var hi = ladder.count - 1
+        while lo <= hi {
+            let mid = (lo + hi) / 2
             // Per-attempt pool: each rung rebuilds the whole document; its scratch must not stack
             // across rungs. The returned Data survives the drain — it's retained, not autoreleased.
-            let data = try autoreleasepool { try compressedData(from: source, quality: q) }
-            attempts.append(CompressionAttempt(quality: q, byteCount: data.count))
-            if data.count < (best?.count ?? .max) {
-                best = data
+            let data = try autoreleasepool { try compressedData(from: source, quality: ladder[mid]) }
+            attempts.append(CompressionAttempt(quality: ladder[mid], byteCount: data.count))
+            if data.count <= targetBytes {
+                fittingBest = data      // fits — hunt a higher-quality rung
+                smallest = nil
+                hi = mid - 1
+            } else {
+                if fittingBest == nil, data.count < (smallest?.count ?? .max) {
+                    smallest = data
+                }
+                lo = mid + 1
             }
-            if data.count <= targetBytes { break }
         }
 
-        guard var chosen = best else {
+        guard var chosen = fittingBest ?? smallest else {
             throw PDFOperationError.compressionFailed
         }
         // Rasterizing a lean vector/text PDF can *inflate* it past every rung. Never hand back a
         // "compressed" file bigger than the original — fall back to the source bytes, so the
         // output is bounded by the input even when the target is unreachable.
-        if chosen.count >= sourceData.count {
-            chosen = sourceData
+        if chosen.count >= sourceBytes {
+            do {
+                chosen = try Data(contentsOf: inputURL)
+            } catch {
+                throw PDFOperationError.couldNotOpen(inputURL)
+            }
         }
 
         do {

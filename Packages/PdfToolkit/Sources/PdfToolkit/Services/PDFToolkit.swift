@@ -18,19 +18,57 @@ struct PDFRedactionExportOptions: Sendable {
     )
 }
 
-/// How the watermark text is stamped onto every page. RGB components (not `NSColor`) keep this
-/// `Sendable` for the background PDF queue.
+/// A decoded logo carried by value so ``WatermarkOptions`` stays `Sendable` across the PDF serial
+/// queue and can be snapshotted into a batch operation. The `CGImage` is immutable and only ever
+/// read (drawn), so `@unchecked Sendable` is safe — nothing mutates it after decode.
+struct WatermarkImage: @unchecked Sendable {
+    let cgImage: CGImage
+}
+
+/// How a watermark is stamped onto the chosen pages. RGB components (not `NSColor`) and a decoded
+/// `CGImage` (not a URL) keep this `Sendable` for the background PDF queue and for a batch snapshot.
+///
+/// New fields are all defaulted so the original text-watermark call sites keep compiling unchanged;
+/// `content == .text` with `pageScope == .all` reproduces the pre-existing behavior exactly.
 struct WatermarkOptions: Sendable {
+    /// Whether this watermark stamps text or a logo image. Image is the smallpdf-beating addition.
+    enum Content: Sendable {
+        case text
+        case image
+    }
+
+    /// Which pages receive the mark. Resolved against each document's real page count at stamp
+    /// time (so it stays correct per-file in a batch), never pre-expanded here.
+    enum PageScope: Sendable, Equatable {
+        case all
+        case firstPageOnly
+        /// `PageRangeParser` syntax, e.g. "1, 3-5, 8". Empty text is an error, not "all pages".
+        case custom(String)
+    }
+
     var text: String
     var fontSize: CGFloat
-    /// 0…1 fill opacity of the stamped text.
+    /// 0…1 fill opacity of the stamp (applied to text fill and, for images, composited with the
+    /// logo's own alpha so a transparent PNG fades correctly).
     var opacity: CGFloat
     var rotationDegrees: CGFloat
     var red: CGFloat
     var green: CGFloat
     var blue: CGFloat
-    /// When true, the text is repeated across the whole page; otherwise it is drawn once, centered.
+    /// When true, the mark is repeated across the whole page; otherwise it is drawn once, centered.
     var tiled: Bool
+    // --- Additive: all defaulted so existing initializers stay source-compatible ---
+    /// Text vs. image. Defaults to `.text`, the original behavior.
+    var content: Content = .text
+    /// Font family (display or PostScript name) for text marks; `nil` = bold system font (default).
+    var fontName: String? = nil
+    /// The decoded logo for `.image` content; `nil` for text marks.
+    var image: WatermarkImage? = nil
+    /// Logo size as a fraction of the page, aspect-fit inside `imageScale × page` (0…1). Only used
+    /// for `.image` content.
+    var imageScale: CGFloat = 0.4
+    /// Which pages get the mark. Defaults to every page.
+    var pageScope: PageScope = .all
 }
 
 /// One measured compression attempt: the `quality` it was produced at and the resulting file size.
@@ -567,16 +605,18 @@ public enum PDFToolkit {
         return pdfData as Data
     }
 
-    /// Stamps `options.text` onto every page and writes a new PDF.
+    /// Stamps text or a logo image onto the chosen pages and writes a new PDF.
     ///
     /// Each page is copied into a fresh CoreGraphics PDF context with `drawPDFPage`, which keeps the
     /// original page **as vector content** (text stays selectable, graphics stay sharp) rather than
-    /// rasterizing it the way compression does. The watermark is then drawn on top with CoreText via
-    /// an `NSGraphicsContext` bridge, so it is baked into the page content stream — not a strippable
-    /// annotation. Intrinsic page rotation is honored: the output page's media box uses the page's
-    /// *displayed* size and `getDrawingTransform` maps the source upright before the stamp is added.
-    /// Visible annotation appearances (form values, signatures, notes) are drawn after the content
-    /// so they survive the rebuild — flattened into the page rather than silently dropped.
+    /// rasterizing it the way compression does. The watermark is then drawn on top — text with
+    /// CoreText via an `NSGraphicsContext` bridge, a logo with `CGContext.draw` — so it is baked
+    /// into the page content stream, not a strippable annotation. Intrinsic page rotation is
+    /// honored: the output page's media box uses the page's *displayed* size and `getDrawingTransform`
+    /// maps the source upright before the stamp is added. Visible annotation appearances (form
+    /// values, signatures, notes) are drawn after the content so they survive the rebuild —
+    /// flattened into the page rather than silently dropped. Pages outside `options.pageScope` are
+    /// still emitted unchanged (page count is always preserved); they just receive no mark.
     static func watermark(inputURL: URL, outputURL: URL, options: WatermarkOptions) throws {
         try requireDistinctOutput(outputURL, from: [inputURL])
         try writeOutput(try watermarkData(inputURL: inputURL, options: options), to: outputURL)
@@ -586,9 +626,20 @@ public enum PDFToolkit {
     /// builds the whole result in an `NSMutableData`, so the core simply hands those bytes back.
     internal static func watermarkData(inputURL: URL, options: WatermarkOptions) throws -> Data {
         let trimmed = options.text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { throw PDFOperationError.watermarkTextRequired }
+        // Validate the payload for the chosen mode before touching the document.
+        switch options.content {
+        case .text:
+            guard !trimmed.isEmpty else { throw PDFOperationError.watermarkTextRequired }
+        case .image:
+            guard options.image != nil else { throw PDFOperationError.watermarkImageRequired }
+        }
+
         let source = try openUnlockedDocument(at: inputURL)
         guard source.pageCount > 0 else { throw PDFOperationError.emptyPDF }
+
+        // Which pages get the mark, resolved against this document's real length (a custom range
+        // that overshoots throws `pageOutOfBounds`, exactly like the other range-taking tools).
+        let stampPages = try applicableWatermarkPages(options.pageScope, pageCount: source.pageCount)
 
         let pdfData = NSMutableData()
         guard let consumer = CGDataConsumer(data: pdfData as CFMutableData),
@@ -600,56 +651,15 @@ public enum PDFToolkit {
         for i in 0..<source.pageCount {
             let dp = try displayedPage(source.page(at: i), inputURL: inputURL)
             emitDisplayedPage(dp, into: ctx) { ctx, dp in
-                drawWatermark(in: ctx, box: dp.box, text: trimmed, options: options)
+                // Every page is emitted; only the in-scope ones are stamped.
+                guard stampPages.contains(i) else { return }
+                drawWatermark(in: ctx, box: dp.box, trimmedText: trimmed, options: options)
             }
         }
         ctx.closePDF()
 
         guard pdfData.length > 0 else { throw PDFOperationError.watermarkFailed }
         return pdfData as Data
-    }
-
-    private static func drawWatermark(in ctx: CGContext, box: CGRect, text: String, options: WatermarkOptions) {
-        let graphics = NSGraphicsContext(cgContext: ctx, flipped: false)
-        NSGraphicsContext.saveGraphicsState()
-        NSGraphicsContext.current = graphics
-
-        let color = NSColor(
-            srgbRed: options.red,
-            green: options.green,
-            blue: options.blue,
-            alpha: max(0, min(1, options.opacity))
-        )
-        let font = NSFont.boldSystemFont(ofSize: max(4, options.fontSize))
-        let attributes: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: color]
-        let string = NSAttributedString(string: text, attributes: attributes)
-        let textSize = string.size()
-        let radians = options.rotationDegrees * .pi / 180
-
-        ctx.saveGState()
-        ctx.translateBy(x: box.midX, y: box.midY)
-        ctx.rotate(by: radians)
-
-        if options.tiled {
-            // Cover the page after rotation: step over a square whose side is the page diagonal.
-            let diagonal = (box.width * box.width + box.height * box.height).squareRoot()
-            let stepX = textSize.width + 100
-            let stepY = textSize.height + 100
-            var y = -diagonal / 2
-            while y <= diagonal / 2 {
-                var x = -diagonal / 2
-                while x <= diagonal / 2 {
-                    string.draw(at: CGPoint(x: x, y: y))
-                    x += stepX
-                }
-                y += stepY
-            }
-        } else {
-            string.draw(at: CGPoint(x: -textSize.width / 2, y: -textSize.height / 2))
-        }
-
-        ctx.restoreGState()
-        NSGraphicsContext.restoreGraphicsState()
     }
 
     /// Bakes placed text and drawn signatures onto their pages and writes a new PDF.

@@ -25,30 +25,20 @@ extension BatchOperation {
         .rotate(quarterTurns: quarterTurns)
     }
 
-    /// Watermark: `nil` when the text is blank (nothing to stamp); otherwise the trimmed text and the
-    /// chosen style become `WatermarkOptions`. Mirrors `WatermarkToolView`.
-    static func watermarkConfig(
-        text: String,
-        fontSize: CGFloat,
-        opacity: CGFloat,
-        rotationDegrees: CGFloat,
-        red: CGFloat,
-        green: CGFloat,
-        blue: CGFloat,
-        tiled: Bool
-    ) -> BatchOperation? {
-        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return nil }
-        return .watermark(WatermarkOptions(
-            text: trimmed,
-            fontSize: fontSize,
-            opacity: opacity,
-            rotationDegrees: rotationDegrees,
-            red: red,
-            green: green,
-            blue: blue,
-            tiled: tiled
-        ))
+    /// Watermark: `nil` when there is nothing to stamp — blank text in text mode, or no chosen image
+    /// in image mode — so the run button disables just like the other tools' empty-field guards.
+    /// The text is trimmed so a batch stamps exactly what the single run does. Mirrors
+    /// `WatermarkToolView`, which builds the same `WatermarkOptions` for its single-file path.
+    static func watermarkConfig(_ options: WatermarkOptions) -> BatchOperation? {
+        switch options.content {
+        case .text:
+            guard !options.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
+        case .image:
+            guard options.image != nil else { return nil }
+        }
+        var normalized = options
+        normalized.text = options.text.trimmingCharacters(in: .whitespacesAndNewlines)
+        return .watermark(normalized)
     }
 
     /// Protect · Add password: `nil` until the two entries match and are non-empty. Mirrors

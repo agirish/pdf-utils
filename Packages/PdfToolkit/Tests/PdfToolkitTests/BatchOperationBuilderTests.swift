@@ -1,4 +1,5 @@
 import Testing
+import CoreGraphics
 import Foundation
 @testable import PdfToolkit
 
@@ -40,11 +41,15 @@ import Foundation
 
     // MARK: Watermark
 
-    @Test func watermarkTrimsTextAndThreadsTheChosenStyle() {
-        let op = BatchOperation.watermarkConfig(
-            text: "  DRAFT ", fontSize: 48, opacity: 0.25, rotationDegrees: 45,
-            red: 0.8, green: 0.12, blue: 0.12, tiled: true
+    private func textOptions(_ text: String, tiled: Bool = true) -> WatermarkOptions {
+        WatermarkOptions(
+            text: text, fontSize: 48, opacity: 0.25, rotationDegrees: 45,
+            red: 0.8, green: 0.12, blue: 0.12, tiled: tiled
         )
+    }
+
+    @Test func watermarkTrimsTextAndThreadsTheChosenStyle() {
+        let op = BatchOperation.watermarkConfig(textOptions("  DRAFT "))
         guard case .watermark(let options) = op else {
             Issue.record("expected .watermark, got \(String(describing: op))"); return
         }
@@ -59,9 +64,44 @@ import Foundation
     }
 
     @Test func watermarkIsNilForBlankOrWhitespaceText() {
-        #expect(BatchOperation.watermarkConfig(
-            text: "   \n", fontSize: 48, opacity: 0.25, rotationDegrees: 45,
-            red: 0, green: 0, blue: 0, tiled: false) == nil)
+        #expect(BatchOperation.watermarkConfig(textOptions("   \n")) == nil)
+    }
+
+    @Test func watermarkThreadsFontAndPageScope() {
+        var options = textOptions("DRAFT")
+        options.fontName = "Helvetica Neue"
+        options.pageScope = .firstPageOnly
+        guard case .watermark(let out) = BatchOperation.watermarkConfig(options) else {
+            Issue.record("expected .watermark"); return
+        }
+        #expect(out.fontName == "Helvetica Neue")
+        #expect(out.pageScope == .firstPageOnly)
+    }
+
+    @Test func watermarkImageModeIsNilWithoutAnImageAndValidWithOne() {
+        var noImage = textOptions("ignored")
+        noImage.content = .image
+        noImage.image = nil
+        #expect(BatchOperation.watermarkConfig(noImage) == nil)
+
+        var withImage = noImage
+        withImage.image = WatermarkImage(cgImage: Self.solidImage())
+        guard case .watermark(let out) = BatchOperation.watermarkConfig(withImage) else {
+            Issue.record("expected .watermark for image mode with an image"); return
+        }
+        #expect(out.content == .image)
+        #expect(out.image != nil)
+    }
+
+    /// A tiny opaque CGImage for the image-mode builder test (no file IO needed).
+    private static func solidImage() -> CGImage {
+        let ctx = CGContext(
+            data: nil, width: 4, height: 4, bitsPerComponent: 8, bytesPerRow: 0,
+            space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        )!
+        ctx.setFillColor(CGColor(red: 1, green: 0, blue: 0, alpha: 1))
+        ctx.fill(CGRect(x: 0, y: 0, width: 4, height: 4))
+        return ctx.makeImage()!
     }
 
     // MARK: Protect

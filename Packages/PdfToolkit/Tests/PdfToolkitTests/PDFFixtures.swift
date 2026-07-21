@@ -238,6 +238,7 @@ extension PDFOperationError {
         case .noRedactions: return "noRedactions"
         case .redactionFailed: return "redactionFailed"
         case .watermarkTextRequired: return "watermarkTextRequired"
+        case .watermarkImageRequired: return "watermarkImageRequired"
         case .watermarkFailed: return "watermarkFailed"
         case .noFillSignItems: return "noFillSignItems"
         case .fillSignFailed: return "fillSignFailed"

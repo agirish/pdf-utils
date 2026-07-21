@@ -56,7 +56,7 @@ public enum Tool: String, CaseIterable, Identifiable, Hashable {
         case .deletePages:
             return "Remove unwanted pages"
         case .watermark:
-            return "Stamp text across every page"
+            return "Stamp text or a logo across your pages"
         case .redact:
             return "Permanently black out sensitive areas"
         case .fillSign:
@@ -92,7 +92,7 @@ public enum Tool: String, CaseIterable, Identifiable, Hashable {
         case .deletePages:
             return "Produce a new PDF without the pages you specify. You must list which pages to drop—an empty field will not delete everything. At least one page must remain."
         case .watermark:
-            return "Overlay text—DRAFT, CONFIDENTIAL, a name—across every page. Tune size, angle, opacity, and color, and choose a single centered stamp or a tiled pattern. The underlying page stays vector (text stays selectable); your original file is untouched."
+            return "Overlay text—DRAFT, CONFIDENTIAL, a name—or your own logo image. Pick the font, color, size, angle, and opacity; choose a single centered stamp or a tiled pattern; and apply it to every page, the first page, or a range you type. The underlying page stays vector (text stays selectable); your original file is untouched."
         case .redact:
             return "Draw rectangles over names, account numbers, or images you want gone for good. Marked regions are rebuilt as solid black—text there can’t be copied or searched. Everything runs on your Mac; review marks before exporting."
         case .fillSign:

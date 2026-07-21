@@ -16,6 +16,7 @@ public enum PDFOperationError: LocalizedError {
     case noRedactions
     case redactionFailed
     case watermarkTextRequired
+    case watermarkImageRequired
     case watermarkFailed
     case noFillSignItems
     case fillSignFailed
@@ -62,6 +63,8 @@ public enum PDFOperationError: LocalizedError {
             return "Redaction failed while rebuilding the PDF."
         case .watermarkTextRequired:
             return "Enter the watermark text to stamp on each page."
+        case .watermarkImageRequired:
+            return "Choose an image to stamp as the watermark."
         case .watermarkFailed:
             return "Could not build the watermarked PDF."
         case .noFillSignItems:

@@ -47,6 +47,20 @@ import PDFKit
         #expect(indices == [])
     }
 
+    @Test func retypingARangeReincludesAPreviouslyDroppedPage() throws {
+        // Bug #1: `resolve` applies drops AFTER parsing the range, so a page dropped inline stays
+        // suppressed even once the user types a range that names it. The view fixes this by clearing a
+        // row's drops when its range text changes (MergeToolView's `.onChange(of: rangeText)`). This
+        // pins the resolver contract that fix relies on.
+        //
+        // Page 3 (index 2) was dropped on the whole file — the old selection correctly omits it:
+        #expect(try MergePageSelection.resolve(rangeText: "", dropped: [2], pageCount: 5) == [0, 1, 3, 4])
+        // If that drop survived a retype to "3-5", page 3 would still be gone — the bug:
+        #expect(try MergePageSelection.resolve(rangeText: "3-5", dropped: [2], pageCount: 5) == [3, 4])
+        // With the drop cleared on the range edit, the retyped range re-includes page 3 (index 2):
+        #expect(try MergePageSelection.resolve(rangeText: "3-5", dropped: [], pageCount: 5) == [2, 3, 4])
+    }
+
     @Test func unparseableRangeThrowsInvalidPageRange() {
         #expect(#expect(throws: PDFOperationError.self) {
             try MergePageSelection.resolve(rangeText: "abc", dropped: [], pageCount: 5)

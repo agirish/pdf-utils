@@ -170,6 +170,22 @@ import PDFKit
         #expect(!FileManager.default.fileExists(atPath: out.path))
     }
 
+    @Test func perFileSelectionRefusesALockedInput() throws {
+        // The per-file selection overload (the one the Merge tool actually calls) must refuse a
+        // password-locked input up front, exactly like the whole-file `merge(inputURLs:)` path —
+        // copying a locked page yields a blank placeholder, so a silent merge of nothing is the worst
+        // outcome. The encrypted-input suite pins `merge(inputURLs:)`; this pins `merge(inputs:)`.
+        let dir = FixtureDir()
+        let plain = dir.url("plain.pdf"), locked = dir.url("locked.pdf"), out = dir.url("out.pdf")
+        try PDFFixtures.writePDF(markers: ["A1", "A2"], to: plain)
+        try PDFToolkit.encrypt(inputURL: plain, outputURL: locked, password: "secret")
+
+        #expect(#expect(throws: PDFOperationError.self) {
+            try PDFToolkit.merge(inputs: [(plain, [0]), (locked, nil)], outputURL: out)
+        }?.kind == "encryptedInput")
+        #expect(!FileManager.default.fileExists(atPath: out.path))
+    }
+
     @Test func emptyInputsListThrowsNoInputFiles() {
         let dir = FixtureDir()
         #expect(#expect(throws: PDFOperationError.self) {

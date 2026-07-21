@@ -17,6 +17,17 @@ private struct MergeResult {
     let fileBytes: Int64
 }
 
+/// Wraps a per-row range error so the merge alert names the file it came from. A single-file tool's
+/// error already reads unambiguously; a multi-file merge needs the filename to point the user at the
+/// row to fix.
+private struct MergeFileError: LocalizedError {
+    let fileName: String
+    let underlying: Error
+    var errorDescription: String? {
+        "\(fileName): \(underlying.localizedDescription)"
+    }
+}
+
 /// The merged document's pages as they will be written: virtualized preview specs in output order,
 /// a lookup from each global page number back to its source (for the render closure and inline
 /// page-drop), and the effective total. Derived purely from the queue, page counts, ranges, and
@@ -113,6 +124,8 @@ struct MergeToolView: View {
                     : "These files can't be previewed or merged until their passwords are removed (Password Protect → Remove password).",
                 emptySystemImage: entries.isEmpty ? "doc.on.doc" : "lock.fill",
                 onDeletePage: dropPreviewPage,
+                deletePageHelp: "Leave this page out of the merged PDF",
+                deletePageAccessibilityLabel: { "Drop page \($0) from the merge" },
                 render: { spec in
                     guard let target = layout.lookup[spec.id] else { return nil }
                     return (try? await PDFPageThumbnailLoader.loadPage(from: target.url, pageIndex: target.pageIndex))?.image
@@ -174,7 +187,9 @@ struct MergeToolView: View {
 
             Divider()
 
-            RunActionButton(title: "Merge & save…", busy: busy, canRun: !entries.isEmpty) {
+            // Disabled while page counts are still loading: resolving a typed range against a
+            // not-yet-known count (`pagesByEntryID[...] ?? 0`) would throw a bogus out-of-bounds error.
+            RunActionButton(title: "Merge & save…", busy: busy, canRun: !entries.isEmpty && !pageSummaryLoading) {
                 Task { await runMerge() }
             }
             .padding(16)
@@ -342,6 +357,14 @@ struct MergeToolView: View {
                         .textFieldStyle(.roundedBorder)
                         .font(.callout)
                         .accessibilityLabel("Pages to include from \(value.url.lastPathComponent)")
+                        .onChange(of: value.rangeText) { _, _ in
+                            // A freshly typed range is a new, explicit choice of pages, so it
+                            // supersedes this row's earlier inline page-drops. Without this, dropping
+                            // page 3 and then typing "3-5" would leave page 3 suppressed (drops apply
+                            // after the range in MergePageSelection.resolve) even though the user just
+                            // asked to include it.
+                            droppedByEntryID[value.id] = nil
+                        }
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -613,6 +636,9 @@ struct MergeToolView: View {
             alertMessage = PDFOperationError.noInputFiles.localizedDescription
             return
         }
+        // The run button is disabled while counts load, but guard here too: resolving a typed range
+        // against an unknown page count would surface a false "page N is not in this document".
+        guard !pageSummaryLoading else { return }
 
         // Resolve every row's pages up front so an unparseable range (or a page outside the file) is
         // reported the same way Extract/Split do — before the user is asked to pick a destination.
@@ -693,12 +719,18 @@ struct MergeToolView: View {
     /// merge time with the actionable encryptedInput error, exactly as before.
     private func makeMergePlans() throws -> [(url: URL, pageIndices: [Int]?)] {
         try entries.map { entry in
-            let indices = try MergePageSelection.resolve(
-                rangeText: entry.rangeText,
-                dropped: droppedByEntryID[entry.id] ?? [],
-                pageCount: pagesByEntryID[entry.id] ?? 0
-            )
-            return (entry.url, indices)
+            do {
+                let indices = try MergePageSelection.resolve(
+                    rangeText: entry.rangeText,
+                    dropped: droppedByEntryID[entry.id] ?? [],
+                    pageCount: pagesByEntryID[entry.id] ?? 0
+                )
+                return (entry.url, indices)
+            } catch {
+                // Name the offending file: a bare "Invalid page range: …" in a multi-file merge
+                // doesn't tell the user which row to fix.
+                throw MergeFileError(fileName: entry.url.lastPathComponent, underlying: error)
+            }
         }
     }
 

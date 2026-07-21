@@ -35,6 +35,13 @@ struct SinglePDFPreviewColumn: View {
     /// button. Independent of the selection layer above — a caller sets this and leaves
     /// `selectedPages`/`onTogglePage` nil, so the pages render as plain previews that can each be dropped.
     var onDeletePage: ((Int) -> Void)? = nil
+    /// Tooltip for the per-page trash button. Caller-framed so each tool speaks in its own terms
+    /// (Merge: “…out of the merged PDF”; Reorder: “…out of the saved copy”) rather than every caller
+    /// inheriting Merge's wording. Only consulted when `onDeletePage` is set.
+    var deletePageHelp: String = "Leave this page out"
+    /// Accessibility label for the per-page trash button, given the page's 1-based display number.
+    /// Caller-framed for the same reason as ``deletePageHelp``.
+    var deletePageAccessibilityLabel: (Int) -> String = { "Drop page \($0)" }
 
     /// Reorders pages by dragging thumbnails: mirrors SwiftUI `.onMove(from:to:)` applied over `pages`.
     /// When non-nil, every thumbnail becomes draggable and the grid live-reorders as a drag crosses
@@ -49,8 +56,10 @@ struct SinglePDFPreviewColumn: View {
     var render: (PreviewPageSpec) async -> NSImage?
 
     /// The page id being dragged, captured when the drag starts and read on drop to know the source.
-    /// Not tied to any lingering visual, so a cancelled drag leaves nothing stuck. Defaulted so it
-    /// stays out of the synthesized memberwise init.
+    /// A cancelled or off-cell drag can leave this set (SwiftUI has no drag-end hook), but that is
+    /// harmless: the drop is gated on our own in-process payload type (see ``GridReorderDropDelegate``),
+    /// so a stray foreign drop can't ride a stale id into a real reorder, and the only visual that
+    /// reads it (`dropTargetID`) clears on drop-exit. Defaulted so it stays out of the memberwise init.
     @State private var draggingSpecID: Int? = nil
     /// The page id of the cell the drag is currently hovering — highlighted as the drop target, and
     /// cleared on exit or drop so it never persists.
@@ -160,25 +169,39 @@ struct SinglePDFPreviewColumn: View {
     /// Wraps ``pageCell`` with the drag-to-reorder layer when `onMovePages` is set (Reorder). The
     /// cell you drag over lifts as the drop target; the move is applied once, on drop — never during
     /// the drag, which is what keeps it reliable (mutating the grid mid-drag tears down the drop
-    /// targets and the drop snaps back). A context menu gives the same moves (plus Remove) for
-    /// keyboard/non-drag use. With `onMovePages` nil — every other caller — the cell is returned
-    /// untouched, so nothing about their grids changes.
+    /// targets and the drop snaps back). Small ‹ › move buttons and a context menu give the same
+    /// moves (plus Remove) to keyboard and VoiceOver users, for whom the pointer-only drag is out of
+    /// reach. With `onMovePages` nil — every other caller — the cell is returned untouched, so nothing
+    /// about their grids changes.
     @ViewBuilder
     private func reorderableCell(_ spec: PreviewPageSpec) -> some View {
         if let onMovePages {
             pageCell(spec)
+                .overlay(alignment: .topLeading) {
+                    reorderMoveControls(spec, onMove: onMovePages)
+                        .padding(7)
+                }
                 .scaleEffect(dropTargetID == spec.id && draggingSpecID != spec.id ? 1.06 : 1)
                 .animation(.easeInOut(duration: 0.12), value: dropTargetID)
                 .onDrag {
                     draggingSpecID = spec.id
-                    // The payload identifies the dragged page; the drop reads `draggingSpecID`, so the
-                    // string itself never has to be parsed back.
-                    return NSItemProvider(object: "\(spec.id)" as NSString)
+                    // Register under our private, in-process type — not plain `.text` — so a stray text
+                    // drag from another app can't satisfy the drop. The payload identifies the dragged
+                    // page; the drop reads `draggingSpecID`, so it never has to be parsed back.
+                    let provider = NSItemProvider()
+                    provider.registerDataRepresentation(
+                        forTypeIdentifier: UTType.pdfUtilsReorderPage.identifier,
+                        visibility: .ownProcess
+                    ) { completion in
+                        completion(Data("\(spec.id)".utf8), nil)
+                        return nil
+                    }
+                    return provider
                 } preview: {
                     dragPreview(spec)
                 }
                 .onDrop(
-                    of: [.text],
+                    of: [.pdfUtilsReorderPage],
                     delegate: GridReorderDropDelegate(
                         targetID: spec.id,
                         pages: pages,
@@ -190,6 +213,43 @@ struct SinglePDFPreviewColumn: View {
                 .contextMenu { reorderMenu(spec) }
         } else {
             pageCell(spec)
+        }
+    }
+
+    /// The ‹ › move affordances shown on a reorder cell (Reorder only). Drag is pointer-only, so these
+    /// small buttons — focusable, clickable, and VoiceOver-readable — are the keyboard/assistive path
+    /// to reordering. Offsets follow `Array.move(fromOffsets:toOffset:)`: one step later is `index + 2`.
+    @ViewBuilder
+    private func reorderMoveControls(_ spec: PreviewPageSpec, onMove: @escaping (IndexSet, Int) -> Void) -> some View {
+        if let index = pages.firstIndex(where: { $0.id == spec.id }) {
+            HStack(spacing: 0) {
+                Button {
+                    onMove(IndexSet(integer: index), index - 1)
+                } label: {
+                    Image(systemName: "chevron.left")
+                        .font(.caption2.weight(.bold))
+                        .foregroundStyle(.white)
+                        .frame(width: 22, height: 20)
+                }
+                .buttonStyle(.plain)
+                .disabled(index == 0)
+                .help("Move page \(spec.id) earlier")
+                .accessibilityLabel("Move page \(spec.id) earlier")
+
+                Button {
+                    onMove(IndexSet(integer: index), index + 2)
+                } label: {
+                    Image(systemName: "chevron.right")
+                        .font(.caption2.weight(.bold))
+                        .foregroundStyle(.white)
+                        .frame(width: 22, height: 20)
+                }
+                .buttonStyle(.plain)
+                .disabled(index == pages.count - 1)
+                .help("Move page \(spec.id) later")
+                .accessibilityLabel("Move page \(spec.id) later")
+            }
+            .background(Capsule().fill(.black.opacity(0.45)))
         }
     }
 
@@ -302,8 +362,8 @@ struct SinglePDFPreviewColumn: View {
                 .background(Circle().fill(.black.opacity(0.45)))
         }
         .buttonStyle(.plain)
-        .help("Leave this page out of the merged PDF")
-        .accessibilityLabel("Drop page \(pageNumber) from the merge")
+        .help(deletePageHelp)
+        .accessibilityLabel(deletePageAccessibilityLabel(pageNumber))
     }
 
     /// Top-left check for a selectable thumbnail. Both states carry their own backing disc so they
@@ -385,8 +445,13 @@ private struct GridReorderDropDelegate: DropDelegate {
     @Binding var dropTargetID: Int?
     let onMove: (IndexSet, Int) -> Void
 
-    /// Only accept our own reorder drags, never stray text dropped from elsewhere.
-    func validateDrop(info: DropInfo) -> Bool { draggingSpecID != nil }
+    /// Only accept our own in-process page-reorder drags, never stray content dropped from elsewhere.
+    /// Keying on the private payload type (not just `draggingSpecID`) closes the hole where a drag
+    /// cancelled off-cell leaves `draggingSpecID` set and a later foreign text drop would otherwise
+    /// pass and silently reorder a page. `draggingSpecID != nil` stays as a cheap belt-and-suspenders.
+    func validateDrop(info: DropInfo) -> Bool {
+        info.hasItemsConforming(to: [.pdfUtilsReorderPage]) && draggingSpecID != nil
+    }
 
     func dropEntered(info: DropInfo) {
         if draggingSpecID != targetID { dropTargetID = targetID }
@@ -410,12 +475,25 @@ private struct GridReorderDropDelegate: DropDelegate {
               let to = pages.firstIndex(where: { $0.id == targetID }) else { return false }
         // No-op drop onto itself still counts as handled, so the drag settles instead of snapping back.
         if from != to {
-            // `Array.move`'s destination is an original-coordinate insertion point: landing after a
-            // lower cell needs `to + 1`; landing before a higher cell is just `to`.
             withAnimation(.easeInOut(duration: 0.2)) {
-                onMove(IndexSet(integer: from), to > from ? to + 1 : to)
+                onMove(IndexSet(integer: from), gridReorderDestination(from: from, to: to))
             }
         }
         return true
     }
+}
+
+/// The `Array.move(fromOffsets:toOffset:)` destination for a drag that drops the page at `from` onto
+/// the cell at `to`. `Array.move`'s destination is an original-coordinate insertion point: landing
+/// after a lower cell needs `to + 1`; landing before a higher cell is just `to`. Extracted so the
+/// grid drop delegate and the Reorder tool's unit tests agree on this off-by-one.
+func gridReorderDestination(from: Int, to: Int) -> Int {
+    to > from ? to + 1 : to
+}
+
+extension UTType {
+    /// Private, in-process drag payload for the Reorder grid's page cells. App-owned (and dragged
+    /// with `.ownProcess` visibility), so a stray text drag from another app can never masquerade as
+    /// a page reorder in ``GridReorderDropDelegate/validateDrop(info:)``.
+    static let pdfUtilsReorderPage = UTType(exportedAs: "com.pdfutils.PdfUtils.reorder-page")
 }

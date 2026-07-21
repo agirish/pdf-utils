@@ -3,7 +3,7 @@ import PDFKit
 import SwiftUI
 import UniformTypeIdentifiers
 
-private struct ReorderItem: Identifiable, Equatable {
+struct ReorderItem: Identifiable, Equatable {
     /// Stable identity = the page's position in the original document (zero-based). No image:
     /// rows and preview cells both demand-render through the shared LRU, keyed by this index.
     let id: Int
@@ -11,16 +11,86 @@ private struct ReorderItem: Identifiable, Equatable {
     var pageNumber: Int { id + 1 }
 }
 
+/// The Reorder tool's working set as a pure value: the pages kept (in output order) and the pages
+/// removed (held sorted by original index so the "Removed" list is stable regardless of removal
+/// order). Every index transform the view performs — drag-move, remove, restore, restore-all, reset
+/// — lives here as a pure mutation, so the math is unit-testable without standing up SwiftUI. The
+/// view holds one of these as @State and renders straight from it.
+struct ReorderWorkingSet: Equatable {
+    /// Pages kept, in output order — what "Reorder & save…" writes and what the preview shows.
+    private(set) var items: [ReorderItem] = []
+    /// Pages removed from the output, kept (with their originals) so any can be restored. Sorted by
+    /// original index for a stable "Removed" list.
+    private(set) var removed: [ReorderItem] = []
+
+    init() {}
+
+    /// A fresh working set for a `pageCount`-page document: every page kept, in original order.
+    init(pageCount: Int) {
+        items = (0..<max(0, pageCount)).map { ReorderItem(id: $0) }
+    }
+
+    /// True once the working set differs from the untouched document — a page was removed, or the
+    /// kept pages are no longer in their original order.
+    var isModified: Bool {
+        if !removed.isEmpty { return true }
+        return items.enumerated().contains { $0.offset != $0.element.originalIndex }
+    }
+
+    /// Every page removed: there is nothing to write, so saving is blocked until one is restored.
+    var allPagesRemoved: Bool {
+        items.isEmpty && !removed.isEmpty
+    }
+
+    /// Relocate the kept pages at `source` offsets to `destination`, mirroring SwiftUI `.onMove`.
+    /// `destination` is already an original-coordinate insertion point — the grid drop delegate has
+    /// applied the `to > from ? to + 1 : to` off-by-one via `gridReorderDestination(from:to:)`.
+    mutating func moveItems(fromOffsets source: IndexSet, toOffset destination: Int) {
+        items.move(fromOffsets: source, toOffset: destination)
+    }
+
+    /// Remove the kept page with this 1-based original page number (the badge the grid shows),
+    /// parking it — sorted — in `removed` so it can be restored. No-op if it isn't currently kept.
+    mutating func remove(originalPageNumber: Int) {
+        guard let item = items.first(where: { $0.pageNumber == originalPageNumber }) else { return }
+        remove(item)
+    }
+
+    /// Excludes a page from the output, keeping it (sorted by original index) so it can be restored.
+    mutating func remove(_ item: ReorderItem) {
+        guard let index = items.firstIndex(of: item) else { return }
+        let removedItem = items.remove(at: index)
+        let insertAt = removed.firstIndex { $0.originalIndex > removedItem.originalIndex } ?? removed.count
+        removed.insert(removedItem, at: insertAt)
+    }
+
+    /// Puts one removed page back at the end of the kept order; the user can drag it from there.
+    mutating func restore(_ item: ReorderItem) {
+        guard let index = removed.firstIndex(of: item) else { return }
+        items.append(removed.remove(at: index))
+    }
+
+    /// Brings every removed page back, appended in ascending original order so it reads predictably.
+    mutating func restoreAll() {
+        guard !removed.isEmpty else { return }
+        items.append(contentsOf: removed.sorted { $0.originalIndex < $1.originalIndex })
+        removed = []
+    }
+
+    /// Back to the untouched document: every page present, in original order.
+    mutating func reset() {
+        items = (items + removed).sorted { $0.originalIndex < $1.originalIndex }
+        removed = []
+    }
+}
+
 struct ReorderToolView: View {
     @Environment(\.toolAccent) private var accent
     @State private var inputURL: URL?
-    /// The pages that will be written, in output order. Removing a page moves it out of here and
-    /// into `removedItems`, so the list, the preview, and the exported copy all follow this array.
-    @State private var items: [ReorderItem] = []
-    /// Pages the user has removed. They are only left out of the exported copy — the source file is
-    /// never touched — so they are kept here (with their rendered thumbnail) so any can be restored.
-    /// Held sorted by original index for a stable "Removed" list regardless of removal order.
-    @State private var removedItems: [ReorderItem] = []
+    /// The pages kept (in output order) and the pages removed. All the reorder/remove/restore/reset
+    /// index math lives on this value type so it can be unit-tested away from SwiftUI; the list, the
+    /// preview, and the exported copy all follow `working.items`.
+    @State private var working = ReorderWorkingSet()
     @State private var busy = false
     @State private var alertMessage: String?
     @State private var showImporter = false
@@ -38,27 +108,13 @@ struct ReorderToolView: View {
         inputURL?.standardizedFileURL.path ?? ""
     }
 
-    /// True once the working set differs from the untouched document — either a page was removed or
-    /// the kept pages are no longer in their original order. Drives the Reset affordance and the
-    /// "you've changed something" affordances; a fresh load with nothing moved reads as unmodified.
-    private var isModified: Bool {
-        if !removedItems.isEmpty { return true }
-        return items.enumerated().contains { $0.offset != $0.element.originalIndex }
-    }
-
-    /// Every page has been removed: there is nothing to write, so saving is blocked until at least
-    /// one page is restored.
-    private var allPagesRemoved: Bool {
-        items.isEmpty && !removedItems.isEmpty
-    }
-
     /// The right-hand preview, in the current arrangement. The spec id is the page's ORIGINAL
     /// 1-based number — the badge the drop-pages design promises ("labels show each page's
     /// original number"), unique within any arrangement, and a stable SwiftUI identity so a drag
     /// moves cells instead of rebuilding them. The cache key carries the same original index, so
     /// reordering (or restoring a dropped page) is pure cache hits — no re-render.
     private var previewSpecs: [PreviewPageSpec] {
-        items.map { item in
+        working.items.map { item in
             PreviewPageSpec(id: item.originalIndex + 1, cacheKey: "\(fileKeyBase)#\(item.originalIndex)")
         }
     }
@@ -73,15 +129,17 @@ struct ReorderToolView: View {
                 thumbnailSize: $thumbnailSize,
                 accent: accent,
                 previewSubtitle: "The pages you keep, in the new order (labels show each page's original number).",
-                emptyTitle: allPagesRemoved ? "All pages removed" : "No PDF selected",
-                emptySubtitle: allPagesRemoved
+                emptyTitle: working.allPagesRemoved ? "All pages removed" : "No PDF selected",
+                emptySubtitle: working.allPagesRemoved
                     ? "Restore a page on the left to preview it."
                     : "Drop a PDF here or choose one to arrange its pages.",
                 emptySystemImage: "arrow.up.arrow.down.square",
-                onDeletePage: { pageNumber in removePage(originalPageNumber: pageNumber) },
+                onDeletePage: { pageNumber in working.remove(originalPageNumber: pageNumber) },
+                deletePageHelp: "Leave this page out of the saved copy",
+                deletePageAccessibilityLabel: { "Leave page \($0) out of the saved copy" },
                 onMovePages: { source, destination in
                     withAnimation(.easeInOut(duration: 0.18)) {
-                        items.move(fromOffsets: source, toOffset: destination)
+                        working.moveItems(fromOffsets: source, toOffset: destination)
                     }
                 },
                 reorderHint: "Drag pages to reorder; the badge stays each page's original number.",
@@ -166,7 +224,7 @@ struct ReorderToolView: View {
 
             Divider()
 
-            RunActionButton(title: "Reorder & save…", busy: busy, canRun: !items.isEmpty) {
+            RunActionButton(title: "Reorder & save…", busy: busy, canRun: !working.items.isEmpty) {
                 Task { await runReorder() }
             }
             .padding(16)
@@ -186,8 +244,8 @@ struct ReorderToolView: View {
                     .font(.title3.weight(.semibold))
                 Spacer(minLength: 8)
                 HStack(spacing: 10) {
-                    if inputURL != nil, isModified {
-                        Button("Reset") { resetOrder() }
+                    if inputURL != nil, working.isModified {
+                        Button("Reset") { working.reset() }
                             .buttonStyle(.borderless)
                             .font(.subheadline.weight(.medium))
                             .foregroundStyle(.secondary)
@@ -264,7 +322,7 @@ struct ReorderToolView: View {
         VStack(alignment: .leading, spacing: 12) {
             selectedFileCard(url: url)
 
-            if isGeneratingPreviews && items.isEmpty && removedItems.isEmpty {
+            if isGeneratingPreviews && working.items.isEmpty && working.removed.isEmpty {
                 HStack(spacing: 8) {
                     ProgressView().controlSize(.small)
                     Text("Reading pages…")
@@ -273,12 +331,12 @@ struct ReorderToolView: View {
                 }
                 .padding(.vertical, 4)
             } else {
-                if allPagesRemoved {
+                if working.allPagesRemoved {
                     allPagesRemovedNotice
                 } else {
                     reorderGuidance
                 }
-                if !removedItems.isEmpty {
+                if !working.removed.isEmpty {
                     removedSection
                 }
             }
@@ -304,7 +362,7 @@ struct ReorderToolView: View {
                     .lineLimit(1)
                     .truncationMode(.middle)
                     .font(.callout.weight(.medium))
-                if isGeneratingPreviews && items.isEmpty && removedItems.isEmpty {
+                if isGeneratingPreviews && working.items.isEmpty && working.removed.isEmpty {
                     Text("Loading preview…")
                         .font(.subheadline)
                         .foregroundStyle(.tertiary)
@@ -331,11 +389,11 @@ struct ReorderToolView: View {
     }
 
     private var pageCountSummary: String {
-        let kept = items.count
-        if removedItems.isEmpty {
+        let kept = working.items.count
+        if working.removed.isEmpty {
             return "\(kept) page\(kept == 1 ? "" : "s")"
         }
-        return "\(kept) kept · \(removedItems.count) removed"
+        return "\(kept) kept · \(working.removed.count) removed"
     }
 
     /// One-line explainer that the reorder interaction now lives in the right-hand grid, since the
@@ -400,11 +458,11 @@ struct ReorderToolView: View {
     private var removedSection: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(alignment: .firstTextBaseline, spacing: 8) {
-                Label("Removed (\(removedItems.count))", systemImage: "trash")
+                Label("Removed (\(working.removed.count))", systemImage: "trash")
                     .font(.subheadline.weight(.semibold))
                     .foregroundStyle(.secondary)
                 Spacer(minLength: 8)
-                Button("Restore all") { restoreAll() }
+                Button("Restore all") { working.restoreAll() }
                     .buttonStyle(.borderless)
                     .font(.subheadline.weight(.medium))
                     .lineLimit(1)
@@ -417,12 +475,12 @@ struct ReorderToolView: View {
                 .fixedSize(horizontal: false, vertical: true)
 
             let rows = VStack(spacing: 6) {
-                ForEach(removedItems) { item in
+                ForEach(working.removed) { item in
                     removedRow(for: item)
                 }
             }
             // Bound the area so a document with many removed pages can't push the save bar off-screen.
-            if removedItems.count > 5 {
+            if working.removed.count > 5 {
                 ScrollView { rows }
                     .frame(maxHeight: 176)
             } else {
@@ -462,7 +520,7 @@ struct ReorderToolView: View {
                 .foregroundStyle(.secondary)
                 .frame(maxWidth: .infinity, alignment: .leading)
 
-            Button { restorePage(item) } label: {
+            Button { working.restore(item) } label: {
                 Label("Restore", systemImage: "arrow.uturn.backward")
                     .font(.subheadline.weight(.medium))
             }
@@ -477,62 +535,20 @@ struct ReorderToolView: View {
         .accessibilityHint("Restores this page to the list")
     }
 
-    // MARK: - Ordering
-
-    private func resetOrder() {
-        // Back to the untouched document: every page present, in original order.
-        items = (items + removedItems).sorted { $0.originalIndex < $1.originalIndex }
-        removedItems = []
-    }
-
-    // MARK: - Removal
-
-    /// Grid trash button / context menu → the item removal. The grid speaks in 1-based original page
-    /// numbers (the badge it shows); an item's `pageNumber` is that same number, so this maps back.
-    private func removePage(originalPageNumber: Int) {
-        guard let item = items.first(where: { $0.pageNumber == originalPageNumber }) else { return }
-        removePage(item)
-    }
-
-    /// Excludes a page from the exported copy. The rendered page is kept in `removedItems` (sorted by
-    /// original index) so it can be restored; nothing is written to disk.
-    private func removePage(_ item: ReorderItem) {
-        guard let index = items.firstIndex(of: item) else { return }
-        let removed = items.remove(at: index)
-        let insertAt = removedItems.firstIndex { $0.originalIndex > removed.originalIndex } ?? removedItems.count
-        removedItems.insert(removed, at: insertAt)
-    }
-
-    /// Puts a removed page back at the end of the working order; the user can drag it wherever they
-    /// want from there.
-    private func restorePage(_ item: ReorderItem) {
-        guard let index = removedItems.firstIndex(of: item) else { return }
-        items.append(removedItems.remove(at: index))
-    }
-
-    private func restoreAll() {
-        guard !removedItems.isEmpty else { return }
-        // Append in ascending original order so a bulk restore reads predictably.
-        items.append(contentsOf: removedItems.sorted { $0.originalIndex < $1.originalIndex })
-        removedItems = []
-    }
-
     // MARK: - Thumbnails
 
     private func loadThumbnails() async {
         guard let url = inputURL else {
-            items = []
-            removedItems = []
+            working = ReorderWorkingSet()
             isGeneratingPreviews = false
             return
         }
-        // Clear the old document's rows BEFORE the await: `items` is what "Reorder & save…"
+        // Clear the old document's rows BEFORE the await: `working.items` is what "Reorder & save…"
         // applies to the current `inputURL`, so leaving them populated while the new file's
         // thumbnails render lets a click apply document A's page order (and count) to document B —
         // silently truncating it to A's page count. Drop the removed set with it so removals typed
         // against document A can't carry over and silently omit pages from document B.
-        items = []
-        removedItems = []
+        working = ReorderWorkingSet()
         isGeneratingPreviews = true
         do {
             // Only the page count loads up front; row and preview cells render on demand.
@@ -541,14 +557,13 @@ struct ReorderToolView: View {
             // must neither install its stale rows nor clear the spinner the newer load now owns.
             guard !Task.isCancelled else { return }
             fileKeyBase = PreviewPageSpec.fileKey(for: url)
-            items = (0..<count).map { ReorderItem(id: $0) }
+            working = ReorderWorkingSet(pageCount: count)
             isGeneratingPreviews = false
         } catch is CancellationError {
             // Superseded mid-load; the newer load owns the state.
         } catch {
             guard !Task.isCancelled else { return }
-            items = []
-            removedItems = []
+            working = ReorderWorkingSet()
             isGeneratingPreviews = false
             if case PDFOperationError.encryptedInput = error {
                 // Locked selection: actionable message + back to the empty state (Metadata's pattern).
@@ -573,7 +588,7 @@ struct ReorderToolView: View {
 
     @MainActor
     private func runReorder() async {
-        guard let fileURL = inputURL, !items.isEmpty else {
+        guard let fileURL = inputURL, !working.items.isEmpty else {
             alertMessage = PDFOperationError.noInputFiles.localizedDescription
             return
         }
@@ -586,7 +601,7 @@ struct ReorderToolView: View {
         }
 
         suggestedName = fileURL.deletingPathExtension().lastPathComponent + "-reordered.pdf"
-        let order = items.map(\.originalIndex)
+        let order = working.items.map(\.originalIndex)
 
         do {
             let data = try await PDFBackgroundWork.run {

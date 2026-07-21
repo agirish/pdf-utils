@@ -182,13 +182,11 @@ struct ProtectToolView: View {
         do {
             let data = try await PDFBackgroundWork.run {
                 try fileURL.withSecurityScopedAccess {
-                    try PDFExportSupport.data { out in
-                        switch modeSnapshot {
-                        case .protect:
-                            try PDFToolkit.encrypt(inputURL: fileURL, outputURL: out, password: secret)
-                        case .remove:
-                            try PDFToolkit.removePassword(inputURL: fileURL, outputURL: out, password: secret)
-                        }
+                    switch modeSnapshot {
+                    case .protect:
+                        return try PDFToolkit.encryptData(inputURL: fileURL, password: secret)
+                    case .remove:
+                        return try PDFToolkit.removePasswordData(inputURL: fileURL, password: secret)
                     }
                 }
             }

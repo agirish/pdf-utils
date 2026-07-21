@@ -351,9 +351,7 @@ struct ExtractToolView: View {
                         throw PDFOperationError.emptyPDF
                     }
                     let indices = try PageRangeParser.parse(rangeSnapshot, pageCount: count, preserveOrder: true)
-                    return try PDFExportSupport.data { out in
-                        try PDFToolkit.extract(inputURL: fileURL, outputURL: out, pageIndices: indices)
-                    }
+                    return try PDFToolkit.extractData(inputURL: fileURL, pageIndices: indices)
                 }
             }
             switch try await PDFExportCoordinator.route(

@@ -185,13 +185,11 @@ struct CompressToolView: View {
         do {
             let data = try await PDFBackgroundWork.run {
                 try fileURL.withSecurityScopedAccess {
-                    try PDFExportSupport.data { out in
-                        switch selectedMode {
-                        case .quality:
-                            try PDFToolkit.compress(inputURL: fileURL, outputURL: out, quality: qualityValue)
-                        case .targetSize:
-                            try PDFToolkit.compressToTarget(inputURL: fileURL, outputURL: out, targetBytes: targetBytes)
-                        }
+                    switch selectedMode {
+                    case .quality:
+                        return try PDFToolkit.compressData(inputURL: fileURL, quality: qualityValue)
+                    case .targetSize:
+                        return try PDFToolkit.compressToTargetData(inputURL: fileURL, targetBytes: targetBytes)
                     }
                 }
             }

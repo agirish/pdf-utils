@@ -721,9 +721,7 @@ struct FillSignToolView: View {
         do {
             let data = try await PDFBackgroundWork.run {
                 try fileURL.withSecurityScopedAccess {
-                    try PDFExportSupport.data { out in
-                        try PDFToolkit.fillAndSign(inputURL: fileURL, outputURL: out, items: itemsSnapshot)
-                    }
+                    try PDFToolkit.fillAndSignData(inputURL: fileURL, items: itemsSnapshot)
                 }
             }
             switch try await PDFExportCoordinator.route(

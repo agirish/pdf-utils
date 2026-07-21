@@ -334,9 +334,7 @@ struct DeletePagesToolView: View {
                         throw PDFOperationError.emptyPDF
                     }
                     let indices = try PageRangeParser.parse(pagesSpec, pageCount: count, emptyMeansAllPages: false)
-                    return try PDFExportSupport.data { out in
-                        try PDFToolkit.deletePages(inputURL: fileURL, outputURL: out, pageIndices: indices)
-                    }
+                    return try PDFToolkit.deletePagesData(inputURL: fileURL, pageIndices: indices)
                 }
             }
             switch try await PDFExportCoordinator.route(

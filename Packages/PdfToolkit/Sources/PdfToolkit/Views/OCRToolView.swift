@@ -370,25 +370,20 @@ struct OCRToolView: View {
         do {
             let outcome: (data: Data, summary: OCRRunSummary) = try await PDFBackgroundWork.run { isCancelled in
                 try fileURL.withSecurityScopedAccess {
-                    var summary = OCRRunSummary()
-                    let data = try PDFExportSupport.data { out in
-                        summary = try PDFToolkit.ocr(
-                            inputURL: fileURL,
-                            outputURL: out,
-                            options: options,
-                            progress: { page, total in
-                                Task { @MainActor in
-                                    // Main-actor hops are not FIFO: drop out-of-order and
-                                    // after-the-run updates instead of painting them.
-                                    guard generation == progressGeneration, page > progressPage else { return }
-                                    progressPage = page
-                                    progressTotal = total
-                                }
-                            },
-                            isCancelled: isCancelled
-                        )
-                    }
-                    return (data, summary)
+                    try PDFToolkit.ocrData(
+                        inputURL: fileURL,
+                        options: options,
+                        progress: { page, total in
+                            Task { @MainActor in
+                                // Main-actor hops are not FIFO: drop out-of-order and
+                                // after-the-run updates instead of painting them.
+                                guard generation == progressGeneration, page > progressPage else { return }
+                                progressPage = page
+                                progressTotal = total
+                            }
+                        },
+                        isCancelled: isCancelled
+                    )
                 }
             }
             // All pages skipped means the output would be a pointless rebuilt copy — say so and

@@ -408,18 +408,15 @@ struct CropToolView: View {
         do {
             let data = try await PDFBackgroundWork.run {
                 try fileURL.withSecurityScopedAccess {
-                    try PDFExportSupport.data { out in
-                        switch selectedMode {
-                        case .auto:
-                            try PDFToolkit.autoCrop(
-                                inputURL: fileURL,
-                                outputURL: out,
-                                padding: paddingSnapshot,
-                                unified: unifiedSnapshot
-                            )
-                        case .custom:
-                            try PDFToolkit.crop(inputURL: fileURL, outputURL: out, insets: insetsSnapshot)
-                        }
+                    switch selectedMode {
+                    case .auto:
+                        return try PDFToolkit.autoCropData(
+                            inputURL: fileURL,
+                            padding: paddingSnapshot,
+                            unified: unifiedSnapshot
+                        )
+                    case .custom:
+                        return try PDFToolkit.cropData(inputURL: fileURL, insets: insetsSnapshot)
                     }
                 }
             }

@@ -412,9 +412,7 @@ struct MetadataToolView: View {
         do {
             let data = try await PDFBackgroundWork.run {
                 try fileURL.withSecurityScopedAccess {
-                    try PDFExportSupport.data { out in
-                        try PDFToolkit.writeMetadata(inputURL: fileURL, outputURL: out, fields: snapshot)
-                    }
+                    try PDFToolkit.writeMetadataData(inputURL: fileURL, fields: snapshot)
                 }
             }
             // applyMetadataStrip: false — the output IS deliberately chosen metadata; the global

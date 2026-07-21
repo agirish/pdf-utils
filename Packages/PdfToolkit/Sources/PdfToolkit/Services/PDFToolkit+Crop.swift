@@ -25,13 +25,18 @@ extension PDFToolkit {
     static let minimumCropSide: CGFloat = 24
 
     /// Insets every page's crop box by the given displayed-edge amounts and writes a new PDF.
+    static func crop(inputURL: URL, outputURL: URL, insets: CropInsets) throws {
+        try requireDistinctOutput(outputURL, from: [inputURL])
+        try writeOutput(try cropData(inputURL: inputURL, insets: insets), to: outputURL)
+    }
+
+    /// In-memory core of ``crop(inputURL:outputURL:insets:)``.
     ///
     /// The crop box is what viewers display; page content is not deleted, so cropping back out
     /// remains possible in any PDF editor. Insets are given in *displayed* orientation and mapped
     /// through each page's intrinsic rotation onto the stored (unrotated) crop rect — trimming
     /// "the top you see" of a rotation-90 page moves the stored box's minX edge, not maxY.
-    static func crop(inputURL: URL, outputURL: URL, insets: CropInsets) throws {
-        try requireDistinctOutput(outputURL, from: [inputURL])
+    internal static func cropData(inputURL: URL, insets: CropInsets) throws -> Data {
         let source = try openUnlockedDocument(at: inputURL)
         guard source.pageCount > 0 else { throw PDFOperationError.emptyPDF }
 
@@ -48,12 +53,19 @@ extension PDFToolkit {
             copy.setBounds(cropped, for: .cropBox)
             output.insert(copy, at: output.pageCount)
         }
-        guard output.write(to: outputURL) else {
-            throw PDFOperationError.couldNotWrite(outputURL)
+        guard let data = output.dataRepresentation() else {
+            throw PDFOperationError.couldNotEncodeOutput
         }
+        return data
     }
 
     /// Crops every page to its rendered content bounds plus `padding` points of breathing room.
+    static func autoCrop(inputURL: URL, outputURL: URL, padding: CGFloat, unified: Bool) throws {
+        try requireDistinctOutput(outputURL, from: [inputURL])
+        try writeOutput(try autoCropData(inputURL: inputURL, padding: padding, unified: unified), to: outputURL)
+    }
+
+    /// In-memory core of ``autoCrop(inputURL:outputURL:padding:unified:)``.
     ///
     /// Each page is rendered small and scanned for non-background pixels; the tight box those
     /// pixels span becomes the crop (in displayed space, then mapped through rotation like
@@ -62,8 +74,7 @@ extension PDFToolkit {
     /// no detectable content (blank separators) are left uncropped in per-page mode and don't
     /// shrink the unified trim; a page whose content box would fall under the minimum side keeps
     /// its original crop rather than failing the whole run.
-    static func autoCrop(inputURL: URL, outputURL: URL, padding: CGFloat, unified: Bool) throws {
-        try requireDistinctOutput(outputURL, from: [inputURL])
+    internal static func autoCropData(inputURL: URL, padding: CGFloat, unified: Bool) throws -> Data {
         let source = try openUnlockedDocument(at: inputURL)
         guard source.pageCount > 0 else { throw PDFOperationError.emptyPDF }
 
@@ -101,9 +112,10 @@ extension PDFToolkit {
             }
             output.insert(copy, at: output.pageCount)
         }
-        guard output.write(to: outputURL) else {
-            throw PDFOperationError.couldNotWrite(outputURL)
+        guard let data = output.dataRepresentation() else {
+            throw PDFOperationError.couldNotEncodeOutput
         }
+        return data
     }
 
     // MARK: Geometry

@@ -417,14 +417,11 @@ struct RedactToolView: View {
         do {
             let data = try await PDFBackgroundWork.run {
                 try fileURL.withSecurityScopedAccess {
-                    return try PDFExportSupport.data { out in
-                        try PDFToolkit.redact(
-                            inputURL: fileURL,
-                            outputURL: out,
-                            marks: marksSnapshot,
-                            options: options
-                        )
-                    }
+                    try PDFToolkit.redactData(
+                        inputURL: fileURL,
+                        marks: marksSnapshot,
+                        options: options
+                    )
                 }
             }
             switch try await PDFExportCoordinator.route(

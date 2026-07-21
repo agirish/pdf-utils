@@ -368,9 +368,7 @@ struct ImagesToPDFToolView: View {
         do {
             let data = try await PDFBackgroundWork.run {
                 try URLCollectionSecurityScope.withAccess(urls) {
-                    try PDFExportSupport.data { out in
-                        try PDFToolkit.imagesToPDF(inputURLs: urls, outputURL: out, options: options)
-                    }
+                    try PDFToolkit.imagesToPDFData(inputURLs: urls, options: options)
                 }
             }
             switch try await PDFExportCoordinator.route(

@@ -243,9 +243,7 @@ struct WatermarkToolView: View {
         do {
             let data = try await PDFBackgroundWork.run {
                 try fileURL.withSecurityScopedAccess {
-                    try PDFExportSupport.data { out in
-                        try PDFToolkit.watermark(inputURL: fileURL, outputURL: out, options: options)
-                    }
+                    try PDFToolkit.watermarkData(inputURL: fileURL, options: options)
                 }
             }
             switch try await PDFExportCoordinator.route(

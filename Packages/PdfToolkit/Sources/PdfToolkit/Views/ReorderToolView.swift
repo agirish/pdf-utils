@@ -570,9 +570,7 @@ struct ReorderToolView: View {
         do {
             let data = try await PDFBackgroundWork.run {
                 try fileURL.withSecurityScopedAccess {
-                    try PDFExportSupport.data { out in
-                        try PDFToolkit.reorder(inputURL: fileURL, outputURL: out, order: order)
-                    }
+                    try PDFToolkit.reorderData(inputURL: fileURL, order: order)
                 }
             }
             switch try await PDFExportCoordinator.route(

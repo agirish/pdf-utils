@@ -563,9 +563,7 @@ struct MergeToolView: View {
             // whatever the user chose to replace. Every single-file tool already works this way.
             try await PDFBackgroundWork.run {
                 let merged = try URLCollectionSecurityScope.withAccess(urlsSnapshot) {
-                    try PDFExportSupport.data { tempURL in
-                        try PDFToolkit.merge(inputURLs: urlsSnapshot, outputURL: tempURL)
-                    }
+                    try PDFToolkit.mergeData(inputURLs: urlsSnapshot)
                 }
                 // Honor the Files-tab "Strip metadata on export" setting, exactly like the
                 // single-file tools do via PDFExportCoordinator.route.

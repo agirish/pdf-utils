@@ -31,13 +31,6 @@ extension PDFToolkit {
     private typealias RecognizedLine = (string: String, normalizedRect: CGRect)
 
     /// Lays an invisible, selectable text layer behind every scanned page and writes a new PDF.
-    ///
-    /// Pages are rebuilt the way ``watermark`` rebuilds them — original content re-drawn as vector
-    /// through `drawPDFPage` (nothing is rasterized), visible annotations flattened in, intrinsic
-    /// rotation baked into an upright page. On pages with no extractable text, the page is rendered
-    /// to a bitmap, Apple's Vision text recognition runs over it on-device, and each recognized
-    /// line is drawn back in invisible text mode at its detected position, sized so selection
-    /// highlights match the printed words underneath.
     static func ocr(
         inputURL: URL,
         outputURL: URL,
@@ -46,6 +39,28 @@ extension PDFToolkit {
         isCancelled: (@Sendable () -> Bool)? = nil
     ) throws -> OCRRunSummary {
         try requireDistinctOutput(outputURL, from: [inputURL])
+        let (data, summary) = try ocrData(
+            inputURL: inputURL, options: options, progress: progress, isCancelled: isCancelled
+        )
+        try writeOutput(data, to: outputURL)
+        return summary
+    }
+
+    /// In-memory core of ``ocr(inputURL:outputURL:options:progress:isCancelled:)`` — returns the
+    /// rebuilt PDF's bytes alongside the run summary the caller reports.
+    ///
+    /// Pages are rebuilt the way ``watermark`` rebuilds them — original content re-drawn as vector
+    /// through `drawPDFPage` (nothing is rasterized), visible annotations flattened in, intrinsic
+    /// rotation baked into an upright page. On pages with no extractable text, the page is rendered
+    /// to a bitmap, Apple's Vision text recognition runs over it on-device, and each recognized
+    /// line is drawn back in invisible text mode at its detected position, sized so selection
+    /// highlights match the printed words underneath.
+    internal static func ocrData(
+        inputURL: URL,
+        options: OCROptions,
+        progress: (@Sendable (_ page: Int, _ total: Int) -> Void)? = nil,
+        isCancelled: (@Sendable () -> Bool)? = nil
+    ) throws -> (Data, OCRRunSummary) {
         let source = try openUnlockedDocument(at: inputURL)
         guard source.pageCount > 0 else { throw PDFOperationError.emptyPDF }
 
@@ -95,12 +110,7 @@ extension PDFToolkit {
         ctx.closePDF()
 
         guard pdfData.length > 0 else { throw PDFOperationError.ocrFailed }
-        do {
-            try (pdfData as Data).write(to: outputURL, options: .atomic)
-        } catch {
-            throw PDFOperationError.couldNotWrite(outputURL)
-        }
-        return summary
+        return (pdfData as Data, summary)
     }
 
     // MARK: Recognition

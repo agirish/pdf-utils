@@ -28,6 +28,7 @@ public enum PDFOperationError: LocalizedError {
     case cropTooSmall(pageNumber: Int)
     case ocrFailed
     case encryptedInput(URL)
+    case couldNotEncodeOutput
 
     public var errorDescription: String? {
         switch self {
@@ -85,6 +86,8 @@ public enum PDFOperationError: LocalizedError {
             return "Text recognition failed while rebuilding the PDF."
         case .encryptedInput(let url):
             return "“\(url.lastPathComponent)” is password-protected. Remove its password first (Password Protect → Remove password), then try again."
+        case .couldNotEncodeOutput:
+            return "Could not build the result PDF in memory."
         }
     }
 }

@@ -250,6 +250,7 @@ extension PDFOperationError {
         case .cropTooSmall: return "cropTooSmall"
         case .ocrFailed: return "ocrFailed"
         case .encryptedInput: return "encryptedInput"
+        case .couldNotEncodeOutput: return "couldNotEncodeOutput"
         }
     }
 }

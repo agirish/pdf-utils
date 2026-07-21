@@ -53,32 +53,39 @@ enum BatchOperation: Sendable {
         return PDFExportCoordinator.suggestedFilename(stem: safeStem, suffixWord: suffixWord, defaults: defaults)
     }
 
-    /// Dispatches to the matching `PDFToolkit` call. The single place the operation → toolkit mapping
-    /// lives, so the runner never grows a parallel switch. Reads the input and writes `outputURL`;
-    /// callers wrap this in the right security scope. Rotation covers *all* pages, so the page count
-    /// is read here per file (each document has its own length).
+    /// Dispatches to the matching `PDFToolkit` call and writes the result to `outputURL`; callers
+    /// wrap this in the right security scope. A thin wrapper over ``applyData(_:inputURL:)`` so the
+    /// operation → toolkit mapping never grows a parallel switch.
     static func apply(_ operation: BatchOperation, inputURL: URL, outputURL: URL) throws {
+        try PDFToolkit.requireDistinctOutput(outputURL, from: [inputURL])
+        try PDFToolkit.writeOutput(try applyData(operation, inputURL: inputURL), to: outputURL)
+    }
+
+    /// Dispatches to the matching `PDFToolkit` core and returns the result's bytes. The single
+    /// place the operation → toolkit mapping lives, so the runner never grows a parallel switch.
+    /// Reads the input; callers wrap this in the right security scope. Rotation covers *all* pages,
+    /// so the page count is read here per file (each document has its own length).
+    static func applyData(_ operation: BatchOperation, inputURL: URL) throws -> Data {
         switch operation {
         case .compressQuality(let quality):
-            try PDFToolkit.compress(inputURL: inputURL, outputURL: outputURL, quality: quality)
+            return try PDFToolkit.compressData(inputURL: inputURL, quality: quality)
         case .compressTarget(let targetBytes):
-            try PDFToolkit.compressToTarget(inputURL: inputURL, outputURL: outputURL, targetBytes: targetBytes)
+            return try PDFToolkit.compressToTargetData(inputURL: inputURL, targetBytes: targetBytes)
         case .rotate(let quarterTurns):
             guard let count = PDFToolkit.pageCount(at: inputURL) else {
                 throw PDFOperationError.couldNotOpen(inputURL)
             }
-            try PDFToolkit.rotate(
+            return try PDFToolkit.rotateData(
                 inputURL: inputURL,
-                outputURL: outputURL,
                 pageIndices: Array(0..<count),
                 quarterTurns: quarterTurns
             )
         case .watermark(let options):
-            try PDFToolkit.watermark(inputURL: inputURL, outputURL: outputURL, options: options)
+            return try PDFToolkit.watermarkData(inputURL: inputURL, options: options)
         case .encrypt(let password):
-            try PDFToolkit.encrypt(inputURL: inputURL, outputURL: outputURL, password: password)
+            return try PDFToolkit.encryptData(inputURL: inputURL, password: password)
         case .removePassword(let password):
-            try PDFToolkit.removePassword(inputURL: inputURL, outputURL: outputURL, password: password)
+            return try PDFToolkit.removePasswordData(inputURL: inputURL, password: password)
         }
     }
 }
@@ -236,13 +243,11 @@ final class BatchRunner: ObservableObject {
             do {
                 let result: (url: URL, bytes: Int64) = try await PDFBackgroundWork.run {
                     try URLCollectionSecurityScope.withAccess([inputURL, directory]) {
-                        // Materialize to a temp file, finalize, then land atomically — the same
-                        // shape as the single-file coordinator. Writing the destination directly
-                        // meant a crash or force-quit mid-file left a truncated PDF at its final
+                        // Materialize in memory, finalize, then land atomically — the same shape
+                        // as the single-file coordinator. Writing the destination directly meant
+                        // a crash or force-quit mid-file left a truncated PDF at its final
                         // user-visible name.
-                        let produced = try PDFExportSupport.data { tempURL in
-                            try BatchOperation.apply(operation, inputURL: inputURL, outputURL: tempURL)
-                        }
+                        let produced = try BatchOperation.applyData(operation, inputURL: inputURL)
                         let finalized = stripMetadata ? PDFExportCoordinator.stripMetadata(produced) : produced
                         let outputURL = PDFExportCoordinator.uniqueURL(inDirectory: directory, filename: filename)
                         try finalized.write(to: outputURL, options: .atomic)

@@ -83,6 +83,11 @@ extension PDFToolkit {
     /// output, which is the privacy outcome the tool promises.
     static func writeMetadata(inputURL: URL, outputURL: URL, fields: PDFMetadataFields) throws {
         try requireDistinctOutput(outputURL, from: [inputURL])
+        try writeOutput(try writeMetadataData(inputURL: inputURL, fields: fields), to: outputURL)
+    }
+
+    /// In-memory core of ``writeMetadata(inputURL:outputURL:fields:)``.
+    internal static func writeMetadataData(inputURL: URL, fields: PDFMetadataFields) throws -> Data {
         guard let doc = PDFDocument(url: inputURL) else {
             throw PDFOperationError.couldNotOpen(inputURL)
         }
@@ -106,8 +111,9 @@ extension PDFToolkit {
         if !keywordList.isEmpty { attrs[PDFDocumentAttribute.keywordsAttribute] = keywordList }
 
         doc.documentAttributes = attrs
-        guard doc.write(to: outputURL) else {
-            throw PDFOperationError.couldNotWrite(outputURL)
+        guard let data = doc.dataRepresentation() else {
+            throw PDFOperationError.couldNotEncodeOutput
         }
+        return data
     }
 }

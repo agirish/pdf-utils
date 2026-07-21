@@ -171,14 +171,11 @@ struct RotateToolView: View {
                             emptyMeansAllPages: false
                         )
                     }
-                    return try PDFExportSupport.data { out in
-                        try PDFToolkit.rotate(
-                            inputURL: fileURL,
-                            outputURL: out,
-                            pageIndices: indices,
-                            quarterTurns: quarterTurnsSnapshot
-                        )
-                    }
+                    return try PDFToolkit.rotateData(
+                        inputURL: fileURL,
+                        pageIndices: indices,
+                        quarterTurns: quarterTurnsSnapshot
+                    )
                 }
             }
             switch try await PDFExportCoordinator.route(

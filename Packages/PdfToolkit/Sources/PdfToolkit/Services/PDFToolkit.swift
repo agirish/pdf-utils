@@ -86,16 +86,34 @@ public enum PDFToolkit {
         }
     }
 
+    /// Lands a core's in-memory result at `outputURL` atomically, mapping any write failure to the
+    /// operation-level `couldNotWrite` the URL API has always thrown. The one write path every
+    /// URL wrapper shares now that the operations build their result as `Data`.
+    // Internal (not private): operation extensions in sibling files (Crop, Metadata, …) share it.
+    static func writeOutput(_ data: Data, to outputURL: URL) throws {
+        do {
+            try data.write(to: outputURL, options: .atomic)
+        } catch {
+            throw PDFOperationError.couldNotWrite(outputURL)
+        }
+    }
+
     /// Merges PDFs in the order given, copying each source page into the result.
+    public static func merge(inputURLs: [URL], outputURL: URL) throws {
+        try requireDistinctOutput(outputURL, from: inputURLs)
+        try writeOutput(try mergeData(inputURLs: inputURLs), to: outputURL)
+    }
+
+    /// In-memory core of ``merge(inputURLs:outputURL:)`` — the tool views consume the bytes
+    /// directly, skipping the temp-file round trip.
     ///
     /// Uses `page.copy()` rather than moving the original page out of its document — the same
     /// approach as `extract`/`split`. Inserting a page that still belongs to another live
     /// `PDFDocument` hangs on macOS 26 (PDFKit spins building an `NSOrderedSet` inside
     /// `insertPage:atIndex:`), which would freeze every merge; copying detaches the page first and
     /// sidesteps it.
-    public static func merge(inputURLs: [URL], outputURL: URL) throws {
+    internal static func mergeData(inputURLs: [URL]) throws -> Data {
         guard !inputURLs.isEmpty else { throw PDFOperationError.noInputFiles }
-        try requireDistinctOutput(outputURL, from: inputURLs)
 
         let merged = PDFDocument()
         for url in inputURLs {
@@ -108,9 +126,10 @@ public enum PDFToolkit {
             }
         }
 
-        guard merged.write(to: outputURL) else {
-            throw PDFOperationError.couldNotWrite(outputURL)
+        guard let data = merged.dataRepresentation() else {
+            throw PDFOperationError.couldNotEncodeOutput
         }
+        return data
     }
 
     /// Splits a PDF into several files, one per segment. Each `segment` is a list of zero-based
@@ -168,8 +187,13 @@ public enum PDFToolkit {
 
     /// Copies listed pages (zero-based) into a new PDF.
     public static func extract(inputURL: URL, outputURL: URL, pageIndices: [Int]) throws {
-        guard !pageIndices.isEmpty else { throw PDFOperationError.noPagesSelected }
         try requireDistinctOutput(outputURL, from: [inputURL])
+        try writeOutput(try extractData(inputURL: inputURL, pageIndices: pageIndices), to: outputURL)
+    }
+
+    /// In-memory core of ``extract(inputURL:outputURL:pageIndices:)``.
+    internal static func extractData(inputURL: URL, pageIndices: [Int]) throws -> Data {
+        guard !pageIndices.isEmpty else { throw PDFOperationError.noPagesSelected }
         let source = try openUnlockedDocument(at: inputURL)
 
         let out = PDFDocument()
@@ -185,9 +209,10 @@ public enum PDFToolkit {
             insertAt += 1
         }
 
-        guard out.write(to: outputURL) else {
-            throw PDFOperationError.couldNotWrite(outputURL)
+        guard let data = out.dataRepresentation() else {
+            throw PDFOperationError.couldNotEncodeOutput
         }
+        return data
     }
 
     /// Writes a new PDF whose pages follow `order` (a permutation of the source's zero-based
@@ -197,10 +222,21 @@ public enum PDFToolkit {
         try extract(inputURL: inputURL, outputURL: outputURL, pageIndices: order)
     }
 
-    /// Removes pages (zero-based). Duplicates are ignored. Removed from highest index first.
+    /// In-memory core of ``reorder(inputURL:outputURL:order:)`` — `extract`'s core reshuffled.
+    internal static func reorderData(inputURL: URL, order: [Int]) throws -> Data {
+        try extractData(inputURL: inputURL, pageIndices: order)
+    }
+
+    /// Removes pages (zero-based). Duplicates are ignored.
     static func deletePages(inputURL: URL, outputURL: URL, pageIndices: [Int]) throws {
-        guard !pageIndices.isEmpty else { throw PDFOperationError.noPagesSelected }
         try requireDistinctOutput(outputURL, from: [inputURL])
+        try writeOutput(try deletePagesData(inputURL: inputURL, pageIndices: pageIndices), to: outputURL)
+    }
+
+    /// In-memory core of ``deletePages(inputURL:outputURL:pageIndices:)``. Removed from highest
+    /// index first.
+    internal static func deletePagesData(inputURL: URL, pageIndices: [Int]) throws -> Data {
+        guard !pageIndices.isEmpty else { throw PDFOperationError.noPagesSelected }
         let doc = try openUnlockedDocument(at: inputURL)
 
         let unique = Set(pageIndices)
@@ -215,42 +251,55 @@ public enum PDFToolkit {
             doc.removePage(at: index)
         }
 
-        guard doc.write(to: outputURL) else {
-            throw PDFOperationError.couldNotWrite(outputURL)
+        guard let data = doc.dataRepresentation() else {
+            throw PDFOperationError.couldNotEncodeOutput
         }
+        return data
     }
 
     /// Rotates selected pages by `quarterTurns` × 90° clockwise.
     public static func rotate(inputURL: URL, outputURL: URL, pageIndices: [Int], quarterTurns: Int) throws {
         try requireDistinctOutput(outputURL, from: [inputURL])
-        let doc = try openUnlockedDocument(at: inputURL)
-        let turns = ((quarterTurns % 4) + 4) % 4
-        guard turns != 0 else {
-            guard doc.write(to: outputURL) else { throw PDFOperationError.couldNotWrite(outputURL) }
-            return
-        }
-
-        let unique = Set(pageIndices)
-        for i in 0..<doc.pageCount {
-            guard unique.contains(i), let page = doc.page(at: i) else { continue }
-            var r = page.rotation
-            r = ((r % 360) + 360) % 360
-            r += turns * 90
-            r = ((r % 360) + 360) % 360
-            page.rotation = r
-        }
-
-        guard doc.write(to: outputURL) else {
-            throw PDFOperationError.couldNotWrite(outputURL)
-        }
+        try writeOutput(
+            try rotateData(inputURL: inputURL, pageIndices: pageIndices, quarterTurns: quarterTurns),
+            to: outputURL
+        )
     }
 
-    /// Writes an encrypted copy that requires `password` to open. The same string is set as both the
-    /// user password (needed to open) and the owner password (needed to change permissions), so the
-    /// document is fully locked behind one password. The input must be an openable, unencrypted PDF.
+    /// In-memory core of ``rotate(inputURL:outputURL:pageIndices:quarterTurns:)``.
+    internal static func rotateData(inputURL: URL, pageIndices: [Int], quarterTurns: Int) throws -> Data {
+        let doc = try openUnlockedDocument(at: inputURL)
+        let turns = ((quarterTurns % 4) + 4) % 4
+        if turns != 0 {
+            let unique = Set(pageIndices)
+            for i in 0..<doc.pageCount {
+                guard unique.contains(i), let page = doc.page(at: i) else { continue }
+                var r = page.rotation
+                r = ((r % 360) + 360) % 360
+                r += turns * 90
+                r = ((r % 360) + 360) % 360
+                page.rotation = r
+            }
+        }
+
+        guard let data = doc.dataRepresentation() else {
+            throw PDFOperationError.couldNotEncodeOutput
+        }
+        return data
+    }
+
+    /// Writes an encrypted copy that requires `password` to open.
     static func encrypt(inputURL: URL, outputURL: URL, password: String) throws {
-        guard !password.isEmpty else { throw PDFOperationError.passwordRequired }
         try requireDistinctOutput(outputURL, from: [inputURL])
+        try writeOutput(try encryptData(inputURL: inputURL, password: password), to: outputURL)
+    }
+
+    /// In-memory core of ``encrypt(inputURL:outputURL:password:)``. The same string is set as both
+    /// the user password (needed to open) and the owner password (needed to change permissions), so
+    /// the document is fully locked behind one password. The input must be an openable, unencrypted
+    /// PDF.
+    internal static func encryptData(inputURL: URL, password: String) throws -> Data {
+        guard !password.isEmpty else { throw PDFOperationError.passwordRequired }
         // `encryptedInput`, not `incorrectPassword`: the user never typed a password here, so the
         // "check it and try again" message pointed at a field that doesn't exist on this path.
         let doc = try openUnlockedDocument(at: inputURL)
@@ -260,16 +309,22 @@ public enum PDFToolkit {
             .userPasswordOption: password,
             .ownerPasswordOption: password,
         ]
-        guard doc.write(to: outputURL, withOptions: options) else {
+        guard let data = doc.dataRepresentation(options: options) else {
             throw PDFOperationError.protectionFailed
         }
+        return data
     }
 
-    /// Writes a decrypted copy with no password. If the source is locked it is unlocked with
-    /// `password` first (wrong password → `incorrectPassword`); a source that isn't encrypted at all
-    /// throws `notEncrypted` so the tool can say there's nothing to remove.
+    /// Writes a decrypted copy with no password.
     public static func removePassword(inputURL: URL, outputURL: URL, password: String) throws {
         try requireDistinctOutput(outputURL, from: [inputURL])
+        try writeOutput(try removePasswordData(inputURL: inputURL, password: password), to: outputURL)
+    }
+
+    /// In-memory core of ``removePassword(inputURL:outputURL:password:)``. If the source is locked
+    /// it is unlocked with `password` first (wrong password → `incorrectPassword`); a source that
+    /// isn't encrypted at all throws `notEncrypted` so the tool can say there's nothing to remove.
+    internal static func removePasswordData(inputURL: URL, password: String) throws -> Data {
         guard let doc = PDFDocument(url: inputURL) else {
             throw PDFOperationError.couldNotOpen(inputURL)
         }
@@ -282,9 +337,9 @@ public enum PDFToolkit {
         }
         guard doc.pageCount > 0 else { throw PDFOperationError.emptyPDF }
 
-        // Writing the unlocked document directly is NOT enough: PDFKit carries the original
-        // encryption into the output, so `write(to:)` on a just-unlocked doc produces a file that
-        // is still locked with the same password. Rebuild the pages into a fresh document, which
+        // Serializing the unlocked document directly is NOT enough: PDFKit carries the original
+        // encryption into the output, so a just-unlocked doc re-serializes to a file that is
+        // still locked with the same password. Rebuild the pages into a fresh document, which
         // has no encryption dictionary, so the saved copy genuinely opens with no password.
         // The rebuild keeps pages and the info dictionary; document-level structure that PDFKit
         // can't re-attach (outline/bookmarks, attachments, form dictionary) does not survive —
@@ -297,21 +352,23 @@ public enum PDFToolkit {
             output.insert(page, at: output.pageCount)
         }
         output.documentAttributes = doc.documentAttributes
-        guard output.pageCount > 0, output.write(to: outputURL) else {
+        guard output.pageCount > 0, let data = output.dataRepresentation() else {
             throw PDFOperationError.protectionFailed
         }
+        return data
     }
 
     /// Rebuilds the PDF from rendered page images to reduce size. `quality` is 0...1 (JPEG-style tradeoff).
     public static func compress(inputURL: URL, outputURL: URL, quality: Double) throws {
         try requireDistinctOutput(outputURL, from: [inputURL])
+        try writeOutput(try compressData(inputURL: inputURL, quality: quality), to: outputURL)
+    }
+
+    /// In-memory core of ``compress(inputURL:outputURL:quality:)`` — the guarded open plus the
+    /// shared page-rebuild loop.
+    internal static func compressData(inputURL: URL, quality: Double) throws -> Data {
         let source = try openUnlockedDocument(at: inputURL)
-        let data = try compressedData(from: source, quality: quality)
-        do {
-            try data.write(to: outputURL)
-        } catch {
-            throw PDFOperationError.couldNotWrite(outputURL)
-        }
+        return try compressedData(from: source, quality: quality)
     }
 
     /// Compresses toward a byte budget by sweeping a bounded ladder of qualities from high to low,
@@ -324,19 +381,16 @@ public enum PDFToolkit {
     /// wins?" decision lives in `selectBestAttempt` so it can be unit tested without file IO.
     static func compressToTarget(inputURL: URL, outputURL: URL, targetBytes: Int) throws {
         try requireDistinctOutput(outputURL, from: [inputURL])
-        // The byte count, not the bytes: pinning the whole source Data across a multi-rung sweep
-        // doubled peak memory on exactly the scan-heavy files this operation exists for. The full
-        // bytes are read only in the rare inflation fallback at the end.
         guard let sourceBytes = try? inputURL.resourceValues(forKeys: [.fileSizeKey]).fileSize else {
             throw PDFOperationError.couldNotOpen(inputURL)
         }
-        // Guarded open before the pass-through below, so a locked file errors clearly instead of
-        // being copied under a "-compressed" name when it happens to fit the target.
-        let source = try openUnlockedDocument(at: inputURL)
 
-        // Already at or under the target: rasterizing can only lose quality, so pass the source
-        // through unchanged instead of walking the ladder for a worse, possibly larger file.
+        // Already at or under the target: keep the cheap on-disk copy instead of pulling the whole
+        // source through memory just to write it back out.
         if sourceBytes <= targetBytes {
+            // Guarded open before the pass-through, so a locked file errors clearly instead of
+            // being copied under a "-compressed" name when it happens to fit the target.
+            _ = try openUnlockedDocument(at: inputURL)
             do {
                 try? FileManager.default.removeItem(at: outputURL)
                 try FileManager.default.copyItem(at: inputURL, to: outputURL)
@@ -344,6 +398,32 @@ public enum PDFToolkit {
                 throw PDFOperationError.couldNotWrite(outputURL)
             }
             return
+        }
+
+        try writeOutput(try compressToTargetData(inputURL: inputURL, targetBytes: targetBytes), to: outputURL)
+    }
+
+    /// In-memory core of ``compressToTarget(inputURL:outputURL:targetBytes:)`` — the quality-ladder
+    /// sweep. A source that already fits the target passes through as its own unchanged bytes.
+    internal static func compressToTargetData(inputURL: URL, targetBytes: Int) throws -> Data {
+        // The byte count, not the bytes: pinning the whole source Data across a multi-rung sweep
+        // doubled peak memory on exactly the scan-heavy files this operation exists for. The full
+        // bytes are read only in the rare inflation fallback at the end.
+        guard let sourceBytes = try? inputURL.resourceValues(forKeys: [.fileSizeKey]).fileSize else {
+            throw PDFOperationError.couldNotOpen(inputURL)
+        }
+        // Guarded open before the pass-through below, so a locked file errors clearly instead of
+        // being handed back under a "-compressed" name when it happens to fit the target.
+        let source = try openUnlockedDocument(at: inputURL)
+
+        // Already at or under the target: rasterizing can only lose quality, so pass the source
+        // through unchanged instead of walking the ladder for a worse, possibly larger file.
+        if sourceBytes <= targetBytes {
+            do {
+                return try Data(contentsOf: inputURL)
+            } catch {
+                throw PDFOperationError.couldNotOpen(inputURL)
+            }
         }
 
         // Attempt size is monotone in quality (a lower rung rasterizes fewer pixels), so binary-
@@ -388,11 +468,7 @@ public enum PDFToolkit {
             }
         }
 
-        do {
-            try chosen.write(to: outputURL)
-        } catch {
-            throw PDFOperationError.couldNotWrite(outputURL)
-        }
+        return chosen
     }
 
     /// Chooses which measured attempt to keep for a target size: the **highest-quality** attempt whose
@@ -455,9 +531,15 @@ public enum PDFToolkit {
     /// Visible annotation appearances (form values, signatures, notes) are drawn after the content
     /// so they survive the rebuild — flattened into the page rather than silently dropped.
     static func watermark(inputURL: URL, outputURL: URL, options: WatermarkOptions) throws {
+        try requireDistinctOutput(outputURL, from: [inputURL])
+        try writeOutput(try watermarkData(inputURL: inputURL, options: options), to: outputURL)
+    }
+
+    /// In-memory core of ``watermark(inputURL:outputURL:options:)`` — the CGPDFContext already
+    /// builds the whole result in an `NSMutableData`, so the core simply hands those bytes back.
+    internal static func watermarkData(inputURL: URL, options: WatermarkOptions) throws -> Data {
         let trimmed = options.text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { throw PDFOperationError.watermarkTextRequired }
-        try requireDistinctOutput(outputURL, from: [inputURL])
         let source = try openUnlockedDocument(at: inputURL)
         guard source.pageCount > 0 else { throw PDFOperationError.emptyPDF }
 
@@ -477,7 +559,7 @@ public enum PDFToolkit {
         ctx.closePDF()
 
         guard pdfData.length > 0 else { throw PDFOperationError.watermarkFailed }
-        try (pdfData as Data).write(to: outputURL)
+        return pdfData as Data
     }
 
     private static func drawWatermark(in ctx: CGContext, box: CGRect, text: String, options: WatermarkOptions) {
@@ -534,9 +616,15 @@ public enum PDFToolkit {
     /// Typed runs are drawn with CoreText (they remain selectable, searchable vector text); drawn
     /// signatures are stroked as vector paths from their normalized polylines — never rasterized.
     static func fillAndSign(inputURL: URL, outputURL: URL, items: [FillSignItem]) throws {
+        try requireDistinctOutput(outputURL, from: [inputURL])
+        try writeOutput(try fillAndSignData(inputURL: inputURL, items: items), to: outputURL)
+    }
+
+    /// In-memory core of ``fillAndSign(inputURL:outputURL:items:)`` — like ``watermarkData``, the
+    /// CGPDFContext builds the result in memory and the core hands the bytes back.
+    internal static func fillAndSignData(inputURL: URL, items: [FillSignItem]) throws -> Data {
         let inked = items.filter(\.hasInk)
         guard !inked.isEmpty else { throw PDFOperationError.noFillSignItems }
-        try requireDistinctOutput(outputURL, from: [inputURL])
         let source = try openUnlockedDocument(at: inputURL)
         guard source.pageCount > 0 else { throw PDFOperationError.emptyPDF }
 
@@ -578,7 +666,7 @@ public enum PDFToolkit {
         ctx.closePDF()
 
         guard pdfData.length > 0 else { throw PDFOperationError.fillSignFailed }
-        try (pdfData as Data).write(to: outputURL)
+        return pdfData as Data
     }
 
     /// Maps a PDF-user-space rect into displayed-page coordinates (origin at the displayed crop
@@ -684,8 +772,17 @@ public enum PDFToolkit {
         marks: [RedactionMark],
         options: PDFRedactionExportOptions = .default
     ) throws {
-        guard !marks.isEmpty else { throw PDFOperationError.noRedactions }
         try requireDistinctOutput(outputURL, from: [inputURL])
+        try writeOutput(try redactData(inputURL: inputURL, marks: marks, options: options), to: outputURL)
+    }
+
+    /// In-memory core of ``redact(inputURL:outputURL:marks:options:)``.
+    internal static func redactData(
+        inputURL: URL,
+        marks: [RedactionMark],
+        options: PDFRedactionExportOptions = .default
+    ) throws -> Data {
+        guard !marks.isEmpty else { throw PDFOperationError.noRedactions }
         let source = try openUnlockedDocument(at: inputURL)
         guard source.pageCount > 0 else { throw PDFOperationError.emptyPDF }
 
@@ -747,9 +844,10 @@ public enum PDFToolkit {
         guard output.pageCount > 0 else { throw PDFOperationError.redactionFailed }
         // Do not pass `saveTextFromOCROption`: PDFKit’s OCR-on-save pass re-encodes image-based pages and
         // reliably produced thumbnail-sized redacted pages in testing (even with screen-optimize off).
-        guard output.write(to: outputURL) else {
-            throw PDFOperationError.couldNotWrite(outputURL)
+        guard let data = output.dataRepresentation() else {
+            throw PDFOperationError.couldNotEncodeOutput
         }
+        return data
     }
 
     /// One-page PDF with explicit Core Graphics MediaBox and bitmap drawn into the full page rect.

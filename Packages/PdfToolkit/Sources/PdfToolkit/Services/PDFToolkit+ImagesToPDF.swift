@@ -42,19 +42,24 @@ extension PDFToolkit {
     private static let maxPagePoints: CGFloat = 14400
 
     /// Combines images into one PDF, a page per image, in the order given.
+    static func imagesToPDF(inputURLs: [URL], outputURL: URL, options: ImagesToPDFOptions) throws {
+        try requireDistinctOutput(outputURL, from: inputURLs)
+        try writeOutput(try imagesToPDFData(inputURLs: inputURLs, options: options), to: outputURL)
+    }
+
+    /// In-memory core of ``imagesToPDF(inputURLs:outputURL:options:)``.
     ///
     /// Every image is loaded through ImageIO with its EXIF orientation baked in (a sideways iPhone
     /// HEIC comes out upright), then drawn into a CGPDFContext page. Fixed page sizes auto-rotate
     /// to landscape for landscape images so photos aren't needlessly letterboxed.
-    static func imagesToPDF(inputURLs: [URL], outputURL: URL, options: ImagesToPDFOptions) throws {
+    internal static func imagesToPDFData(inputURLs: [URL], options: ImagesToPDFOptions) throws -> Data {
         guard !inputURLs.isEmpty else { throw PDFOperationError.noInputFiles }
-        try requireDistinctOutput(outputURL, from: inputURLs)
 
         let pdfData = NSMutableData()
         guard let consumer = CGDataConsumer(data: pdfData as CFMutableData),
               let ctx = CGContext(consumer: consumer, mediaBox: nil, nil)
         else {
-            throw PDFOperationError.couldNotWrite(outputURL)
+            throw PDFOperationError.couldNotEncodeOutput
         }
 
         for url in inputURLs {
@@ -74,12 +79,8 @@ extension PDFToolkit {
         }
         ctx.closePDF()
 
-        guard pdfData.length > 0 else { throw PDFOperationError.couldNotWrite(outputURL) }
-        do {
-            try (pdfData as Data).write(to: outputURL, options: .atomic)
-        } catch {
-            throw PDFOperationError.couldNotWrite(outputURL)
-        }
+        guard pdfData.length > 0 else { throw PDFOperationError.couldNotEncodeOutput }
+        return pdfData as Data
     }
 
     /// Row thumbnails plus displayed pixel sizes for the queued images, in queue order.

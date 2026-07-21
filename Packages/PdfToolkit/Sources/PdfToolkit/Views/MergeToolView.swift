@@ -23,6 +23,10 @@ struct MergeToolView: View {
     @State private var selectedEntryID: UUID?
     @State private var isDropTargeted = false
     @State private var pagesByEntryID: [UUID: Int] = [:]
+    /// Entries whose file is password-locked: badged in the list, excluded from `totalPages`, and
+    /// absent from the preview strip — without this the header counted a locked file's real pages
+    /// (locked docs report them) while the strip silently skipped it, and the two contradicted.
+    @State private var lockedEntryIDs: Set<UUID> = []
     @State private var totalPages = 0
     @State private var pageSummaryLoading = false
 
@@ -52,9 +56,13 @@ struct MergeToolView: View {
                         thumbnailSize: $thumbnailSize,
                         accent: accent,
                         previewSubtitle: "Visual order of the merged pages (matches the list on the left).",
-                        emptyTitle: "No PDFs selected for merge",
-                        emptySubtitle: "Add PDFs in the sidebar or drop PDFs onto the list.",
-                        emptySystemImage: "doc.on.doc"
+                        // Files queued but nothing previewable means every entry is locked — say
+                        // that, instead of the "No PDFs selected" copy that contradicted the list.
+                        emptyTitle: entries.isEmpty ? "No PDFs selected for merge" : "Only password-protected PDFs",
+                        emptySubtitle: entries.isEmpty
+                            ? "Add PDFs in the sidebar or drop PDFs onto the list."
+                            : "These files can't be previewed or merged until their passwords are removed (Password Protect → Remove password).",
+                        emptySystemImage: entries.isEmpty ? "doc.on.doc" : "lock.fill"
                     )
                     .frame(minWidth: 360)
                 }
@@ -235,8 +243,8 @@ struct MergeToolView: View {
 
     private var listCard: some View {
         VStack(alignment: .leading, spacing: 8) {
-            if totalPages > 0 {
-                Text("\(totalPages) pages across \(entries.count) files")
+            if totalPages > 0 || !lockedEntryIDs.isEmpty {
+                Text(mergeSummaryLine)
                     .font(.subheadline.weight(.medium))
                     .foregroundStyle(.secondary)
                     .padding(.horizontal, 4)
@@ -265,6 +273,14 @@ struct MergeToolView: View {
         }
     }
 
+    /// The header total counts only mergeable pages; locked entries are called out separately so
+    /// the number always matches what the preview strip shows.
+    private var mergeSummaryLine: String {
+        let base = "\(totalPages) page\(totalPages == 1 ? "" : "s") across \(entries.count) file\(entries.count == 1 ? "" : "s")"
+        guard !lockedEntryIDs.isEmpty else { return base }
+        return base + " — \(lockedEntryIDs.count) password-protected"
+    }
+
     private var rowBackground: some View {
         RoundedRectangle(cornerRadius: 10, style: .continuous)
             .fill(Color.primary.opacity(0.025))
@@ -280,7 +296,11 @@ struct MergeToolView: View {
                     .lineLimit(1)
                     .truncationMode(.middle)
                     .font(.callout.weight(.medium))
-                if let pages = pagesByEntryID[entry.id] {
+                if lockedEntryIDs.contains(entry.id) {
+                    Label("Password-protected — can't merge", systemImage: "lock.fill")
+                        .font(.subheadline)
+                        .foregroundStyle(.orange)
+                } else if let pages = pagesByEntryID[entry.id] {
                     Text("\(pages) page\(pages == 1 ? "" : "s")")
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
@@ -397,6 +417,7 @@ struct MergeToolView: View {
         let snapshot = entries
         guard !snapshot.isEmpty else {
             pagesByEntryID = [:]
+            lockedEntryIDs = []
             totalPages = 0
             pageSummaryLoading = false
             return
@@ -404,27 +425,42 @@ struct MergeToolView: View {
         let urls = snapshot.map(\.url)
         pageSummaryLoading = true
         pagesByEntryID = [:]
+        lockedEntryIDs = []
         totalPages = 0
         do {
-            let counts = try await PDFBackgroundWork.run {
+            let summary: (counts: [UUID: Int], locked: Set<UUID>) = try await PDFBackgroundWork.run {
                 try URLCollectionSecurityScope.withAccess(urls) {
-                    var dict: [UUID: Int] = [:]
+                    var counts: [UUID: Int] = [:]
+                    var locked: Set<UUID> = []
                     for e in snapshot {
-                        dict[e.id] = PDFToolkit.pageCount(at: e.url) ?? 0
+                        // One open per file answers both questions. A locked document reports its
+                        // real page count, but those pages can't merge or preview — counting them
+                        // in the total made the header contradict the strip.
+                        guard let doc = PDFDocument(url: e.url) else {
+                            counts[e.id] = 0
+                            continue
+                        }
+                        if doc.isLocked {
+                            locked.insert(e.id)
+                        } else {
+                            counts[e.id] = doc.pageCount
+                        }
                     }
-                    return dict
+                    return (counts, locked)
                 }
             }
             // The whole function is main-actor now, so the check is atomic with the install with
             // no hop for cancellation to land in: a superseded pass must not put its partial
             // snapshot (a stale total and a prematurely cleared spinner) over the newer pass's.
             guard !Task.isCancelled else { return }
-            pagesByEntryID = counts
-            totalPages = counts.values.reduce(0, +)
+            pagesByEntryID = summary.counts
+            lockedEntryIDs = summary.locked
+            totalPages = summary.counts.values.reduce(0, +)
             pageSummaryLoading = false
         } catch {
             guard !Task.isCancelled else { return }
             pagesByEntryID = [:]
+            lockedEntryIDs = []
             totalPages = 0
             pageSummaryLoading = false
         }
@@ -443,36 +479,33 @@ struct MergeToolView: View {
 
         previewTask = Task {
             do {
-                let loadedPages: [PDFPageThumbnail] = try await PDFBackgroundWork.run { isCancelled in
-                    var bgPreviews: [PDFPageThumbnail] = []
-                    var globalPageNum = 1
-                    try URLCollectionSecurityScope.withAccess(urlsSnapshot) {
-                        for url in urlsSnapshot {
-                            // Task.checkCancellation() is inert on the GCD queue — only this probe
-                            // sees `previewTask?.cancel()`, and without it every superseded preview
-                            // rendered all pages of every file before the queue freed up.
-                            if isCancelled() { throw CancellationError() }
-                            guard let doc = PDFDocument(url: url) else { continue }
-                            // A locked entry's pages render blank; skip it in the preview strip
-                            // rather than show empty pages — the run itself refuses it with the
-                            // actionable encryptedInput message.
-                            guard !doc.isLocked else { continue }
-                            for i in 0..<doc.pageCount {
-                                if isCancelled() { throw CancellationError() }
-                                guard let page = doc.page(at: i) else { continue }
-
-                                // Shared sizing authority — this inline copy once diverged from the
-                                // loader's rotation fix and kept rendering rotated pages soft.
-                                let thumbSize = PDFPageThumbnailLoader.thumbnailBox(for: page)
-                                let image = page.thumbnail(of: thumbSize, for: .mediaBox)
-                                bgPreviews.append(PDFPageThumbnail(pageNumber: globalPageNum, image: image))
-                                globalPageNum += 1
-                            }
+                // One loader for policy AND sizing. The inline sweep this replaces was a second
+                // copy of both, and diverged twice: it missed the rotation-sizing fix in one
+                // round and hand-rolled the locked-document skip in another. Per-file calls keep
+                // the strip's behavior identical to every other preview grid by construction;
+                // cancellation still propagates (loadAllPages probes the calling task's
+                // cancellation inside the PDF queue).
+                var pages: [PDFPageThumbnail] = []
+                var globalPageNum = 1
+                for url in urlsSnapshot {
+                    try Task.checkCancellation()
+                    do {
+                        let thumbs = try await PDFPageThumbnailLoader.loadAllPages(from: url)
+                        for thumb in thumbs {
+                            pages.append(PDFPageThumbnail(pageNumber: globalPageNum, image: thumb.image))
+                            globalPageNum += 1
                         }
+                    } catch is CancellationError {
+                        throw CancellationError()
+                    } catch {
+                        // Locked (encryptedInput) or unreadable: no pages in the strip. The row
+                        // badge and header summary carry the explanation; the run itself
+                        // surfaces the hard error.
+                        continue
                     }
-                    return bgPreviews
                 }
 
+                let loadedPages = pages
                 await MainActor.run {
                     guard !Task.isCancelled else { return }
                     previewPages = loadedPages

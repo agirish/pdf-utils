@@ -194,6 +194,43 @@ struct ActivityLogTests {
         #expect(log.entries.filter { $0.message == "twin" }.count == 2)
     }
 
+    @Test func drainPendingMergesOutOfOrderBatchesByTimestamp() {
+        // Own entries can land in `pending` out of timestamp order (two threads stamp t1 < t2 but
+        // enqueue t2 first). That inversion can't be produced deterministically from the public
+        // surface, so this seeds the handoff buffer directly and pins that draining goes through
+        // the ordered insert — reverting drainPending to a blind append fails here.
+        let url = tempURL()
+        defer { try? FileManager.default.removeItem(at: url) }
+        let log = ActivityLog(fileURL: url)
+
+        let older = LogEntry(timestamp: Date(timeIntervalSince1970: 100), level: .info, message: "older")
+        let newer = LogEntry(timestamp: Date(timeIntervalSince1970: 200), level: .info, message: "newer")
+        log.pending.mutate { $0 = [newer, older] }   // inverted arrival order
+        log.drainPending()
+
+        #expect(log.entries.map(\.message) == ["older", "newer"])
+    }
+
+    @Test func beginLiveTailingSuspendsEvictionUntilTheFirstReadCompletes() async throws {
+        // Pins the suspension WIRING, not just the ledger API: a clean-ledger begin must suspend
+        // eviction synchronously (the locked check-and-suspend), and the tailer must resume it
+        // once its catch-up read finishes. Reverting either half — the plain hasEvicted read or
+        // the resume-after-first-read flag — fails here.
+        let url = tempURL()
+        defer { try? FileManager.default.removeItem(at: url) }
+        try "[2026-01-01 00:00:00.000] [INFO] seed\n".write(to: url, atomically: true, encoding: .utf8)
+        let log = ActivityLog(fileURL: url)
+
+        log.beginLiveTailing()
+        #expect(log.ownLines.isEvictionSuspended)    // suspended before the tailer's queue runs
+
+        for _ in 0..<1000 where log.ownLines.isEvictionSuspended {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        #expect(!log.ownLines.isEvictionSuspended)   // released by the first read completing
+        #expect(!log.ownLines.hasEvicted)            // and releasing under capacity evicted nothing
+    }
+
     @Test func ownLineLedgerSuspensionBlocksEvictionUntilResumed() {
         // The catch-up window: with eviction suspended the ledger grows past capacity so every
         // consumable line stays findable; resume trims back down and marks the eviction.

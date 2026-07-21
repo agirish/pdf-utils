@@ -210,12 +210,16 @@ public final class ActivityLog: ObservableObject {
     let writer: LogFileWriter
     /// Ordered handoff from nonisolated loggers to the main actor. `DispatchQueue.main.async`
     /// preserves submission order, so entries land in call order.
-    private let pending = LockedValue<[LogEntry]>([])
+    // Internal (not private) so tests can seed a deterministic out-of-order batch and pin that
+    // draining goes through the ordered insert — the racing-threads inversion this guards against
+    // can't be produced deterministically through the public surface.
+    let pending = LockedValue<[LogEntry]>([])
 
     /// The lines this process has written, recorded so the live tailer can recognize and skip them
     /// when it reads them back off disk — they already reached `entries` through the synchronous
     /// handoff above, so re-importing them would double every self-logged entry. See ``beginLiveTailing()``.
-    private let ownLines = OwnLineLedger(capacity: maxInMemory)
+    // Internal (not private) so tests can observe the catch-up suspension window on the ledger.
+    let ownLines = OwnLineLedger(capacity: maxInMemory)
 
     /// The live-tail watcher, created on the first ``beginLiveTailing()``. Stays nil in processes that
     /// never display the log (the menu-bar helper) and until the viewer first opens.
@@ -332,7 +336,7 @@ public final class ActivityLog: ObservableObject {
         return true
     }
 
-    private func drainPending() {
+    func drainPending() {
         // While a clear's truncate is in flight, leave the buffer alone: an entry sitting in
         // `pending` right now had its bytes written BEFORE the truncate (the completion-ordered
         // handoff guarantees that), so the writer-queue purge must be the one to take it. Draining
@@ -493,7 +497,8 @@ public final class ActivityLog: ObservableObject {
 
 /// A minimal lock-guarded cell readable/writable from any thread. Used for the level gate and the
 /// nonisolated → main-actor handoff buffer, both touched off the main actor by `log()`.
-private final class LockedValue<Value>: @unchecked Sendable {
+/// Internal (not private) because the test-visible `pending` buffer is typed with it.
+final class LockedValue<Value>: @unchecked Sendable {
     private let lock = NSLock()
     private var stored: Value
     init(_ initial: Value) { stored = initial }
@@ -540,6 +545,13 @@ final class OwnLineLedger: @unchecked Sendable {
     var hasEvicted: Bool {
         lock.lock(); defer { lock.unlock() }
         return evicted
+    }
+
+    /// Whether a catch-up window is currently holding eviction open — observable so tests can pin
+    /// the begin-tailing wiring (suspend on begin, resume after the first read).
+    var isEvictionSuspended: Bool {
+        lock.lock(); defer { lock.unlock() }
+        return evictionSuspended
     }
 
     /// One locked step for the catch-up decision: if nothing has ever been evicted, suspends
@@ -668,6 +680,15 @@ final class ActivityLogTailer: @unchecked Sendable {
         return UInt64(status.st_size)
     }
 
+    /// When set, the next successful arm anchors at the (new) file's end instead of keeping the
+    /// current offset — the rename branch's intent, remembered here so a RETRIED re-arm still
+    /// lands at the new EOF rather than re-reading a whole replacement file from a stale offset.
+    private var anchorAtEndOnNextArm = false
+    /// Bounded retries for transient `open()` failures (descriptor pressure under load). A silent
+    /// give-up left the tailer dead for the rest of the session — live updates just stopped, with
+    /// nothing in the UI to say why. ~5s of retries outlives any transient spike.
+    private var openRetriesRemaining = 20
+
     /// (Re)opens the read descriptor and its watch. `O_CREAT` without `O_TRUNC` makes this race-free
     /// against the writer still creating the file — it creates an empty file if missing (the writer's
     /// `O_APPEND` then shares that inode) and never truncates existing content.
@@ -683,7 +704,21 @@ final class ActivityLogTailer: @unchecked Sendable {
         fd = -1
 
         let opened = open(url.path, O_RDONLY | O_CREAT, 0o644)
-        guard opened >= 0 else { return }
+        guard opened >= 0 else {
+            if openRetriesRemaining > 0 {
+                openRetriesRemaining -= 1
+                queue.asyncAfter(deadline: .now() + .milliseconds(250)) { [weak self] in
+                    guard let self, self.fd < 0 else { return }
+                    self.openAndArm()
+                    // A successful retried arm has already applied any pending EOF anchor; this
+                    // read then picks up from the correct offset (the catch-up window on a
+                    // first-open retry, or nothing at all after a rename re-arm).
+                    self.readNew()
+                }
+            }
+            return
+        }
+        openRetriesRemaining = 20   // healthy again; future failures get a fresh budget
         fd = opened
 
         let source = DispatchSource.makeFileSystemObjectSource(
@@ -698,11 +733,13 @@ final class ActivityLogTailer: @unchecked Sendable {
                 // old inode still holds past our offset FIRST — a coalesced [.write, .rename]
                 // delivery otherwise dropped lines written just before the swap — then re-establish
                 // on the new file and anchor at its end (the trim seeded it with the old tail, which
-                // is already reflected in `entries` or was just drained above).
+                // is already reflected in `entries` or was just drained above). The anchor rides
+                // `anchorAtEndOnNextArm` so it applies on the ARMED file even when the re-arm has
+                // to retry — setting the offset here from a failed (fd -1) state anchored at 0 and
+                // re-imported the entire replacement file as duplicates once a retry succeeded.
                 self.readNew()
+                self.anchorAtEndOnNextArm = true
                 self.openAndArm()
-                self.offset = self.currentSize()
-                self.partial.removeAll()
             } else {
                 self.readNew()
             }
@@ -710,6 +747,12 @@ final class ActivityLogTailer: @unchecked Sendable {
         source.setCancelHandler { [fd] in if fd >= 0 { close(fd) } }
         self.source = source
         source.resume()
+
+        if anchorAtEndOnNextArm {
+            anchorAtEndOnNextArm = false
+            offset = currentSize()
+            partial.removeAll()
+        }
     }
 
     private func readNew() {

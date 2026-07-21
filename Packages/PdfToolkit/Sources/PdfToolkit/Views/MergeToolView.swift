@@ -387,22 +387,24 @@ struct MergeToolView: View {
         removeEntry(at: idx)
     }
 
+    // @MainActor with a synchronous head: the guards and installs before the first await run
+    // atomically with task entry, so a superseded pass can no longer resume from a pre-head
+    // suspension AFTER the newer pass finished and set the spinner nothing would clear — the last
+    // sliver of the cancellation contract the tail guards below already honor.
+    @MainActor
     private func refreshPageSummary() async {
+        guard !Task.isCancelled else { return }
         let snapshot = entries
         guard !snapshot.isEmpty else {
-            await MainActor.run {
-                pagesByEntryID = [:]
-                totalPages = 0
-                pageSummaryLoading = false
-            }
+            pagesByEntryID = [:]
+            totalPages = 0
+            pageSummaryLoading = false
             return
         }
         let urls = snapshot.map(\.url)
-        await MainActor.run {
-            pageSummaryLoading = true
-            pagesByEntryID = [:]
-            totalPages = 0
-        }
+        pageSummaryLoading = true
+        pagesByEntryID = [:]
+        totalPages = 0
         do {
             let counts = try await PDFBackgroundWork.run {
                 try URLCollectionSecurityScope.withAccess(urls) {
@@ -413,23 +415,18 @@ struct MergeToolView: View {
                     return dict
                 }
             }
-            // Checked INSIDE the main-actor block, like generatePreviews: a superseded pass must
-            // not install its partial snapshot (a stale total and a prematurely cleared spinner)
-            // over the state the newer pass now owns, and only on the main actor is the check
-            // atomic with the install — off-actor, cancellation could land in the hop.
-            await MainActor.run {
-                guard !Task.isCancelled else { return }
-                pagesByEntryID = counts
-                totalPages = counts.values.reduce(0, +)
-                pageSummaryLoading = false
-            }
+            // The whole function is main-actor now, so the check is atomic with the install with
+            // no hop for cancellation to land in: a superseded pass must not put its partial
+            // snapshot (a stale total and a prematurely cleared spinner) over the newer pass's.
+            guard !Task.isCancelled else { return }
+            pagesByEntryID = counts
+            totalPages = counts.values.reduce(0, +)
+            pageSummaryLoading = false
         } catch {
-            await MainActor.run {
-                guard !Task.isCancelled else { return }
-                pagesByEntryID = [:]
-                totalPages = 0
-                pageSummaryLoading = false
-            }
+            guard !Task.isCancelled else { return }
+            pagesByEntryID = [:]
+            totalPages = 0
+            pageSummaryLoading = false
         }
     }
 

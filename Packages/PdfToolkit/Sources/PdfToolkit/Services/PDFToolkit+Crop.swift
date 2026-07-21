@@ -24,19 +24,24 @@ extension PDFToolkit {
     /// No crop may leave less than this per axis — a sliver page is unusable in every viewer.
     static let minimumCropSide: CGFloat = 24
 
-    /// Insets every page's crop box by the given displayed-edge amounts and writes a new PDF.
-    static func crop(inputURL: URL, outputURL: URL, insets: CropInsets) throws {
+    /// Insets the crop box of every page — or only `pageIndices` when given — by the displayed-edge
+    /// amounts and writes a new PDF.
+    static func crop(inputURL: URL, outputURL: URL, insets: CropInsets, pageIndices: Set<Int>? = nil) throws {
         try requireDistinctOutput(outputURL, from: [inputURL])
-        try writeOutput(try cropData(inputURL: inputURL, insets: insets), to: outputURL)
+        try writeOutput(try cropData(inputURL: inputURL, insets: insets, pageIndices: pageIndices), to: outputURL)
     }
 
-    /// In-memory core of ``crop(inputURL:outputURL:insets:)``.
+    /// In-memory core of ``crop(inputURL:outputURL:insets:pageIndices:)``.
     ///
     /// The crop box is what viewers display; page content is not deleted, so cropping back out
     /// remains possible in any PDF editor. Insets are given in *displayed* orientation and mapped
     /// through each page's intrinsic rotation onto the stored (unrotated) crop rect — trimming
     /// "the top you see" of a rotation-90 page moves the stored box's minX edge, not maxY.
-    internal static func cropData(inputURL: URL, insets: CropInsets) throws -> Data {
+    ///
+    /// `pageIndices` nil trims every page (the segmented "Custom margins" and "Auto-detect" paths);
+    /// a set trims only those 0-based pages and copies the rest untouched — the marquee's
+    /// "this page only" option, where the drawn box is exact on one page but arbitrary on others.
+    internal static func cropData(inputURL: URL, insets: CropInsets, pageIndices: Set<Int>? = nil) throws -> Data {
         let source = try openUnlockedDocument(at: inputURL)
         guard source.pageCount > 0 else { throw PDFOperationError.emptyPDF }
 
@@ -45,12 +50,14 @@ extension PDFToolkit {
             guard let page = source.page(at: i), let copy = page.copy() as? PDFPage else {
                 throw PDFOperationError.couldNotOpen(inputURL)
             }
-            let current = page.bounds(for: .cropBox)
-            let cropped = insetRect(current, rotation: page.rotation, by: insets)
-            guard cropped.width >= minimumCropSide, cropped.height >= minimumCropSide else {
-                throw PDFOperationError.cropTooSmall(pageNumber: i + 1)
+            if pageIndices?.contains(i) ?? true {
+                let current = page.bounds(for: .cropBox)
+                let cropped = insetRect(current, rotation: page.rotation, by: insets)
+                guard cropped.width >= minimumCropSide, cropped.height >= minimumCropSide else {
+                    throw PDFOperationError.cropTooSmall(pageNumber: i + 1)
+                }
+                copy.setBounds(cropped, for: .cropBox)
             }
-            copy.setBounds(cropped, for: .cropBox)
             output.insert(copy, at: output.pageCount)
         }
         guard let data = output.dataRepresentation() else {
@@ -155,6 +162,33 @@ extension PDFToolkit {
             minX += insets.left
         }
         return CGRect(x: minX, y: minY, width: max(0, maxX - minX), height: max(0, maxY - minY))
+    }
+
+    /// Inverse of ``insetRect(_:rotation:by:)``: the displayed-edge insets that crop `cropBox` down
+    /// to `selection`. Both rects are in the same stored (unrotated) page space — `selection` is a
+    /// marquee the user dragged directly on the page, expressed via `pdfView.convert`, which never
+    /// rotates. Feeding the result back through `insetRect` reproduces `selection`, so a drawn box
+    /// and the numeric Top/Bottom/Left/Right fields stay two ways of saying the same thing.
+    ///
+    /// The four stored gaps between the boxes are relabelled onto the visual edges the same way
+    /// `insetRect` maps them the other direction: at 90° the stored left gap is the trim the viewer
+    /// sees on top, and so on. Clamped to ≥ 0 so a selection nudged a hair past an edge reads as a
+    /// flush (zero) trim rather than a negative one.
+    static func insets(from selection: CGRect, rotation: Int, in cropBox: CGRect) -> CropInsets {
+        let storedTop = max(0, cropBox.maxY - selection.maxY)
+        let storedBottom = max(0, selection.minY - cropBox.minY)
+        let storedLeft = max(0, selection.minX - cropBox.minX)
+        let storedRight = max(0, cropBox.maxX - selection.maxX)
+        switch ((rotation % 360) + 360) % 360 {
+        case 90:
+            return CropInsets(top: storedLeft, left: storedBottom, bottom: storedRight, right: storedTop)
+        case 180:
+            return CropInsets(top: storedBottom, left: storedRight, bottom: storedTop, right: storedLeft)
+        case 270:
+            return CropInsets(top: storedRight, left: storedTop, bottom: storedLeft, right: storedBottom)
+        default:
+            return CropInsets(top: storedTop, left: storedLeft, bottom: storedBottom, right: storedRight)
+        }
     }
 
     /// The displayed-edge trims that would tighten `page`'s crop box to its rendered content plus

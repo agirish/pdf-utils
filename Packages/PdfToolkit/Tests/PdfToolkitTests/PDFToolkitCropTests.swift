@@ -37,6 +37,39 @@ import Testing
                 == PDFToolkit.insetRect(rect, rotation: 270, by: insets))
     }
 
+    @Test func insetsFromSelectionInvertInsetRectUnderEveryRotation() {
+        // A crop box with a NON-zero origin — the case origin-zero fixtures have hidden before.
+        let cropBox = CGRect(x: 30, y: 40, width: 500, height: 600)
+        let insets = CropInsets(top: 12, left: 34, bottom: 56, right: 7)
+
+        for rotation in [0, 90, 180, 270, -90, 450] {
+            // Drawing the box the numbers describe, then reading the numbers back off that box,
+            // must return exactly the numbers — the two-way marquee/field sync depends on it.
+            let box = PDFToolkit.insetRect(cropBox, rotation: rotation, by: insets)
+            let recovered = PDFToolkit.insets(from: box, rotation: rotation, in: cropBox)
+            #expect(recovered == insets)
+        }
+    }
+
+    @Test func insetsFromSelectionMeasuresVisualEdgesAtRotation90() {
+        // Stored space: a selection inset 10 off the left edge and 20 off the bottom of the box.
+        let cropBox = CGRect(x: 0, y: 0, width: 400, height: 500)
+        let selection = CGRect(x: 10, y: 20, width: 400 - 10 - 30, height: 500 - 20 - 40)
+        // At 90° the stored left edge is the visual TOP and the stored bottom edge is the visual LEFT.
+        let insets = PDFToolkit.insets(from: selection, rotation: 90, in: cropBox)
+        #expect(insets == CropInsets(top: 10, left: 20, bottom: 30, right: 40))
+    }
+
+    @Test func insetsFromSelectionFlushWithAnEdgeReadsAsZeroTrim() {
+        let cropBox = CGRect(x: 0, y: 0, width: 200, height: 200)
+        // A selection nudged a hair PAST the top/right edges must not report a negative trim.
+        let selection = CGRect(x: 50, y: 0, width: 160, height: 210)
+        let insets = PDFToolkit.insets(from: selection, rotation: 0, in: cropBox)
+        #expect(insets.top == 0)
+        #expect(insets.right == 0)
+        #expect(insets.left == 50)
+    }
+
     // MARK: crop()
 
     @Test func cropInsetsEveryPagesBox() throws {
@@ -55,6 +88,27 @@ import Testing
         let expected = CGRect(x: 20, y: 30, width: 612 - 20 - 40, height: 792 - 10 - 30)
         #expect(try cropBox(at: out, page: 0) == expected)
         #expect(try cropBox(at: out, page: 1) == expected)
+        #expect(try PDFFixtures.pageTexts(at: out) == PDFFixtures.pageTexts(at: src))
+    }
+
+    @Test func cropAppliesToOnlyTheGivenPagesAndLeavesTheRestUntouched() throws {
+        let dir = FixtureDir()
+        let src = dir.url("src.pdf")
+        try PDFFixtures.writePDF(pageCount: 3, to: src)
+        let out = dir.url("out.pdf")
+
+        // The marquee's "this page only" path: crop page 2 (index 1), copy pages 1 and 3 as-is.
+        try PDFToolkit.crop(
+            inputURL: src,
+            outputURL: out,
+            insets: CropInsets(top: 10, left: 20, bottom: 30, right: 40),
+            pageIndices: [1]
+        )
+
+        let full = CGRect(x: 0, y: 0, width: 612, height: 792)
+        #expect(try cropBox(at: out, page: 0) == full)
+        #expect(try cropBox(at: out, page: 1) == CGRect(x: 20, y: 30, width: 612 - 20 - 40, height: 792 - 10 - 30))
+        #expect(try cropBox(at: out, page: 2) == full)
         #expect(try PDFFixtures.pageTexts(at: out) == PDFFixtures.pageTexts(at: src))
     }
 
@@ -108,6 +162,85 @@ import Testing
         }
         #expect(error?.kind == "cropTooSmall")
         if case .cropTooSmall(let page) = error { #expect(page == 1) }
+    }
+
+    // MARK: Drag-to-crop pipeline (selection → insets → output)
+
+    @Test func marqueeSelectionBecomesTheOutputCropBoxUnderRotationAndOffsetOrigin() throws {
+        // Mirrors the drag flow end to end: the overlay holds a selection rect in stored page space
+        // (what `pdfView.convert` yields), `insets(from:)` turns it into CropInsets, `crop` writes
+        // them. The OUTPUT crop box — the bounds a viewer displays — must equal the drawn rectangle,
+        // on a page that is BOTH rotated 90° AND already cropped to a non-zero origin.
+        let dir = FixtureDir()
+        let src = dir.url("src.pdf")
+        let startCrop = CGRect(x: 40, y: 55, width: 500, height: 620)
+        try PDFFixtures.writePDF(
+            markers: [PDFFixtures.marker(1)],
+            rotations: [0: 90],
+            cropFirstPageTo: startCrop,
+            to: src
+        )
+
+        // A rectangle the user dragged inside that crop box, in stored page space.
+        let selection = CGRect(x: 90, y: 120, width: 300, height: 400)
+        let rotation = try PDFFixtures.pageRotations(at: src)[0]
+        let insets = PDFToolkit.insets(from: selection, rotation: rotation, in: startCrop)
+
+        let out = dir.url("out.pdf")
+        try PDFToolkit.crop(inputURL: src, outputURL: out, insets: insets)
+
+        let outBox = try cropBox(at: out)
+        #expect(abs(outBox.minX - selection.minX) < 0.001)
+        #expect(abs(outBox.minY - selection.minY) < 0.001)
+        #expect(abs(outBox.width - selection.width) < 0.001)
+        #expect(abs(outBox.height - selection.height) < 0.001)
+        // The rotation still rides along, so the viewer keeps the same orientation.
+        #expect(try PDFFixtures.pageRotations(at: out) == [90])
+    }
+
+    @Test func marqueeCropRendersOnlyTheDrawnRegion() throws {
+        // A green square lands inside the dragged rectangle and a wide margin lands outside it. After
+        // cropping to the selection, RENDERING THE OUTPUT'S CROP BOX (what a viewer sees) must show
+        // the square and nothing from the trimmed margin — the "open the output and look" check.
+        let dir = FixtureDir()
+        let src = dir.url("src.pdf")
+        let startCrop = CGRect(x: 40, y: 50, width: 500, height: 600)
+        try PDFFixtures.writePDF(
+            markers: ["ONLY"],
+            cropFirstPageTo: startCrop,
+            greenSquareOnFirstPage: CGRect(x: 100, y: 100, width: 60, height: 60),
+            to: src
+        )
+
+        let selection = CGRect(x: 80, y: 80, width: 200, height: 200)   // contains the green square
+        let insets = PDFToolkit.insets(from: selection, rotation: 0, in: startCrop)
+        let out = dir.url("out.pdf")
+        try PDFToolkit.crop(inputURL: src, outputURL: out, insets: insets)
+
+        let doc = try #require(PDFDocument(url: out))
+        let page = try #require(doc.page(at: 0))
+        let box = page.bounds(for: .cropBox)
+        #expect(box == selection)
+        let image = page.thumbnail(of: box.size, for: .cropBox)
+        let tiff = try #require(image.tiffRepresentation)
+        let rep = try #require(NSBitmapImageRep(data: tiff))
+        let sx = CGFloat(rep.pixelsWide) / box.width
+        let sy = CGFloat(rep.pixelsHigh) / box.height
+        func color(_ px: CGFloat, _ py: CGFloat) -> NSColor {
+            let col = min(rep.pixelsWide - 1, max(0, Int((px - box.minX) * sx)))
+            let row = min(rep.pixelsHigh - 1, max(0, Int((box.maxY - py) * sy)))   // flip PDF y-up → image y-down
+            return rep.colorAt(x: col, y: row)?.usingColorSpace(.deviceRGB) ?? .white
+        }
+
+        // The square (centre ~130,130 in crop-box space) is visibly green in the cropped output…
+        let onSquare = color(130, 130)
+        #expect(onSquare.greenComponent > 0.5)
+        #expect(onSquare.greenComponent - onSquare.redComponent > 0.2)
+        // …and a corner well inside the crop but away from the square stayed blank paper.
+        let clear = color(260, 260)
+        #expect(clear.redComponent > 0.85)
+        #expect(clear.greenComponent > 0.85)
+        #expect(clear.blueComponent > 0.85)
     }
 
     // MARK: autoCrop()

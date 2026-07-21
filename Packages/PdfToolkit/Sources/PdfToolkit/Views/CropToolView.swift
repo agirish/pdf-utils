@@ -3,10 +3,12 @@ import PDFKit
 import SwiftUI
 import UniformTypeIdentifiers
 
-/// Which lever drives the crop: automatic content detection, or hand-typed margins.
+/// Which lever drives the crop: automatic content detection, hand-typed margins, or a rectangle
+/// dragged directly on the page.
 private enum CropMode: Hashable {
     case auto
     case custom
+    case drag
 }
 
 struct CropToolView: View {
@@ -29,6 +31,11 @@ struct CropToolView: View {
     @State private var pageSpecs: [PreviewPageSpec] = []
     @State private var isGeneratingPreviews = false
     @State private var thumbnailSize: CGFloat = 120
+    // Drag-to-crop: a full document loaded on demand (only this mode needs an interactive PDFView),
+    // the page the marquee is drawn on, and the fit-to-view zoom.
+    @State private var pdfDocument: PDFDocument?
+    @State private var dragPageIndex = 0
+    @State private var dragZoom: CGFloat = 1
 
     private var selectionPathKey: String {
         inputURL?.standardizedFileURL.path ?? ""
@@ -47,21 +54,8 @@ struct CropToolView: View {
         HSplitView {
             sidebarColumn
                 .toolSidebarWidth()
-            SinglePDFPreviewColumn(
-                pages: pageSpecs,
-                isGenerating: isGeneratingPreviews,
-                thumbnailSize: $thumbnailSize,
-                accent: accent,
-                previewSubtitle: "Pages before cropping. The trim applies to every page when you save.",
-                emptyTitle: "No PDF selected",
-                emptySubtitle: "Drop a PDF here or choose one to trim its margins.",
-                emptySystemImage: "crop",
-                render: { spec in
-                    guard let url = inputURL else { return nil }
-                    return (try? await PDFPageThumbnailLoader.loadPage(from: url, pageIndex: spec.id - 1))?.image
-                }
-            )
-            .frame(minWidth: 360)
+            previewColumn
+                .frame(minWidth: 360)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .overlay {
@@ -103,6 +97,143 @@ struct CropToolView: View {
         .task(id: selectionPathKey) {
             await loadThumbnails()
         }
+        .onChange(of: mode) { _, newMode in
+            // The interactive PDFView is drag-only; drop the loaded document when leaving so a big
+            // file isn't pinned in memory while Auto/Custom use the virtualized thumbnail grid.
+            if newMode != .drag { pdfDocument = nil }
+        }
+    }
+
+    // MARK: - Preview column
+
+    @ViewBuilder
+    private var previewColumn: some View {
+        if mode == .drag {
+            marqueePane
+        } else {
+            SinglePDFPreviewColumn(
+                pages: pageSpecs,
+                isGenerating: isGeneratingPreviews,
+                thumbnailSize: $thumbnailSize,
+                accent: accent,
+                previewSubtitle: "Pages before cropping. The trim applies to every page when you save.",
+                emptyTitle: "No PDF selected",
+                emptySubtitle: "Drop a PDF here or choose one to trim its margins.",
+                emptySystemImage: "crop",
+                render: { spec in
+                    guard let url = inputURL else { return nil }
+                    return (try? await PDFPageThumbnailLoader.loadPage(from: url, pageIndex: spec.id - 1))?.image
+                }
+            )
+        }
+    }
+
+    /// Drag-to-crop's right column: an interactive single-page editor loaded on demand. The load lives
+    /// here, so it runs only while this pane is on screen (this mode), and re-runs when the file changes.
+    private var marqueePane: some View {
+        Group {
+            if inputURL == nil {
+                EmptyStateView(
+                    icon: "crop",
+                    title: "No PDF selected",
+                    message: "Drop a PDF here or choose one, then drag a box to crop it."
+                )
+            } else if let doc = pdfDocument {
+                marqueeEditor(doc: doc)
+            } else {
+                ProgressView("Opening PDF…")
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(ToolPreviewPaneBackground())
+        .task(id: selectionPathKey) { await loadInteractiveDoc() }
+    }
+
+    private func marqueeEditor(doc: PDFDocument) -> some View {
+        let pageCount = max(1, doc.pageCount)
+        return VStack(alignment: .leading, spacing: 0) {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(alignment: .center) {
+                    Text("Drag to crop")
+                        .font(.title3.weight(.semibold))
+                    Spacer(minLength: 8)
+                    if pageCount > 1 { pageNavigator(pageCount: pageCount) }
+                }
+                Text("Drag a box on the page, or pull the handles. The dimmed area is trimmed away.")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .padding(18)
+
+            Divider().opacity(0.35)
+
+            CropMarqueePDFEditor(
+                document: doc,
+                pageIndex: min(dragPageIndex, pageCount - 1),
+                insets: Binding(get: { customInsets }, set: { setInsets($0) }),
+                zoom: dragZoom,
+                accent: accent
+            )
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(Color(nsColor: .underPageBackgroundColor))
+
+            Divider().opacity(0.35)
+
+            zoomBar
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private func pageNavigator(pageCount: Int) -> some View {
+        HStack(spacing: 8) {
+            Button {
+                dragPageIndex = max(0, min(dragPageIndex, pageCount - 1) - 1)
+            } label: {
+                Image(systemName: "chevron.left")
+            }
+            .buttonStyle(.borderless)
+            .disabled(dragPageIndex <= 0)
+            .help("Previous page")
+
+            Text("Page \(min(dragPageIndex, pageCount - 1) + 1) of \(pageCount)")
+                .font(.subheadline.weight(.medium))
+                .monospacedDigit()
+
+            Button {
+                dragPageIndex = min(pageCount - 1, min(dragPageIndex, pageCount - 1) + 1)
+            } label: {
+                Image(systemName: "chevron.right")
+            }
+            .buttonStyle(.borderless)
+            .disabled(dragPageIndex >= pageCount - 1)
+            .help("Next page")
+        }
+    }
+
+    private var zoomBar: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "minus.magnifyingglass")
+                .foregroundStyle(.secondary)
+            Slider(value: $dragZoom, in: 1...4)
+            Image(systemName: "plus.magnifyingglass")
+                .foregroundStyle(.secondary)
+            Text("\(Int((dragZoom * 100).rounded()))%")
+                .font(.subheadline.monospacedDigit())
+                .foregroundStyle(.secondary)
+                .frame(width: 52, alignment: .trailing)
+        }
+        .padding(.horizontal, 18)
+        .padding(.vertical, 12)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Zoom, \(Int((dragZoom * 100).rounded())) percent")
+    }
+
+    private func setInsets(_ i: CropInsets) {
+        topInset = i.top
+        leftInset = i.left
+        bottomInset = i.bottom
+        rightInset = i.right
     }
 
     // MARK: - Sidebar
@@ -179,7 +310,7 @@ struct CropToolView: View {
             }
             Text(inputURL == nil
                  ? "Drop a PDF or add a file, then choose how to trim it."
-                 : "Auto-detect finds the content on each page; custom margins trim fixed amounts from every page.")
+                 : "Auto-detect finds the content on each page; custom margins trim fixed amounts; drag to crop draws the box right on the page.")
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -269,6 +400,7 @@ struct CropToolView: View {
             Picker("Crop mode", selection: $mode) {
                 Text("Auto-detect").tag(CropMode.auto)
                 Text("Custom margins").tag(CropMode.custom)
+                Text("Drag to crop").tag(CropMode.drag)
             }
             .pickerStyle(.segmented)
             .labelsHidden()
@@ -278,6 +410,8 @@ struct CropToolView: View {
                 autoControls
             case .custom:
                 customControls
+            case .drag:
+                dragControls
             }
         }
         .padding(16)
@@ -311,24 +445,53 @@ struct CropToolView: View {
         }
     }
 
+    /// The Top/Bottom/Left/Right point fields, shared by Custom margins and Drag to crop — both edit
+    /// the same four insets, so the grid lives in one place.
+    private var edgeInsetGrid: some View {
+        Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 8) {
+            GridRow {
+                insetField("Top", value: $topInset)
+                insetField("Bottom", value: $bottomInset)
+            }
+            GridRow {
+                insetField("Left", value: $leftInset)
+                insetField("Right", value: $rightInset)
+            }
+        }
+    }
+
     private var customControls: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text("Trim from each edge")
                 .font(.subheadline.weight(.semibold))
-            Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 8) {
-                GridRow {
-                    insetField("Top", value: $topInset)
-                    insetField("Bottom", value: $bottomInset)
-                }
-                GridRow {
-                    insetField("Left", value: $leftInset)
-                    insetField("Right", value: $rightInset)
-                }
-            }
+            edgeInsetGrid
             Text("Amounts are in points (72 pt = 1 inch, 28 pt ≈ 1 cm), measured on the page as displayed. The same trim applies to every page.")
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    private var dragControls: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Trim from each edge")
+                .font(.subheadline.weight(.semibold))
+            edgeInsetGrid
+            Toggle("Use the same crop on every page", isOn: $unified)
+                .toggleStyle(.checkbox)
+                .font(.subheadline)
+            Text(unified
+                 ? "Drag the box on the page at right; the same trim applies to every page. The fields track the box—type to nudge it to the point."
+                 : "Only the page you’re viewing is cropped to the box. Every other page is left exactly as it is.")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            Button("Reset selection") { setInsets(CropInsets()) }
+                .buttonStyle(.borderless)
+                .font(.subheadline.weight(.medium))
+                .foregroundStyle(.secondary)
+                .disabled(customInsets.isZero)
+                .help("Clear the crop back to the full page")
         }
     }
 
@@ -388,6 +551,29 @@ struct CropToolView: View {
         }
     }
 
+    /// Loads the full document the marquee editor needs, off the main thread and on the shared PDFKit
+    /// serial queue (the same pattern Redact uses). Resets first, so a file switch never shows the
+    /// previous document. A locked/corrupt file is left for the thumbnail loader and the save path to
+    /// report — this pane just stays on its "Opening…"/empty state rather than double-alerting.
+    private func loadInteractiveDoc() async {
+        pdfDocument = nil
+        dragPageIndex = 0
+        guard let url = inputURL else { return }
+        do {
+            let box = try await PDFBackgroundWork.run {
+                try url.withSecurityScopedAccess { PDFDocumentBox(document: PDFDocument(url: url)) }
+            }
+            guard !Task.isCancelled else { return }
+            if let doc = box.document, doc.isLocked == false, doc.pageCount > 0 {
+                pdfDocument = doc
+            }
+        } catch is CancellationError {
+            // Superseded by another selection; the newer load owns the state.
+        } catch {
+            // Non-fatal here; surfaced elsewhere.
+        }
+    }
+
     // MARK: - Export
 
     @MainActor
@@ -409,6 +595,8 @@ struct CropToolView: View {
         let insetsSnapshot = customInsets
         let paddingSnapshot = CGFloat(max(0, padding))
         let unifiedSnapshot = unified
+        // For "this page only" in drag mode, clamp the viewed page to the document's real range.
+        let dragPageSnapshot = min(max(dragPageIndex, 0), max(0, (pdfDocument?.pageCount ?? 1) - 1))
 
         do {
             let data = try await PDFBackgroundWork.run {
@@ -422,6 +610,9 @@ struct CropToolView: View {
                         )
                     case .custom:
                         return try PDFToolkit.cropData(inputURL: fileURL, insets: insetsSnapshot)
+                    case .drag:
+                        let indices: Set<Int>? = unifiedSnapshot ? nil : [dragPageSnapshot]
+                        return try PDFToolkit.cropData(inputURL: fileURL, insets: insetsSnapshot, pageIndices: indices)
                     }
                 }
             }

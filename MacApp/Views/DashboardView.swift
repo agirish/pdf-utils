@@ -203,63 +203,16 @@ struct DashboardView: View {
         let categories = orderedCategories
         return VStack(alignment: .leading, spacing: 32) {
             ForEach(Array(categories.enumerated()), id: \.element) { index, category in
-                VStack(alignment: .leading, spacing: 16) {
-                    categoryHeader(category, index: index, count: categories.count)
+                CategorySectionView(
+                    category: category,
+                    index: index,
+                    count: categories.count,
+                    onMove: moveCategory
+                ) {
                     toolGrid(category.tools)
                 }
             }
         }
-    }
-
-    /// A section label in the artifact's treatment — small, uppercase, letter-spaced — trailed by a
-    /// hairline rule that runs to the edge, in native SF type, with move-up/down controls so the
-    /// sections can be rearranged in place.
-    private func categoryHeader(_ category: ToolCategory, index: Int, count: Int) -> some View {
-        HStack(spacing: 12) {
-            Text(category.displayName.uppercased())
-                .font(.subheadline.weight(.semibold))
-                .tracking(0.8)
-                .foregroundStyle(.secondary)
-                .fixedSize()
-                .accessibilityAddTraits(.isHeader)
-            Rectangle()
-                .fill(.primary.opacity(0.10))
-                .frame(height: 1)
-            reorderControls(category, index: index, count: count)
-        }
-    }
-
-    /// The up/down pair that moves a category's whole section. Grouped on a soft pill so they read as
-    /// one control; each end button disables at the edge it can't move past.
-    private func reorderControls(_ category: ToolCategory, index: Int, count: Int) -> some View {
-        HStack(spacing: 0) {
-            Button {
-                moveCategory(category, .up)
-            } label: {
-                Image(systemName: "chevron.up")
-                    .frame(width: 22, height: 20)
-                    .contentShape(Rectangle())
-            }
-            .disabled(index == 0)
-            .help("Move \(category.displayName) up")
-            .accessibilityLabel("Move \(category.displayName) up")
-
-            Button {
-                moveCategory(category, .down)
-            } label: {
-                Image(systemName: "chevron.down")
-                    .frame(width: 22, height: 20)
-                    .contentShape(Rectangle())
-            }
-            .disabled(index == count - 1)
-            .help("Move \(category.displayName) down")
-            .accessibilityLabel("Move \(category.displayName) down")
-        }
-        .buttonStyle(.plain)
-        .font(.caption.weight(.semibold))
-        .foregroundStyle(.secondary)
-        .background(.quaternary.opacity(0.6), in: Capsule())
-        .overlay(Capsule().strokeBorder(.primary.opacity(0.06), lineWidth: 1))
     }
 
     /// The flat adaptive tile grid — the app's original dashboard body, reused verbatim for Grid mode,
@@ -296,6 +249,83 @@ struct DashboardView: View {
         }
         .frame(maxWidth: .infinity, alignment: .center)
         .padding(.vertical, 56)
+    }
+}
+
+/// One category section in the Categories view: its header (small uppercase label + hairline rule)
+/// above the section's tile grid. Owns its own hover state so the move-up/down controls stay hidden
+/// until the pointer is over this section — keeping the dashboard clean when you're not rearranging.
+/// The whole section (header + tiles) is the hover target, so the controls are easy to reach.
+private struct CategorySectionView<Grid: View>: View {
+    let category: ToolCategory
+    let index: Int
+    let count: Int
+    let onMove: (ToolCategory, ToolCategoryOrder.MoveDirection) -> Void
+    @ViewBuilder let grid: () -> Grid
+
+    @State private var hovered = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            header
+            grid()
+        }
+        .onHover { hovered = $0 }
+    }
+
+    /// The section label in the artifact's treatment — small, uppercase, letter-spaced — trailed by a
+    /// hairline rule and the hover-revealed reorder pill, in native SF type.
+    private var header: some View {
+        HStack(spacing: 12) {
+            Text(category.displayName.uppercased())
+                .font(.subheadline.weight(.semibold))
+                .tracking(0.8)
+                .foregroundStyle(.secondary)
+                .fixedSize()
+                .accessibilityAddTraits(.isHeader)
+            Rectangle()
+                .fill(.primary.opacity(0.10))
+                .frame(height: 1)
+            // Kept in the layout at zero opacity (rather than removed) so revealing it on hover doesn't
+            // reflow the hairline; hit-testing is off while hidden so an unseen control can't be clicked.
+            reorderControls
+                .opacity(hovered ? 1 : 0)
+                .allowsHitTesting(hovered)
+                .animation(.easeOut(duration: 0.15), value: hovered)
+        }
+    }
+
+    /// The up/down pair that moves this category's whole section. Grouped on a soft pill so they read
+    /// as one control; each end button disables at the edge it can't move past.
+    private var reorderControls: some View {
+        HStack(spacing: 0) {
+            Button {
+                onMove(category, .up)
+            } label: {
+                Image(systemName: "chevron.up")
+                    .frame(width: 22, height: 20)
+                    .contentShape(Rectangle())
+            }
+            .disabled(index == 0)
+            .help("Move \(category.displayName) up")
+            .accessibilityLabel("Move \(category.displayName) up")
+
+            Button {
+                onMove(category, .down)
+            } label: {
+                Image(systemName: "chevron.down")
+                    .frame(width: 22, height: 20)
+                    .contentShape(Rectangle())
+            }
+            .disabled(index == count - 1)
+            .help("Move \(category.displayName) down")
+            .accessibilityLabel("Move \(category.displayName) down")
+        }
+        .buttonStyle(.plain)
+        .font(.caption.weight(.semibold))
+        .foregroundStyle(.secondary)
+        .background(.quaternary.opacity(0.6), in: Capsule())
+        .overlay(Capsule().strokeBorder(.primary.opacity(0.06), lineWidth: 1))
     }
 }
 

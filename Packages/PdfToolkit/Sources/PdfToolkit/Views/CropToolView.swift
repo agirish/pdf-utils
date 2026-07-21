@@ -364,6 +364,11 @@ struct CropToolView: View {
             guard !Task.isCancelled else { return }
             thumbnails = []
             isGeneratingPreviews = false
+            if case PDFOperationError.encryptedInput = error {
+                // Locked selection: actionable message + back to the empty state (Metadata's pattern).
+                alertMessage = error.localizedDescription
+                inputURL = nil
+            }
         }
     }
 

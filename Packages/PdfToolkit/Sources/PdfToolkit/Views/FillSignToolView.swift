@@ -665,8 +665,12 @@ struct FillSignToolView: View {
             } else if box.document?.isLocked == true {
                 // A locked document loads "fine" but every page is a blank placeholder — the user
                 // would place text and signatures on empty pages and only learn why at export.
-                // Refuse at load with the same message the export guard uses.
+                // Refuse at load with the same message the export guard uses, and CLEAR the
+                // selection: leaving inputURL set stranded the pane on "Opening PDF…" forever
+                // after the alert, and made re-selecting the same file (once unlocked) a no-op
+                // because the task id never changed. Clean Metadata's refusal established this.
                 alertMessage = PDFOperationError.encryptedInput(url).localizedDescription
+                inputURL = nil
             } else {
                 pdfDocument = box.document
             }

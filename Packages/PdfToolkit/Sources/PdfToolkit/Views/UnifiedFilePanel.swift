@@ -32,12 +32,12 @@ struct UnifiedFilePanel<Config: View>: View {
     var fallbackSuffix: String
     /// Preview-column subtitle for the one-file case.
     var previewSubtitle: String
-    /// When true, an encrypted (locked) one-file input shows a "Locked PDF" placeholder instead of a
-    /// thumbnail preview it can't render — Protect's remove-password inputs are locked until unlocked.
-    // Default ON: every content operation now refuses locked inputs, so every tool's preview
-    // should show the lock placeholder rather than rendering blank placeholder thumbnails that
-    // look like an empty document. (Originally opt-in for Protect only.)
-    var previewLocksWhenEncrypted: Bool = true
+    /// Body text of the "Locked PDF" placeholder shown when the one loaded file is password-locked
+    /// (the thumbnail loader refuses locked documents — their pages render as blanks). The default
+    /// points at the tool that can actually fix it; Password Protect overrides with its own copy,
+    /// since there the password field is right in its sidebar.
+    var lockedPreviewMessage: String =
+        "This PDF is password-protected. Remove its password first (Password Protect → Remove password) to preview and process it."
     /// Runs the host's single-file save for the one loaded file. The host reads its own controls,
     /// produces the data, routes it through `PDFExportCoordinator`, and shows its save dialog on
     /// `.present`.
@@ -52,7 +52,7 @@ struct UnifiedFilePanel<Config: View>: View {
     @State private var thumbnails: [PDFPageThumbnail] = []
     @State private var isGeneratingPreviews = false
     @State private var thumbnailSize: CGFloat = 120
-    /// The one loaded file is encrypted and can't be previewed until unlocked (Protect only).
+    /// The one loaded file is password-locked and can't be previewed until unlocked.
     @State private var previewLocked = false
     /// The tool's effective accent (per the accent-style preset), injected by ``ToolDetailView``.
     @Environment(\.toolAccent) private var accent
@@ -390,7 +390,7 @@ struct UnifiedFilePanel<Config: View>: View {
                     icon: "lock.fill",
                     tint: accent,
                     title: "Locked PDF",
-                    message: "This PDF is password-protected. Enter its password on the left, then remove it to preview and unlock the file."
+                    message: lockedPreviewMessage
                 )
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .background(ToolPreviewPaneBackground())
@@ -576,19 +576,11 @@ struct UnifiedFilePanel<Config: View>: View {
             return
         }
         thumbnails = []
-        // An encrypted input can't be rendered until unlocked; show the locked placeholder instead of
-        // a futile thumbnail load. The check runs on the serial PDF queue like every other PDFKit call.
-        if previewLocksWhenEncrypted {
-            let locked = (try? await PDFBackgroundWork.run {
-                (try? url.withSecurityScopedAccess { PDFDocument(url: url)?.isLocked ?? false }) ?? false
-            }) ?? false
-            guard !Task.isCancelled else { return }
-            if locked {
-                previewLocked = true
-                isGeneratingPreviews = false
-                return
-            }
-        }
+        // Loading state set SYNCHRONOUSLY, before any await: the old shape ran a separate lock
+        // probe first (serialized behind whatever the PDF queue was doing), during which the pane
+        // showed "No PDF selected" for a file that was selected — and a stale locked placeholder
+        // when switching from a locked file to a normal one. The loader itself now refuses locked
+        // documents, so one call does both jobs and the states can't go stale between them.
         previewLocked = false
         isGeneratingPreviews = true
         do {
@@ -602,6 +594,9 @@ struct UnifiedFilePanel<Config: View>: View {
             guard !Task.isCancelled else { return }
             thumbnails = []
             isGeneratingPreviews = false
+            if case PDFOperationError.encryptedInput = error {
+                previewLocked = true
+            }
         }
     }
 

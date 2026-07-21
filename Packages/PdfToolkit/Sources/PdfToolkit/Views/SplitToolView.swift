@@ -352,6 +352,13 @@ struct SplitToolView: View {
             guard !Task.isCancelled else { return }
             thumbnails = []
             isGeneratingPreviews = false
+            if case PDFOperationError.encryptedInput = error {
+                // The loader refuses locked documents (their pages render blank). Surface the
+                // actionable message and clear the selection back to the empty state — the
+                // pattern Clean Metadata established.
+                alertMessage = error.localizedDescription
+                inputURL = nil
+            }
         }
     }
 

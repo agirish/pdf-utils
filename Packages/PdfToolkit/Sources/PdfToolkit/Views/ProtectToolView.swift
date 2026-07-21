@@ -59,7 +59,9 @@ struct ProtectToolView: View {
             makeOperation: { currentBatchOperation },
             fallbackSuffix: mode == .protect ? "protected" : "unlocked",
             previewSubtitle: "The pages of the PDF you’re about to protect or unlock.",
-            previewLocksWhenEncrypted: true,
+            // Protect is the one tool whose sidebar can actually fix a locked file, so its
+            // placeholder points at the field on the left instead of at another tool.
+            lockedPreviewMessage: "This PDF is password-protected. Enter its password on the left, then remove it to preview and unlock the file.",
             runSingle: { url in await run(url) }
         ) {
             modeCard

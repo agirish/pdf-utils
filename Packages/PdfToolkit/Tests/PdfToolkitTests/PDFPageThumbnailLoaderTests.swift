@@ -9,8 +9,10 @@ import PDFKit
 /// out ~309×238 (soft); sized from the displayed orientation it fills the intended 400 pt.
 @Suite struct PDFPageThumbnailLoaderTests {
 
-    private func makePage(size: CGSize, rotation: Int) throws -> PDFPage {
-        let dir = FixtureDir()
+    /// The caller creates and holds the `FixtureDir` for the test body: a dir local to this helper
+    /// deinits (deleting the backing file) the moment it returns, and the render tests then drew a
+    /// document whose file was already unlinked — passing only via POSIX open-file semantics.
+    private func makePage(in dir: FixtureDir, size: CGSize, rotation: Int) throws -> PDFPage {
         let url = dir.url("thumb.pdf")
         try PDFFixtures.writePDF(markers: ["MARKERPAGE1"], size: size, rotations: rotation == 0 ? [:] : [0: rotation], to: url)
         let doc = try #require(PDFDocument(url: url))
@@ -18,7 +20,8 @@ import PDFKit
     }
 
     @Test func unrotatedPortraitBoxKeepsAspectWithLongEdge400() throws {
-        let page = try makePage(size: CGSize(width: 612, height: 792), rotation: 0)
+        let dir = FixtureDir()
+        let page = try makePage(in: dir, size: CGSize(width: 612, height: 792), rotation: 0)
         let box = PDFPageThumbnailLoader.thumbnailBox(for: page)
         #expect(abs(box.height - 400) < 1)
         #expect(abs(box.width - 612.0 / 792.0 * 400) < 1)
@@ -27,7 +30,8 @@ import PDFKit
     @Test func rotated90BoxIsLandscapeWithLongEdge400() throws {
         // The displayed page is landscape; the box must be too, or the render aspect-fits down to
         // the short side and the whole grid goes soft for scanned (rotated) documents.
-        let page = try makePage(size: CGSize(width: 612, height: 792), rotation: 90)
+        let dir = FixtureDir()
+        let page = try makePage(in: dir, size: CGSize(width: 612, height: 792), rotation: 90)
         let box = PDFPageThumbnailLoader.thumbnailBox(for: page)
         #expect(box.width > box.height)
         #expect(abs(box.width - 400) < 1)
@@ -37,7 +41,8 @@ import PDFKit
     }
 
     @Test func rotated270AndNegativeRotationsNormalize() throws {
-        let page = try makePage(size: CGSize(width: 612, height: 792), rotation: 270)
+        let dir = FixtureDir()
+        let page = try makePage(in: dir, size: CGSize(width: 612, height: 792), rotation: 270)
         let box = PDFPageThumbnailLoader.thumbnailBox(for: page)
         #expect(box.width > box.height)
 
@@ -47,8 +52,28 @@ import PDFKit
     }
 
     @Test func smallPagesAreNeverUpscaled() throws {
-        let page = try makePage(size: CGSize(width: 200, height: 100), rotation: 0)
+        let dir = FixtureDir()
+        let page = try makePage(in: dir, size: CGSize(width: 200, height: 100), rotation: 0)
         let box = PDFPageThumbnailLoader.thumbnailBox(for: page)
         #expect(box == NSSize(width: 200, height: 100))
+    }
+
+    @Test func loadAllPagesRefusesALockedDocument() async throws {
+        // The gate lives in the loader itself — a locked document reports a real page count and
+        // renders blanks, and three review rounds found call sites that missed a caller-side
+        // check. Every preview grid inherits this refusal.
+        let dir = FixtureDir()
+        let plain = dir.url("plain.pdf"), locked = dir.url("locked.pdf")
+        try PDFFixtures.writePDF(pageCount: 2, to: plain)
+        try PDFToolkit.encrypt(inputURL: plain, outputURL: locked, password: "secret")
+
+        await #expect(throws: PDFOperationError.self) {
+            _ = try await PDFPageThumbnailLoader.loadAllPages(from: locked)
+        }
+        // And an owner-restricted (encrypted but NOT locked) document still previews fine.
+        let restricted = dir.url("restricted.pdf")
+        try PDFFixtures.writeOwnerRestrictedPDF(markers: ["MARKERPAGE1"], to: restricted)
+        let thumbs = try await PDFPageThumbnailLoader.loadAllPages(from: restricted)
+        #expect(thumbs.count == 1)
     }
 }

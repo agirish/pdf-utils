@@ -456,6 +456,10 @@ struct MergeToolView: View {
                             // rendered all pages of every file before the queue freed up.
                             if isCancelled() { throw CancellationError() }
                             guard let doc = PDFDocument(url: url) else { continue }
+                            // A locked entry's pages render blank; skip it in the preview strip
+                            // rather than show empty pages — the run itself refuses it with the
+                            // actionable encryptedInput message.
+                            guard !doc.isLocked else { continue }
                             for i in 0..<doc.pageCount {
                                 if isCancelled() { throw CancellationError() }
                                 guard let page = doc.page(at: i) else { continue }

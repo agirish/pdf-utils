@@ -38,6 +38,15 @@ enum PDFPageThumbnailLoader {
                 guard let doc = PDFDocument(url: url) else {
                     throw PDFOperationError.couldNotOpen(url)
                 }
+                // Gate HERE, not per call site: a locked document reports a real page count and
+                // renders every page as a blank placeholder, so an ungated caller shows a
+                // normal-looking grid of empty pages. Three separate rounds of review found
+                // call sites that missed a caller-side check (Merge's inline sweep, then six
+                // direct-loading tool views) — putting the refusal inside the one loader they
+                // all share is the only shape a future call site can't get wrong.
+                guard !doc.isLocked else {
+                    throw PDFOperationError.encryptedInput(url)
+                }
                 var items: [PDFPageThumbnail] = []
                 for i in 0..<doc.pageCount {
                     // Task.checkCancellation() is inert on the GCD queue; only this probe can see

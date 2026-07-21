@@ -54,17 +54,14 @@ struct DashboardView: View {
         PinnedTools.resolve(pinnedRaw)
     }
 
-    /// Whether to offer "Reset order": only in the Categories view, not while searching, and only once
-    /// the *arrangement* has actually been changed from the default — either the section order or any
-    /// section's tool order. Pins are separate and unaffected by Reset.
-    private var canResetArrangement: Bool {
-        dashboardLayout == .categories && !isSearching &&
-        (!ToolCategoryOrder.isDefault(orderedCategories) || !ToolOrder.isDefault(toolOrderRaw))
-    }
-
     private let columns = [
         GridItem(.adaptive(minimum: 200, maximum: 280), spacing: 20),
     ]
+
+    /// The spring the reorder/pinning reflow settles with — a light overshoot so tiles and sections
+    /// snap into place rather than sliding linearly. Shared by the drag drops and the accessibility
+    /// moves so every rearrangement lands the same way. (Reset order itself now lives in Settings.)
+    private let reorderSpring: Animation = .spring(response: 0.3, dampingFraction: 0.72)
 
     /// Tools matching the current query, fuzzy-ranked by the very matcher the ⌘K palette uses
     /// (`rankedToolMatches`), flattened across categories with non-matches dropped. Only read while
@@ -86,7 +83,7 @@ struct DashboardView: View {
 
     private func moveCategory(_ category: ToolCategory, _ direction: ToolCategoryOrder.MoveDirection) {
         let next = ToolCategoryOrder.moving(category, direction, in: orderedCategories)
-        withAnimation(.easeInOut(duration: 0.24)) {
+        withAnimation(reorderSpring) {
             categoryOrderRaw = ToolCategoryOrder.serialize(next)
         }
     }
@@ -105,7 +102,7 @@ struct DashboardView: View {
     /// Move a tool one slot within its group — the keyboard/VoiceOver equivalent of a drag, exposed as
     /// an accessibility action since drag-and-drop is invisible to assistive tech.
     private func moveTool(_ tool: Tool, _ direction: ToolCategoryOrder.MoveDirection, in group: ToolDragGroup) {
-        withAnimation(.easeInOut(duration: 0.2)) {
+        withAnimation(reorderSpring) {
             switch group {
             case .pinned:
                 pinnedRaw = PinnedTools.moving(tool, direction, in: pinnedRaw)
@@ -116,15 +113,8 @@ struct DashboardView: View {
     }
 
     private func togglePin(_ tool: Tool) {
-        withAnimation(.easeInOut(duration: 0.22)) {
+        withAnimation(reorderSpring) {
             pinnedRaw = PinnedTools.toggling(tool, in: pinnedRaw)
-        }
-    }
-
-    private func resetArrangement() {
-        withAnimation(.easeInOut(duration: 0.28)) {
-            categoryOrderRaw = ""
-            toolOrderRaw = ""
         }
     }
 
@@ -200,21 +190,10 @@ struct DashboardView: View {
             }
             HStack(spacing: 12) {
                 searchField
-                if canResetArrangement {
-                    Button {
-                        resetArrangement()
-                    } label: {
-                        Label("Reset order", systemImage: "arrow.uturn.backward")
-                    }
-                    .controlSize(.regular)
-                    .help("Restore the default section and tool order")
-                    .transition(.opacity.combined(with: .move(edge: .leading)))
-                }
                 Spacer(minLength: 0)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .animation(.easeInOut(duration: 0.2), value: canResetArrangement)
     }
 
     /// A standard macOS search field: glyph + plain field + a clear button, on the shared
@@ -293,7 +272,7 @@ struct DashboardView: View {
                         order: categories,
                         dragging: draggingCategory,
                         move: { next in
-                            withAnimation(.easeInOut(duration: 0.22)) {
+                            withAnimation(reorderSpring) {
                                 categoryOrderRaw = ToolCategoryOrder.serialize(next)
                             }
                         },
@@ -336,13 +315,19 @@ struct DashboardView: View {
         LazyVGrid(columns: columns, spacing: 20) {
             ForEach(tools) { tool in
                 let pinned = PinnedTools.contains(tool, in: pinnedRaw)
+                let dragging = draggingTool == tool && draggingToolGroup == group
                 NavigationLink(value: tool) {
                     ToolTileView(tool: tool, floating: floatingTiles, isPinned: pinned) {
                         togglePin(tool)
                     }
                 }
                 .buttonStyle(.plain)
-                .opacity(draggingTool == tool && draggingToolGroup == group ? 0.35 : 1)
+                // Lift the dragged tile out of the grid — fade and shrink it so its slot reads as an
+                // empty gap the OS drag image is being carried out of, rather than a hard-dimmed ghost.
+                .opacity(dragging ? 0.28 : 1)
+                .scaleEffect(dragging ? 0.92 : 1)
+                .zIndex(dragging ? 1 : 0)
+                .animation(reorderSpring, value: dragging)
                 .onDrag {
                     draggingTool = tool
                     draggingToolGroup = group
@@ -355,7 +340,7 @@ struct DashboardView: View {
                     draggingTool: draggingTool,
                     draggingGroup: draggingToolGroup,
                     move: { next in
-                        withAnimation(.easeInOut(duration: 0.18)) {
+                        withAnimation(reorderSpring) {
                             commitToolOrder(next, in: group)
                         }
                     },
@@ -449,7 +434,8 @@ private struct CategorySectionView<Grid: View>: View {
             header
             grid()
         }
-        .opacity(isDragging ? 0.5 : 1)
+        .opacity(isDragging ? 0.55 : 1)
+        .animation(.easeOut(duration: 0.2), value: isDragging)
     }
 
     private var header: some View {

@@ -119,6 +119,7 @@ struct SettingsSearchEntry: Identifiable {
     static let all: [SettingsSearchEntry] = [
         .init(title: "Theme", tab: .appearance, keywords: ["light", "dark", "system", "appearance", "mode"]),
         .init(title: "Dashboard layout", tab: .appearance, keywords: ["dashboard", "layout", "categories", "grid", "list", "groups", "tools", "arrange"]),
+        .init(title: "Reset order", tab: .appearance, keywords: ["reset", "order", "arrange", "rearrange", "default", "dashboard", "sections", "tools", "pin"]),
         .init(title: "Accent color", tab: .appearance, keywords: ["hue", "tint", "color", "accent", "swatch"]),
         .init(title: "Tool colors", tab: .appearance, keywords: ["tool", "colors", "accent", "multicolor", "single", "monochrome", "style"]),
         .init(title: "Glass effect", tab: .appearance, keywords: ["glass", "blur", "frost", "clear", "solid", "material", "translucent"]),
@@ -266,8 +267,18 @@ struct AppearanceSettingsTab: View {
     @AppStorage(LiquidGlass.tintKey) private var surfaceTint: Double = 0
     @AppStorage(SettingsKeys.mergePreviewBackground) private var mergePreviewBackgroundRaw: String = MergePreviewBackgroundStyle.matchMain.rawValue
     @AppStorage(SettingsKeys.dashboardLayout) private var dashboardLayoutRaw: String = DashboardLayout.categories.rawValue
+    @AppStorage(SettingsKeys.dashboardCategoryOrder) private var dashboardCategoryOrderRaw: String = ""
+    @AppStorage(SettingsKeys.dashboardToolOrder) private var dashboardToolOrderRaw: String = ""
 
     private var dashboardLayout: DashboardLayout { DashboardLayout(rawValue: dashboardLayoutRaw) ?? .categories }
+
+    /// Whether the user has rearranged the dashboard away from its default section/tool order — gates
+    /// the Reset order button. Pins are tracked separately (``SettingsKeys/dashboardPinnedTools``) and
+    /// deliberately don't count here, so Reset order never removes a pin.
+    private var hasCustomDashboardOrder: Bool {
+        !ToolCategoryOrder.isDefault(ToolCategoryOrder.resolve(dashboardCategoryOrderRaw))
+            || !ToolOrder.isDefault(dashboardToolOrderRaw)
+    }
     private var appearanceMode: AppearanceMode { AppearanceMode(rawValue: appearanceModeRaw) ?? .system }
     private var glassLevel: GlassLevel { GlassLevel(rawValue: glassLevelRaw) ?? .frosted }
     private var selectedHue: LiquidGlassHue { LiquidGlassHue(rawValue: selectedHueRaw) ?? LiquidGlass.defaultHue }
@@ -303,6 +314,17 @@ struct AppearanceSettingsTab: View {
                 Text("Dashboard layout")
             } footer: {
                 Text(dashboardLayout.detail)
+            }
+
+            Section {
+                Button("Reset order") { resetDashboardOrder() }
+                    .disabled(!hasCustomDashboardOrder)
+            } header: {
+                Text("Dashboard order")
+            } footer: {
+                Text(hasCustomDashboardOrder
+                     ? "Restores the default order of the dashboard sections and the tools within them. Pinned tools aren’t affected."
+                     : "Drag a section header or a tile on the dashboard to rearrange it. Reset order restores the default arrangement; pinned tools aren’t affected.")
             }
 
             Section("Accent color") {
@@ -409,6 +431,13 @@ struct AppearanceSettingsTab: View {
         .onChange(of: appearanceModeRaw) { _, _ in
             AppAppearance.applyPersisted()
         }
+    }
+
+    /// Clear the custom section and within-section tool order, restoring the dashboard's default
+    /// arrangement. Pins are intentionally left in place.
+    private func resetDashboardOrder() {
+        dashboardCategoryOrderRaw = ""
+        dashboardToolOrderRaw = ""
     }
 }
 
@@ -643,6 +672,8 @@ struct AdvancedSettingsTab: View {
             SettingsKeys.mergePreviewBackground,
             SettingsKeys.dashboardLayout,
             SettingsKeys.dashboardCategoryOrder,
+            SettingsKeys.dashboardToolOrder,
+            SettingsKeys.dashboardPinnedTools,
             // Files
             SettingsKeys.saveLocation,
             SettingsKeys.afterExportAction,

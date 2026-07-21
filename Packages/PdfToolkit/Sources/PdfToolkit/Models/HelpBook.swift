@@ -173,6 +173,7 @@ enum HelpBook {
                     .bullets([
                         "Open it with ⇧⌘L, the clock button in a toolbar, or Help ▸ Activity Log.",
                         "It opens in its own window, so it can sit beside your work.",
+                        "New entries appear live as each operation finishes — including Finder right-click actions handled in the background — so you can keep it open and watch.",
                         "Each entry notes the tool, the file, and the result; the logging detail is tunable in Settings ▸ Advanced.",
                     ]),
                 ],

@@ -134,7 +134,7 @@ extension PDFToolkit {
     /// on top, at 180° the stored bottom (minY) is on top, at 270° the stored right (maxX) is.
     /// Derived once, verified per-rotation by the crop geometry tests.
     static func insetRect(_ rect: CGRect, rotation: Int, by insets: CropInsets) -> CGRect {
-        let r = ((rotation % 360) + 360) % 360
+        let r = normalizedRotation(rotation)
         var minX = rect.minX
         var maxX = rect.maxX
         var minY = rect.minY
@@ -179,7 +179,7 @@ extension PDFToolkit {
         let storedBottom = max(0, selection.minY - cropBox.minY)
         let storedLeft = max(0, selection.minX - cropBox.minX)
         let storedRight = max(0, cropBox.maxX - selection.maxX)
-        switch ((rotation % 360) + 360) % 360 {
+        switch normalizedRotation(rotation) {
         case 90:
             return CropInsets(top: storedLeft, left: storedBottom, bottom: storedRight, right: storedTop)
         case 180:

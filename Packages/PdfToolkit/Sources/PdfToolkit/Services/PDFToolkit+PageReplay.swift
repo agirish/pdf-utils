@@ -25,7 +25,7 @@ extension PDFToolkit {
     /// The size a viewer shows for a page box under intrinsic rotation — the one copy of the
     /// swap-axes-at-90/270 idiom.
     static func displayedSize(of bounds: CGRect, rotation: Int) -> CGSize {
-        let r = ((rotation % 360) + 360) % 360
+        let r = normalizedRotation(rotation)
         return (r == 90 || r == 270)
             ? CGSize(width: bounds.height, height: bounds.width)
             : bounds.size
@@ -44,7 +44,7 @@ extension PDFToolkit {
             throw PDFOperationError.couldNotOpen(inputURL)
         }
         let cropBox = page.bounds(for: .cropBox)
-        let rotation = ((page.rotation % 360) + 360) % 360
+        let rotation = normalizedRotation(page.rotation)
         let box = CGRect(origin: .zero, size: displayedSize(of: cropBox, rotation: rotation))
         let transform = cgPage.getDrawingTransform(.cropBox, rect: box, rotate: 0, preserveAspectRatio: false)
         return DisplayedPage(

@@ -78,6 +78,13 @@ public enum PDFToolkit {
         return doc.pageCount
     }
 
+    /// Wraps any degree value into 0…359, handling negatives (both PDFKit's `page.rotation` and our
+    /// quarter-turn math can go negative). Centralizes the `((x % 360) + 360) % 360` idiom that
+    /// rotate, crop, watermark, and page-replay each inlined.
+    static func normalizedRotation(_ degrees: Int) -> Int {
+        ((degrees % 360) + 360) % 360
+    }
+
     /// Opens a PDF for a content operation, refusing password-locked documents.
     ///
     /// A locked `PDFDocument` opens "successfully" and even reports its real page count, but its
@@ -330,9 +337,9 @@ public enum PDFToolkit {
             for i in 0..<doc.pageCount {
                 guard unique.contains(i), let page = doc.page(at: i) else { continue }
                 var r = page.rotation
-                r = ((r % 360) + 360) % 360
+                r = normalizedRotation(r)
                 r += turns * 90
-                r = ((r % 360) + 360) % 360
+                r = normalizedRotation(r)
                 page.rotation = r
             }
         }
@@ -720,7 +727,7 @@ public enum PDFToolkit {
     /// box's corner, /Rotate applied, width/height swapped for 90°/270°) — the space the on-screen
     /// editor and `PDFAnnotation.draw` work in. Internal so geometry tests can pin the mapping.
     static func displayRect(_ rect: CGRect, cropBox: CGRect, rotation: Int) -> CGRect {
-        let r = ((rotation % 360) + 360) % 360
+        let r = normalizedRotation(rotation)
         switch r {
         case 90:
             return CGRect(

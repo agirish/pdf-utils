@@ -20,7 +20,7 @@ enum PDFPageThumbnailLoader {
     /// sweep, which once carried a diverged copy of this math).
     static func thumbnailBox(for page: PDFPage, maxSide: CGFloat = 400) -> NSSize {
         let raw = page.bounds(for: .mediaBox).size
-        let rotation = ((page.rotation % 360) + 360) % 360
+        let rotation = PDFToolkit.normalizedRotation(page.rotation)
         let size = (rotation == 90 || rotation == 270)
             ? CGSize(width: raw.height, height: raw.width)
             : raw

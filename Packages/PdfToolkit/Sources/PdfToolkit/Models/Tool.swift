@@ -78,9 +78,9 @@ public enum Tool: String, CaseIterable, Identifiable, Hashable {
     public var headerDescription: String {
         switch self {
         case .compress:
-            return "Rebuilds each page as an image to reduce file size—best for scans and photos. Vector text may become non-selectable; use the quality slider to balance size and sharpness."
+            return "Rebuilds each page as an image to reduce file size—best for scans and photos. Vector text may become non-selectable; pick a compression strength, or a target size in MB, to balance size and sharpness. Add several PDFs to compress a whole batch at once."
         case .rotate:
-            return "Turn every page or only the pages you list. Rotation is written into a new PDF; your original file stays untouched until you save over it from the save panel."
+            return "Turn every page or only the pages you list—or add several PDFs to rotate them all in one run. Rotation is written into a new PDF; your original files stay untouched until you save."
         case .merge:
             return "Stack several PDFs into one file in the order shown. Take only some pages of a file by typing a range in its Pages field (for example 1, 3-5); leave it blank for all pages. Reorder rows with the arrows, or drop a stray page straight from the combined preview."
         case .split:
@@ -104,7 +104,7 @@ public enum Tool: String, CaseIterable, Identifiable, Hashable {
         case .imagesToPdf:
             return "Drop in JPG, PNG, or HEIC images and get one PDF with a page per image, in the order shown. Choose a paper size—or let each page match its image exactly—and whether pictures fit inside the page or fill it edge to edge."
         case .crop:
-            return "Tighten every page's margins—type a trim for each edge, or let the tool find the content bounds on its own. Cropping changes what viewers display; nothing is deleted from the page, and your original file stays untouched."
+            return "Tighten every page's margins—type a trim for each edge, drag a box directly on the page, or let the tool find the content bounds on its own. Cropping changes what viewers display; nothing is deleted from the page, and your original file stays untouched."
         case .ocr:
             return "Runs Apple's text recognition over every page—entirely on your Mac—and lays an invisible, selectable text layer behind the scan. The page image is unchanged; search, copy, and highlight simply start working."
         }

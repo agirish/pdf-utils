@@ -4,11 +4,12 @@ import Foundation
 /// topics, each topic a short article of typed blocks — kept UI-free so `HelpBookTests` can pin the
 /// shape (unique ids, resolvable cross-links, no empty copy) without a view.
 ///
-/// The eleven tool articles are *derived* from each `Tool.helpContent`, so the words a user reads in
-/// the Help book and the words that used to live in the per-tool sheet are one and the same source —
-/// update `ToolHelpContent` and both move together. The non-tool topics (getting started, settings,
-/// safety) are authored here directly. Deliberately no PDFKit dependency: this is words about the
-/// app, not the app's logic.
+/// Every tool's article is *derived* from its `Tool.helpContent`, so the words a user reads in the
+/// Help book and the words on the tool's own screen are one and the same source — update
+/// `ToolHelpContent` and both move together. The sidebar sections mirror the dashboard's categories
+/// (`ToolCategory`). The other topics (getting started, working with several files, Finder shortcuts,
+/// settings, safety) are authored here directly. Deliberately no PDFKit dependency: this is words
+/// about the app, not the app's logic.
 enum HelpBook {
     /// One rendered piece of an article. The renderer owns layout; the data owns words.
     enum Block: Equatable {
@@ -83,7 +84,7 @@ enum HelpBook {
                 blocks: [
                     .paragraph("Each tool does one job — compress, merge, split, sign, protect, and more. Nothing is uploaded to a server; every page is processed locally and the result is saved through the system save sheet, so you choose the name and folder."),
                     .bullets([
-                        "Pick a tool from the dashboard grid.",
+                        "Pick a tool from the dashboard — browse the categories or search by name.",
                         "Add the PDF (or PDFs) you want to work on.",
                         "Adjust the options, then save the new file.",
                     ]),
@@ -95,73 +96,89 @@ enum HelpBook {
                 intro: "Most tools start the same way: point them at a PDF. You can browse for it, or drag it straight from Finder.",
                 blocks: [
                     .bullets([
-                        "Click Choose… (or Add PDFs… in Merge) to pick files with the system open panel.",
+                        "Click Choose PDF… (or Add PDFs… once a file is loaded) to pick files with the system open panel.",
                         "Or drag one or more PDFs from Finder onto the tool's drop area.",
                         "macOS grants access to exactly the files you pick, so the tools stay sandboxed.",
+                        "Compress, Rotate, Watermark, and Password Protect take several PDFs at once — see Working with several files.",
                     ]),
-                    .tip("If a tool says it can't access a file, choose it again with Choose… or Add PDFs… so macOS can re-grant access."),
+                    .tip("If a tool says it can't access a file, choose it again with Choose PDF… or Add PDFs… so macOS can re-grant access."),
                 ],
-                related: ["welcome", "the-tools"]
+                related: ["several-files", "the-tools", "welcome"]
+            )),
+            Topic(id: "several-files", title: "Working with several files", systemImage: "doc.on.doc", article: Article(
+                intro: "Compress, Rotate, Watermark, and Password Protect can run across a whole set of PDFs at once. Add more than one file and the tool switches from a single save to a batch queue.",
+                blocks: [
+                    .steps([
+                        "Add more than one PDF — drag several in, or use Add PDFs…. With two or more files, the action button becomes Run on N files.",
+                        "Set the tool's options once; they apply to every file in the queue.",
+                        "Click Run on N files to process them all. Cancel stops a run in progress.",
+                    ]),
+                    .bullets([
+                        "The queue shows each file's status: Waiting, Working…, a saved-size pill when it's done, or Failed with a reason.",
+                        "Results follow your Save location (Settings ▸ Files): saved beside each original, or written into one folder you pick.",
+                        "Show in Finder reveals the finished files once the run completes.",
+                    ]),
+                    .tip("Each finished file also lands in the Activity Log, so you can keep it open to watch a long batch."),
+                ],
+                related: ["tool-compress", "tool-rotate", "tool-watermark", "tool-protect"]
             )),
             Topic(id: "the-tools", title: "The tools at a glance", systemImage: "square.grid.2x2", article: Article(
-                intro: "Every tool lives on the dashboard. Here's how they group by what you're trying to do.",
+                intro: "Every tool lives on the dashboard, grouped into four categories by what you're trying to do.",
                 blocks: [
                     .bullets([
-                        "Combine & split — Merge stacks PDFs into one; Split and Extract pull files or pages out; Images to PDF turns pictures into a document.",
-                        "Arrange pages — Reorder, Delete Pages, Rotate, and Crop rework the pages of a single PDF.",
-                        "Compress & watermark — Compress shrinks a file; Watermark stamps text across every page.",
-                        "Scans & text — OCR PDF makes scanned pages searchable and selectable.",
-                        "Secure & sign — Password Protect encrypts, Redact removes content for good, Fill & Sign adds text and a signature, and Clean Metadata strips hidden document info.",
+                        "Optimize — Compress shrinks a file for sharing; OCR PDF makes scanned pages searchable and selectable.",
+                        "Organize pages — Merge stacks PDFs into one; Split and Extract pull files or pages out; Reorder, Delete Pages, and Rotate rework the pages of a single PDF.",
+                        "Edit & annotate — Crop trims margins; Watermark stamps text or a logo; Fill & Sign adds text and a signature; Images to PDF turns pictures into a document.",
+                        "Secure & clean — Redact removes content for good; Password Protect encrypts or unlocks; Clean Metadata strips hidden document info.",
                     ]),
+                    .paragraph("Make the dashboard yours: search by name, pin favorites to the top, drag tools or whole sections into the order you like, or switch the layout between Categories, Grid, and List (Settings ▸ Appearance ▸ Dashboard layout)."),
                     .tip("Press ⌘K anywhere to jump straight to a tool without returning to the dashboard."),
                 ],
-                related: ["tool-merge", "tool-compress", "tool-protect"]
+                related: ["tool-compress", "tool-merge", "several-files", "settings"]
             )),
         ]),
-        Section(title: "Combine & split", topics: [
+        Section(title: "Optimize", topics: [
+            toolTopic(.compress),
+            toolTopic(.ocr),
+        ]),
+        Section(title: "Organize pages", topics: [
             toolTopic(.merge),
             toolTopic(.split),
             toolTopic(.extract),
-            toolTopic(.imagesToPdf),
-        ]),
-        Section(title: "Arrange pages", topics: [
             toolTopic(.reorder),
             toolTopic(.deletePages),
             toolTopic(.rotate),
+        ]),
+        Section(title: "Edit & annotate", topics: [
             toolTopic(.crop),
-        ]),
-        Section(title: "Compress & watermark", topics: [
-            toolTopic(.compress),
             toolTopic(.watermark),
-        ]),
-        Section(title: "Scans & text", topics: [
-            toolTopic(.ocr),
-        ]),
-        Section(title: "Secure & sign", topics: [
-            toolTopic(.protect),
-            toolTopic(.redact),
             toolTopic(.fillSign),
+            toolTopic(.imagesToPdf),
+        ]),
+        Section(title: "Secure & clean", topics: [
+            toolTopic(.redact),
+            toolTopic(.protect),
             toolTopic(.metadata),
         ]),
         Section(title: "Settings and more", topics: [
             Topic(id: "settings", title: "Settings", systemImage: "gearshape", article: Article(
-                intro: "Open Settings with ⌘, or the gear button in any toolbar. Changes apply live across the whole app.",
+                intro: "Open Settings with ⌘, or the gear button in any toolbar. Search across every setting, and changes apply live throughout the app.",
                 blocks: [
                     .bullets([
-                        "Appearance — Theme (System, Light, Dark), Tool colors (Multicolor, Single, Monochrome), the Glass effect and Tint, the content surface, and tool preview panes.",
                         "Files — save location, what happens after exporting, output filename suffixes, and reopening your last tool on launch.",
-                        "Advanced — activity-logging detail, default compression quality, redacted-page sharpness, and stripping metadata on export.",
+                        "Appearance — Theme (System, Light, Dark), the Dashboard layout (Categories, Grid, List) and a Reset order button, the Accent color, Tool colors (Multicolor, Single, Monochrome), the Glass effect and Tint, the content surface, and tool preview panes.",
+                        "Advanced — activity-logging detail, default compression quality, redacted-page sharpness, stripping metadata on export, a Reset all settings button, and the app's version.",
                     ]),
                     .tip("The Glass effect (Clear, Frosted, Solid) controls how much of the desktop shows through the window and the dashboard tiles."),
                 ],
-                related: ["quick-actions", "welcome"]
+                related: ["quick-actions", "the-tools", "welcome"]
             )),
             Topic(id: "quick-actions", title: "Quick Actions (⌘K)", systemImage: "command", article: Article(
                 intro: "Press ⌘K anywhere to open the Quick Actions palette — a keyboard-first way to jump to any tool or setting.",
                 blocks: [
                     .bullets([
-                        "Start typing to filter tools, Settings, and the Activity Log.",
-                        "Press Return to jump straight to the highlighted action.",
+                        "Start typing to filter every tool, the Settings tabs, and the Activity Log.",
+                        "Use ↑ / ↓ to move the highlight, and Return to jump straight to it.",
                         "Press ⌘K again, or Esc, to dismiss it.",
                     ]),
                 ],
@@ -174,10 +191,30 @@ enum HelpBook {
                         "Open it with ⇧⌘L, the clock button in a toolbar, or Help ▸ Activity Log.",
                         "It opens in its own window, so it can sit beside your work.",
                         "New entries appear live as each operation finishes — including Finder right-click actions handled in the background — so you can keep it open and watch.",
-                        "Each entry notes the tool, the file, and the result; the logging detail is tunable in Settings ▸ Advanced.",
+                        "Filter by level (All, Info, Warnings, Errors) or search the messages; each entry notes the tool, the file, and the result, and you can reveal or open the file it produced.",
+                        "Copy or Clear the shown entries, open the full log file, or load older history from earlier sessions. The logging detail is tunable in Settings ▸ Advanced.",
                     ]),
                 ],
-                related: ["privacy-safety", "quick-actions"]
+                related: ["finder-integration", "privacy-safety", "quick-actions"]
+            )),
+            Topic(id: "finder-integration", title: "Right-click in Finder", systemImage: "contextualmenu.and.cursorarrow", article: Article(
+                intro: "Right-click a PDF (or several) in Finder to run common tools without opening the app. The work happens in the background and the result appears right next to the original.",
+                blocks: [
+                    .bullets([
+                        "Compress PDF — shrink one or several selected PDFs.",
+                        "Remove Password… — write an unlocked copy (you'll be asked for the password).",
+                        "Rotate PDF — Rotate Right 90°, Rotate Left 90°, or Rotate 180°.",
+                        "Extract Pages… — pull pages from a single PDF.",
+                        "Merge PDFs — combine two or more selected PDFs into one.",
+                    ]),
+                    .paragraph("A small \(AppBrand.displayName) helper lives in the menu bar and does the actual work, then reveals the finished file in Finder. Every run is recorded in the Activity Log, so you can see what happened even though the main window never opened."),
+                    .steps([
+                        "Turn on the \(AppBrand.displayName) extension in System Settings ▸ Login Items & Extensions, under Finder extensions.",
+                        "Use the helper's menu-bar icon to Open \(AppBrand.displayName) or toggle Start at Login so the shortcuts are always ready.",
+                    ]),
+                    .tip("These are the same on-device tools, just reached from Finder — nothing about a right-click action leaves your Mac."),
+                ],
+                related: ["activity-log", "several-files", "privacy-safety"]
             )),
             Topic(id: "privacy-safety", title: "Privacy & safety", systemImage: "checkmark.shield", article: Article(
                 intro: "\(AppBrand.displayName) is built to be safe by default: nothing leaves your Mac, and your originals stay put.",
@@ -228,10 +265,10 @@ enum HelpBook {
         case .extract: return [topicID(for: .split), topicID(for: .deletePages), topicID(for: .reorder)]
         case .reorder: return [topicID(for: .extract), topicID(for: .deletePages), topicID(for: .rotate)]
         case .deletePages: return [topicID(for: .extract), topicID(for: .reorder)]
-        case .rotate: return [topicID(for: .reorder), topicID(for: .deletePages)]
-        case .compress: return [topicID(for: .watermark), "privacy-safety"]
-        case .watermark: return [topicID(for: .redact), topicID(for: .protect)]
-        case .protect: return [topicID(for: .redact), topicID(for: .fillSign), "privacy-safety"]
+        case .rotate: return [topicID(for: .reorder), topicID(for: .deletePages), "several-files"]
+        case .compress: return [topicID(for: .watermark), "several-files", "privacy-safety"]
+        case .watermark: return [topicID(for: .redact), topicID(for: .protect), "several-files"]
+        case .protect: return [topicID(for: .redact), topicID(for: .fillSign), "several-files", "privacy-safety"]
         case .redact: return [topicID(for: .watermark), topicID(for: .protect), "privacy-safety"]
         case .fillSign: return [topicID(for: .protect), "privacy-safety"]
         case .metadata: return [topicID(for: .protect), topicID(for: .redact), "privacy-safety"]

@@ -660,9 +660,15 @@ struct FillSignToolView: View {
                 try url.withSecurityScopedAccess { PDFDocumentBox(document: PDFDocument(url: url)) }
             }
             guard !Task.isCancelled else { return }
-            pdfDocument = box.document
             if box.document == nil {
                 alertMessage = PDFOperationError.couldNotOpen(url).localizedDescription
+            } else if box.document?.isLocked == true {
+                // A locked document loads "fine" but every page is a blank placeholder — the user
+                // would place text and signatures on empty pages and only learn why at export.
+                // Refuse at load with the same message the export guard uses.
+                alertMessage = PDFOperationError.encryptedInput(url).localizedDescription
+            } else {
+                pdfDocument = box.document
             }
         } catch is CancellationError {
             // Superseded by another document switch; the newer load owns the state.

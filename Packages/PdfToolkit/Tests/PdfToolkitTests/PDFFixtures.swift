@@ -124,6 +124,30 @@ enum PDFFixtures {
         try Data([0xDE, 0xAD, 0xBE, 0xEF]).write(to: url, options: .atomic)
     }
 
+    /// A marker PDF encrypted with an OWNER password only (empty user password): it opens with no
+    /// prompt (`isLocked == false`) yet reports `isEncrypted == true` — the shape of third-party
+    /// "restrictions-only" PDFs. PDFKit's writer can't produce one (`PDFToolkit.encrypt` always
+    /// sets both passwords), so this builds it with CoreGraphics directly.
+    static func writeOwnerRestrictedPDF(markers: [String], to url: URL, ownerPassword: String = "owner-secret") throws {
+        let data = NSMutableData()
+        var mediaBox = CGRect(origin: .zero, size: letter)
+        let consumer = try #require(CGDataConsumer(data: data as CFMutableData))
+        let options: [CFString: Any] = [kCGPDFContextOwnerPassword: ownerPassword]
+        let context = try #require(CGContext(consumer: consumer, mediaBox: &mediaBox, options as CFDictionary))
+        for line in markers {
+            context.beginPDFPage(nil)
+            let attributed = NSAttributedString(
+                string: line,
+                attributes: [.font: NSFont.systemFont(ofSize: 24)]
+            )
+            context.textPosition = CGPoint(x: 72, y: letter.height / 2)
+            CTLineDraw(CTLineCreateWithAttributedString(attributed), context)
+            context.endPDFPage()
+        }
+        context.closePDF()
+        try (data as Data).write(to: url, options: .atomic)
+    }
+
     // Note: the `emptyPDF` guards in `PDFToolkit` are deliberately not fixture-tested. PDFKit's
     // writer cannot persist a zero-page document — an empty (or fully emptied) `PDFDocument` reopens
     // as a one-blank-page file, and a hand-crafted zero-page PDF is rejected on load — so those

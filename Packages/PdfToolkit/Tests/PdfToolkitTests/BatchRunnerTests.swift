@@ -196,6 +196,38 @@ import PDFKit
     // MARK: - Runner finalize path
 
     @MainActor
+    @Test func runnerRowCarriesTheActionableMessageForALockedFile() async throws {
+        // The toolkit's encryptedInput error must survive the runner's localizedDescription
+        // mapping into the per-file row — the one in-app surface a multi-file user actually reads.
+        let dir = FixtureDir()
+        let plain = dir.url("plain.pdf"), locked = dir.url("locked.pdf")
+        try PDFFixtures.writePDF(pageCount: 1, to: plain)
+        try PDFToolkit.encrypt(inputURL: plain, outputURL: locked, password: "secret")
+
+        let defaults = UserDefaults.standard
+        let previousAction = defaults.object(forKey: SettingsKeys.afterExportAction)
+        defaults.set(AfterExportAction.doNothing.rawValue, forKey: SettingsKeys.afterExportAction)
+        defer {
+            if let previousAction { defaults.set(previousAction, forKey: SettingsKeys.afterExportAction) }
+            else { defaults.removeObject(forKey: SettingsKeys.afterExportAction) }
+        }
+
+        let runner = BatchRunner()
+        runner.addURLs([locked])
+        runner.run(operation: .compressQuality(quality: 0.6), into: dir.url)
+        for _ in 0..<250 where runner.isRunning {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        #expect(runner.failedCount == 1)
+        guard case .failed(let message) = runner.items.first?.status else {
+            Issue.record("expected a failed row, got \(String(describing: runner.items.first?.status))")
+            return
+        }
+        #expect(message.contains("password-protected"))
+        #expect(message.contains("Password Protect"))   // the corrected tool name, not "Protect"
+    }
+
+    @MainActor
     @Test func runnerStripsMetadataWhenTheSettingIsOn() async throws {
         // The batch path used to write PDFToolkit output straight to the destination, silently
         // skipping the strip-metadata pass every single-file export applies via the coordinator.

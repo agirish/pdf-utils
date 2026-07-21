@@ -84,7 +84,7 @@ public enum PDFOperationError: LocalizedError {
         case .ocrFailed:
             return "Text recognition failed while rebuilding the PDF."
         case .encryptedInput(let url):
-            return "“\(url.lastPathComponent)” is password-protected. Remove its password first (Protect → Remove password), then try again."
+            return "“\(url.lastPathComponent)” is password-protected. Remove its password first (Password Protect → Remove password), then try again."
         }
     }
 }

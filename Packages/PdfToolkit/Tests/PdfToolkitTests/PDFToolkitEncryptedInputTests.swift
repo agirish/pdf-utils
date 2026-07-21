@@ -172,6 +172,29 @@ import PDFKit
         #expect(reopened.pageCount == 2)
     }
 
+    @Test func ownerRestrictedButUnlockedPDFsStillWorkEverywhere() throws {
+        // The guard must key on isLocked, NOT isEncrypted: an owner-password-only PDF (the shape
+        // of third-party "restrictions-only" files) opens without a prompt and its pages are fully
+        // real. Before this fixture existed, "tightening" the guard to isEncrypted would have kept
+        // all tests green while every operation started refusing such files — the review called
+        // this the best silent-regression window in the guard's design.
+        let dir = FixtureDir()
+        let restricted = dir.url("restricted.pdf")
+        try PDFFixtures.writeOwnerRestrictedPDF(markers: ["MARKERPAGE1", "MARKERPAGE2"], to: restricted)
+
+        let doc = try #require(PDFDocument(url: restricted))
+        #expect(doc.isEncrypted)      // precondition: the fixture really is encrypted…
+        #expect(!doc.isLocked)        // …but not locked — PDFKit opens it implicitly
+
+        // A copy path (the silent-blank-pages family) must produce REAL content, not placeholders.
+        let extracted = dir.url("extracted.pdf")
+        try PDFToolkit.extract(inputURL: restricted, outputURL: extracted, pageIndices: [1])
+        #expect(try PDFFixtures.pageTexts(at: extracted) == ["MARKERPAGE2"])
+
+        // And a rasterizing path must pass the guard too.
+        try PDFToolkit.compress(inputURL: restricted, outputURL: dir.url("compressed.pdf"), quality: 0.5)
+    }
+
     /// Documents WHY the guard exists: pages copied out of a locked document are blank
     /// placeholders, not the real content. If PDFKit ever starts refusing the copy instead,
     /// this test will flag that the guard's rationale (though not the guard) is stale.

@@ -34,7 +34,10 @@ struct UnifiedFilePanel<Config: View>: View {
     var previewSubtitle: String
     /// When true, an encrypted (locked) one-file input shows a "Locked PDF" placeholder instead of a
     /// thumbnail preview it can't render — Protect's remove-password inputs are locked until unlocked.
-    var previewLocksWhenEncrypted: Bool = false
+    // Default ON: every content operation now refuses locked inputs, so every tool's preview
+    // should show the lock placeholder rather than rendering blank placeholder thumbnails that
+    // look like an empty document. (Originally opt-in for Protect only.)
+    var previewLocksWhenEncrypted: Bool = true
     /// Runs the host's single-file save for the one loaded file. The host reads its own controls,
     /// produces the data, routes it through `PDFExportCoordinator`, and shows its save dialog on
     /// `.present`.

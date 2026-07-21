@@ -142,22 +142,26 @@ extension Tool {
         case .merge:
             return ToolHelpContent(
                 overview:
-                    "Merge concatenates whole PDFs in list order: first file’s pages, then the second’s, and so on. The same file can appear twice if you add it twice.",
+                    "Merge combines PDFs in list order: first file’s pages, then the second’s, and so on. By default it takes every page of each file, but you can include only a subset of any file by typing a page range in its Pages field. The same file can appear twice if you add it twice.",
                 steps: [
                     "Click Add PDFs… and select one or more PDFs (⌘-click for multiple), or drag PDFs from Finder onto the dashed area or list.",
+                    "To include only some pages of a file, type a range in its Pages field (for example 1, 3-5). Leave it blank to take the whole file. The row shows how many pages will be used (e.g. “3 of 12 pages”).",
                     "Reorder by dragging rows in the list or with the chevron buttons; Delete removes the selected row; trash removes that file from the merge list only.",
-                    "Watch the preview column on the right: it shows every page in merge order; use the slider to change thumbnail size.",
+                    "Watch the preview column on the right: it shows the pages in merge order. Use the trash on any page to drop it from the output; use the slider to change thumbnail size.",
                     "Click Merge & save…, choose a path in the save panel, then use Start over on the success screen to merge again.",
                 ],
                 controls: [
                     ("Add PDFs…", "Appends chosen PDFs to the list. Order is top to bottom in the merged file."),
+                    ("Pages field", "Which pages of that file to include, like Extract: “1, 3-5” keeps those pages, in the order typed; blank means all pages."),
                     ("Clear all", "Empties the list and clears the preview."),
                     ("↑ / ↓", "Swaps the row with its neighbor—handy for fixing order without re-importing."),
-                    ("Trash", "Removes that entry from the list; it does not delete the file from disk."),
+                    ("Trash (row)", "Removes that entry from the list; it does not delete the file from disk."),
+                    ("Trash (thumbnail)", "Leaves that single page out of the merged PDF. Restore hidden pages brings them all back."),
                     ("Preview slider", "Resizes page thumbnails in the right-hand preview."),
-                    ("Merge & save…", "Opens the save panel, then writes one combined PDF from every listed file."),
+                    ("Merge & save…", "Opens the save panel, then writes one combined PDF from the pages you chose."),
                 ],
                 tips: [
+                    "A page range keeps the order you type (for example 5,1,2), just like Extract.",
                     "Large merges can take a moment; the window should stay responsive while working.",
                 ]
             )

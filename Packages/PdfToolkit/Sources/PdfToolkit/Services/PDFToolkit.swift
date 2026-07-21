@@ -99,34 +99,58 @@ public enum PDFToolkit {
         }
     }
 
-    /// Merges PDFs in the order given, copying each source page into the result.
+    /// Merges whole PDFs in the order given, copying every source page into the result.
     public static func merge(inputURLs: [URL], outputURL: URL) throws {
         try requireDistinctOutput(outputURL, from: inputURLs)
         try writeOutput(try mergeData(inputURLs: inputURLs), to: outputURL)
     }
 
-    /// In-memory core of ``merge(inputURLs:outputURL:)`` — the tool views consume the bytes
-    /// directly, skipping the temp-file round trip.
+    /// Merges a per-input page selection in list order.
+    public static func merge(inputs: [(url: URL, pageIndices: [Int]?)], outputURL: URL) throws {
+        try requireDistinctOutput(outputURL, from: inputs.map(\.url))
+        try writeOutput(try mergeData(inputs: inputs), to: outputURL)
+    }
+
+    /// In-memory core of ``merge(inputURLs:outputURL:)`` — whole files, every page.
+    internal static func mergeData(inputURLs: [URL]) throws -> Data {
+        try mergeData(inputs: inputURLs.map { (url: $0, pageIndices: nil) })
+    }
+
+    /// In-memory core of the merge, with a per-input page selection — the tool views consume the
+    /// bytes directly, skipping the temp-file round trip.
+    ///
+    /// Each input carries `pageIndices`: `nil` copies **every** page of that file (the whole-file
+    /// default), a non-nil array copies exactly those zero-based pages **in the order given**
+    /// (duplicates allowed, so a caller can reorder or repeat within a file), and an empty array
+    /// contributes no pages from that input. At least one page must survive across all inputs, or
+    /// `noPagesSelected` is thrown — PDFKit cannot persist a zero-page document.
     ///
     /// Uses `page.copy()` rather than moving the original page out of its document — the same
     /// approach as `extract`/`split`. Inserting a page that still belongs to another live
     /// `PDFDocument` hangs on macOS 26 (PDFKit spins building an `NSOrderedSet` inside
     /// `insertPage:atIndex:`), which would freeze every merge; copying detaches the page first and
     /// sidesteps it.
-    internal static func mergeData(inputURLs: [URL]) throws -> Data {
-        guard !inputURLs.isEmpty else { throw PDFOperationError.noInputFiles }
+    internal static func mergeData(inputs: [(url: URL, pageIndices: [Int]?)]) throws -> Data {
+        guard !inputs.isEmpty else { throw PDFOperationError.noInputFiles }
 
         let merged = PDFDocument()
-        for url in inputURLs {
-            let doc = try openUnlockedDocument(at: url)
-            for i in 0..<doc.pageCount {
+        for input in inputs {
+            let doc = try openUnlockedDocument(at: input.url)
+            let indices = input.pageIndices ?? Array(0..<doc.pageCount)
+            for i in indices {
+                guard i >= 0, i < doc.pageCount else {
+                    throw PDFOperationError.pageOutOfBounds(i + 1)
+                }
                 guard let copy = doc.page(at: i)?.copy() as? PDFPage else {
-                    throw PDFOperationError.couldNotOpen(url)
+                    throw PDFOperationError.couldNotOpen(input.url)
                 }
                 merged.insert(copy, at: merged.pageCount)
             }
         }
 
+        // A selection that copies nothing (every page dropped/filtered out) would otherwise be
+        // written as a one-blank-page file by PDFKit's writer — refuse it with a clear error instead.
+        guard merged.pageCount > 0 else { throw PDFOperationError.noPagesSelected }
         guard let data = merged.dataRepresentation() else {
             throw PDFOperationError.couldNotEncodeOutput
         }

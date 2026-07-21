@@ -6,12 +6,25 @@ import UniformTypeIdentifiers
 private struct MergeEntry: Identifiable, Equatable {
     let id = UUID()
     let url: URL
+    /// The pages to take from this file, as an Extract-style range string. Empty = all pages (the
+    /// default, and the original whole-file behavior). Honors the order typed (e.g. "5,1,2").
+    var rangeText: String = ""
 }
 
 private struct MergeResult {
     let outputURL: URL
     let totalPages: Int
     let fileBytes: Int64
+}
+
+/// The merged document's pages as they will be written: virtualized preview specs in output order,
+/// a lookup from each global page number back to its source (for the render closure and inline
+/// page-drop), and the effective total. Derived purely from the queue, page counts, ranges, and
+/// drops — no rendering — so a range edit, reorder, or page-drop reshapes it instantly.
+private struct MergePreviewLayout {
+    var specs: [PreviewPageSpec] = []
+    var lookup: [Int: (entryID: UUID, url: URL, pageIndex: Int)] = [:]
+    var totalPages: Int { specs.count }
 }
 
 struct MergeToolView: View {
@@ -23,19 +36,15 @@ struct MergeToolView: View {
     @State private var selectedEntryID: UUID?
     @State private var isDropTargeted = false
     @State private var pagesByEntryID: [UUID: Int] = [:]
-    /// Entries whose file is password-locked: badged in the list, excluded from `totalPages`, and
+    /// Entries whose file is password-locked: badged in the list, excluded from the total, and
     /// absent from the preview strip — without this the header counted a locked file's real pages
     /// (locked docs report them) while the strip silently skipped it, and the two contradicted.
     @State private var lockedEntryIDs: Set<UUID> = []
-    @State private var totalPages = 0
+    /// Pages excluded via the inline trash on the combined preview, per file (zero-based indices).
+    @State private var droppedByEntryID: [UUID: Set<Int>] = [:]
     @State private var pageSummaryLoading = false
 
     @State private var thumbnailSize: CGFloat = 120
-    /// The merged document's pages in visual order, derived from (entries, page counts) whenever
-    /// the summary refreshes. Cells render on demand; a pure reorder of entries is cache hits.
-    @State private var previewSpecs: [PreviewPageSpec] = []
-    /// Global page number → (file, local page index) for the render closure.
-    @State private var previewPageLookup: [Int: (URL, Int)] = [:]
 
     @State private var mergeResult: MergeResult?
 
@@ -48,31 +57,7 @@ struct MergeToolView: View {
             if let result = mergeResult {
                 successView(result)
             } else {
-                // HSplitView avoids NavigationSplitView nested inside NavigationStack (broken columns, hidden controls).
-                HSplitView {
-                    sidebarColumn
-                        .toolSidebarWidth()
-                    SinglePDFPreviewColumn(
-                        pages: previewSpecs,
-                        isGenerating: pageSummaryLoading,
-                        thumbnailSize: $thumbnailSize,
-                        accent: accent,
-                        previewSubtitle: "Visual order of the merged pages (matches the list on the left).",
-                        // Files queued but nothing previewable means every entry is locked — say
-                        // that, instead of the "No PDFs selected" copy that contradicted the list.
-                        emptyTitle: entries.isEmpty ? "No PDFs selected for merge" : "Only password-protected PDFs",
-                        emptySubtitle: entries.isEmpty
-                            ? "Add PDFs in the sidebar or drop PDFs onto the list."
-                            : "These files can't be previewed or merged until their passwords are removed (Password Protect → Remove password).",
-                        emptySystemImage: entries.isEmpty ? "doc.on.doc" : "lock.fill",
-                        render: { spec in
-                            guard let target = previewPageLookup[spec.id] else { return nil }
-                            return (try? await PDFPageThumbnailLoader.loadPage(from: target.0, pageIndex: target.1))?.image
-                        }
-                    )
-                    .frame(minWidth: 360)
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                mergeWorkspace
             }
         }
         .overlay {
@@ -106,6 +91,38 @@ struct MergeToolView: View {
         }
     }
 
+    // HSplitView avoids NavigationSplitView nested inside NavigationStack (broken columns, hidden controls).
+    private var mergeWorkspace: some View {
+        // Compute the layout once per body pass so the preview strip and its render/drop closures
+        // all read the same page→source mapping.
+        let layout = previewLayout
+        return HSplitView {
+            sidebarColumn(effectivePages: layout.totalPages)
+                .toolSidebarWidth()
+            SinglePDFPreviewColumn(
+                pages: layout.specs,
+                isGenerating: pageSummaryLoading,
+                thumbnailSize: $thumbnailSize,
+                accent: accent,
+                previewSubtitle: "The pages of the merged file, in order — use the trash on any page to leave it out.",
+                // Files queued but nothing previewable means every entry is locked — say that,
+                // instead of the "No PDFs selected" copy that would contradict the list.
+                emptyTitle: entries.isEmpty ? "No PDFs selected for merge" : "Only password-protected PDFs",
+                emptySubtitle: entries.isEmpty
+                    ? "Add PDFs in the sidebar or drop PDFs onto the list."
+                    : "These files can't be previewed or merged until their passwords are removed (Password Protect → Remove password).",
+                emptySystemImage: entries.isEmpty ? "doc.on.doc" : "lock.fill",
+                onDeletePage: dropPreviewPage,
+                render: { spec in
+                    guard let target = layout.lookup[spec.id] else { return nil }
+                    return (try? await PDFPageThumbnailLoader.loadPage(from: target.url, pageIndex: target.pageIndex))?.image
+                }
+            )
+            .frame(minWidth: 360)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
     // MARK: - Success
 
     private func successView(_ result: MergeResult) -> some View {
@@ -123,11 +140,7 @@ struct MergeToolView: View {
             },
             onDoAnother: {
                 withAnimation {
-                    entries.removeAll()
-                    previewSpecs = []
-                    previewPageLookup = [:]
-                    pagesByEntryID = [:]
-                    totalPages = 0
+                    resetAll()
                     mergeResult = nil
                 }
             }
@@ -136,7 +149,7 @@ struct MergeToolView: View {
 
     // MARK: - Sidebar
 
-    private var sidebarColumn: some View {
+    private func sidebarColumn(effectivePages: Int) -> some View {
         VStack(spacing: 0) {
             VStack(alignment: .leading, spacing: 14) {
                 headerRow
@@ -145,7 +158,7 @@ struct MergeToolView: View {
                     if entries.isEmpty {
                         emptyMergeDropZone
                     } else {
-                        listCard
+                        listCard(effectivePages: effectivePages)
                     }
                 }
                 .onDrop(of: [.pdf, .fileURL], isTargeted: $isDropTargeted) { providers in
@@ -184,12 +197,7 @@ struct MergeToolView: View {
                 HStack(spacing: 10) {
                     if !entries.isEmpty {
                         Button("Clear all") {
-                            entries.removeAll()
-                            previewSpecs = []
-                            previewPageLookup = [:]
-                            pagesByEntryID = [:]
-                            totalPages = 0
-                            selectedEntryID = nil
+                            resetAll()
                         }
                         .buttonStyle(.borderless)
                         .font(.subheadline.weight(.medium))
@@ -220,7 +228,7 @@ struct MergeToolView: View {
                 .foregroundStyle(accent.opacity(0.85))
             Text("Drop PDFs here or add files")
                 .font(.title3.weight(.semibold))
-            Text("Files are combined top to bottom. Preview updates on the right.")
+            Text("Files are combined top to bottom. Set page ranges per file; preview updates on the right.")
                 .font(.body)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
@@ -244,18 +252,30 @@ struct MergeToolView: View {
         .accessibilityLabel("Merge list is empty. Drop PDF files or use choose PDFs.")
     }
 
-    private var listCard: some View {
+    private func listCard(effectivePages: Int) -> some View {
         VStack(alignment: .leading, spacing: 8) {
-            if totalPages > 0 || !lockedEntryIDs.isEmpty {
-                Text(mergeSummaryLine)
-                    .font(.subheadline.weight(.medium))
-                    .foregroundStyle(.secondary)
-                    .padding(.horizontal, 4)
+            if rawUnlockedTotal > 0 || !lockedEntryIDs.isEmpty {
+                HStack(alignment: .firstTextBaseline) {
+                    Text(mergeSummaryLine(effectivePages: effectivePages))
+                        .font(.subheadline.weight(.medium))
+                        .foregroundStyle(.secondary)
+                    Spacer(minLength: 8)
+                    if droppedPageCount > 0 {
+                        Button("Restore \(droppedPageCount) hidden page\(droppedPageCount == 1 ? "" : "s")") {
+                            droppedByEntryID = [:]
+                        }
+                        .buttonStyle(.borderless)
+                        .font(.caption.weight(.medium))
+                        .foregroundStyle(accent)
+                        .help("Bring back every page dropped from the preview")
+                    }
+                }
+                .padding(.horizontal, 4)
             }
 
             List(selection: $selectedEntryID) {
-                ForEach(entries) { entry in
-                    mergeRow(for: entry)
+                ForEach($entries) { $entry in
+                    mergeRow(entry: $entry)
                         .listRowInsets(EdgeInsets(top: 6, leading: 12, bottom: 6, trailing: 8))
                         .listRowBackground(rowBackground)
                         .tag(Optional(entry.id))
@@ -264,7 +284,7 @@ struct MergeToolView: View {
             }
             .listStyle(.plain)
             .scrollContentBackground(.hidden)
-            .frame(minHeight: 160, idealHeight: 240, maxHeight: 360)
+            .frame(minHeight: 200, idealHeight: 320, maxHeight: 460)
             .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
             .overlay {
                 RoundedRectangle(cornerRadius: 12, style: .continuous)
@@ -276,10 +296,18 @@ struct MergeToolView: View {
         }
     }
 
-    /// The header total counts only mergeable pages; locked entries are called out separately so
-    /// the number always matches what the preview strip shows.
-    private var mergeSummaryLine: String {
-        let base = "\(totalPages) page\(totalPages == 1 ? "" : "s") across \(entries.count) file\(entries.count == 1 ? "" : "s")"
+    /// The header total counts only mergeable, still-selected pages; locked entries are called out
+    /// separately so the number always matches what the preview strip shows.
+    private func mergeSummaryLine(effectivePages: Int) -> String {
+        let files = entries.count
+        let fileWord = files == 1 ? "file" : "files"
+        let raw = rawUnlockedTotal
+        let base: String
+        if effectivePages == raw {
+            base = "\(raw) page\(raw == 1 ? "" : "s") across \(files) \(fileWord)"
+        } else {
+            base = "\(effectivePages) of \(raw) pages across \(files) \(fileWord)"
+        }
         guard !lockedEntryIDs.isEmpty else { return base }
         return base + " — \(lockedEntryIDs.count) password-protected"
     }
@@ -289,78 +317,171 @@ struct MergeToolView: View {
             .fill(Color.primary.opacity(0.025))
     }
 
-    private func mergeRow(for entry: MergeEntry) -> some View {
-        let index = entries.firstIndex(where: { $0.id == entry.id }) ?? 0
-        return HStack(alignment: .center, spacing: 12) {
+    private func mergeRow(entry: Binding<MergeEntry>) -> some View {
+        let value = entry.wrappedValue
+        let index = entries.firstIndex(where: { $0.id == value.id }) ?? 0
+        let locked = lockedEntryIDs.contains(value.id)
+        return HStack(alignment: .top, spacing: 12) {
             RowIndexBadge(number: index + 1, accent: accent)
 
-            VStack(alignment: .leading, spacing: 4) {
-                Text(entry.url.lastPathComponent)
+            VStack(alignment: .leading, spacing: 6) {
+                Text(value.url.lastPathComponent)
                     .lineLimit(1)
                     .truncationMode(.middle)
                     .font(.callout.weight(.medium))
-                if lockedEntryIDs.contains(entry.id) {
+
+                if locked {
+                    // A locked file can't be previewed or merged, so it gets no page range field —
+                    // the badge is the whole story until its password is removed.
                     Label("Password-protected — can't merge", systemImage: "lock.fill")
                         .font(.subheadline)
                         .foregroundStyle(.orange)
-                } else if let pages = pagesByEntryID[entry.id] {
-                    Text("\(pages) page\(pages == 1 ? "" : "s")")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                } else if pageSummaryLoading {
-                    Text("Reading pages…")
-                        .font(.subheadline)
-                        .foregroundStyle(.tertiary)
+                } else {
+                    pageCountLabel(for: value)
+                    TextField("e.g. 1, 3-5 · all pages", text: entry.rangeText)
+                        .textFieldStyle(.roundedBorder)
+                        .font(.callout)
+                        .accessibilityLabel("Pages to include from \(value.url.lastPathComponent)")
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
 
-            HStack(spacing: 2) {
-                Button {
-                    moveEntry(from: index, by: -1)
+            VStack(spacing: 6) {
+                HStack(spacing: 2) {
+                    Button {
+                        moveEntry(from: index, by: -1)
+                    } label: {
+                        Image(systemName: "chevron.up")
+                            .font(.body.weight(.medium))
+                    }
+                    .buttonStyle(.borderless)
+                    .disabled(index == 0)
+                    .help("Move up")
+
+                    Button {
+                        moveEntry(from: index, by: 1)
+                    } label: {
+                        Image(systemName: "chevron.down")
+                            .font(.body.weight(.medium))
+                    }
+                    .buttonStyle(.borderless)
+                    .disabled(index == entries.count - 1)
+                    .help("Move down")
+                }
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
+                .background {
+                    Capsule()
+                        .fill(Color(nsColor: .controlBackgroundColor).opacity(0.65))
+                }
+
+                Button(role: .destructive) {
+                    removeEntry(at: index)
                 } label: {
-                    Image(systemName: "chevron.up")
-                        .font(.body.weight(.medium))
+                    Image(systemName: "trash")
                 }
                 .buttonStyle(.borderless)
-                .disabled(index == 0)
-                .help("Move up")
-
-                Button {
-                    moveEntry(from: index, by: 1)
-                } label: {
-                    Image(systemName: "chevron.down")
-                        .font(.body.weight(.medium))
-                }
-                .buttonStyle(.borderless)
-                .disabled(index == entries.count - 1)
-                .help("Move down")
+                .help("Remove from list")
             }
-            .padding(.horizontal, 8)
-            .padding(.vertical, 4)
-            .background {
-                Capsule()
-                    .fill(Color(nsColor: .controlBackgroundColor).opacity(0.65))
-            }
-
-            Button(role: .destructive) {
-                removeEntry(at: index)
-            } label: {
-                Image(systemName: "trash")
-            }
-            .buttonStyle(.borderless)
-            .help("Remove from list")
         }
         .padding(.vertical, 4)
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel("Position \(index + 1), \(entry.url.lastPathComponent)")
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Position \(index + 1), \(value.url.lastPathComponent)")
+    }
+
+    /// The "X of N pages" (or plain "N pages") summary for one row, or a warning when its range can't
+    /// be parsed — matching how Extract/Split surface bad ranges, but non-blocking while typing.
+    @ViewBuilder
+    private func pageCountLabel(for entry: MergeEntry) -> some View {
+        if let plan = pagePlan(for: entry) {
+            if !plan.valid {
+                Label("Check the page range", systemImage: "exclamationmark.triangle.fill")
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(.orange)
+            } else if plan.indices.count == plan.rawCount {
+                Text("\(plan.rawCount) page\(plan.rawCount == 1 ? "" : "s")")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            } else {
+                Text("\(plan.indices.count) of \(plan.rawCount) pages")
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(accent)
+            }
+        } else if pageSummaryLoading {
+            Text("Reading pages…")
+                .font(.caption)
+                .foregroundStyle(.tertiary)
+        }
     }
 
     private var sidebarSubtitle: String {
         if entries.isEmpty {
-            return "Add PDFs — order is top to bottom in the merged file. Preview appears on the right."
+            return "Add PDFs — order is top to bottom in the merged file. Set a page range per file, or leave it blank for all pages."
         }
-        return "Drag more PDFs here to append. Reorder rows or use arrows; Delete removes the selection."
+        return "Type pages per file (e.g. 1, 3-5); blank = all. Reorder rows with the arrows; Delete removes the selection."
+    }
+
+    // MARK: - Page plans & combined preview
+
+    /// The pages one row contributes, resolved for the live UI (counts, preview) — never throws.
+    ///
+    /// Returns nil for a locked file or until the file's page count is known. `indices` are the
+    /// zero-based pages in output order (empty range = all pages), with inline-dropped pages
+    /// removed. `valid` is false when the range text can't be parsed yet; the preview then falls
+    /// back to all pages (minus drops) so pages don't blink out mid-type, while the row shows a
+    /// "check the range" warning and the actual export re-parses strictly and surfaces the error.
+    private func pagePlan(for entry: MergeEntry) -> (indices: [Int], valid: Bool, rawCount: Int)? {
+        guard !lockedEntryIDs.contains(entry.id),
+              let rawCount = pagesByEntryID[entry.id], rawCount > 0 else { return nil }
+        let dropped = droppedByEntryID[entry.id] ?? []
+        let trimmed = entry.rangeText.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        let baseIndices: [Int]
+        let valid: Bool
+        if trimmed.isEmpty {
+            baseIndices = Array(0..<rawCount)
+            valid = true
+        } else if let parsed = try? PageRangeParser.parse(
+            trimmed, pageCount: rawCount, emptyMeansAllPages: true, preserveOrder: true
+        ) {
+            baseIndices = parsed
+            valid = true
+        } else {
+            baseIndices = Array(0..<rawCount)
+            valid = false
+        }
+
+        return (baseIndices.filter { !dropped.contains($0) }, valid, rawCount)
+    }
+
+    /// The preview strip as a pure function of the queue, page counts, ranges, and drops. Global
+    /// page numbers run top to bottom across entries; each cell's cache key is content-addressed to
+    /// its own file + local page (matching every other grid), so reordering rows, editing a range,
+    /// or dropping a page re-maps positions to already-rendered cells instead of re-rendering.
+    /// Locked entries have no plan and therefore no cells — the row's lock badge and the header
+    /// summary carry the explanation, and the run itself surfaces the hard error.
+    private var previewLayout: MergePreviewLayout {
+        var layout = MergePreviewLayout()
+        var globalPage = 1
+        for entry in entries {
+            guard let plan = pagePlan(for: entry) else { continue }
+            let base = PreviewPageSpec.fileKey(for: entry.url)
+            for local in plan.indices {
+                layout.specs.append(PreviewPageSpec(id: globalPage, cacheKey: "\(base)#\(local)"))
+                layout.lookup[globalPage] = (entry.id, entry.url, local)
+                globalPage += 1
+            }
+        }
+        return layout
+    }
+
+    /// Raw mergeable pages (locked files excluded), the denominator of the "X of N" summary.
+    private var rawUnlockedTotal: Int {
+        entries.reduce(0) { $0 + (lockedEntryIDs.contains($1.id) ? 0 : (pagesByEntryID[$1.id] ?? 0)) }
+    }
+
+    private var droppedPageCount: Int {
+        droppedByEntryID.values.reduce(0) { $0 + $1.count }
     }
 
     // MARK: - Actions
@@ -400,6 +521,7 @@ struct MergeToolView: View {
         guard entries.indices.contains(index) else { return }
         let removed = entries[index].id
         entries.remove(at: index)
+        droppedByEntryID[removed] = nil
         if selectedEntryID == removed {
             selectedEntryID = nil
         }
@@ -410,6 +532,23 @@ struct MergeToolView: View {
         removeEntry(at: idx)
     }
 
+    /// Drops one combined-preview page (its 1-based global position) from the merge. Never drops the
+    /// last remaining page — the output must keep at least one — so the preview can't be emptied.
+    private func dropPreviewPage(atPosition position: Int) {
+        let layout = previewLayout
+        guard layout.specs.count > 1, let target = layout.lookup[position] else { return }
+        droppedByEntryID[target.entryID, default: []].insert(target.pageIndex)
+    }
+
+    private func resetAll() {
+        entries.removeAll()
+        pagesByEntryID = [:]
+        lockedEntryIDs = []
+        droppedByEntryID = [:]
+        selectedEntryID = nil
+        pageSummaryLoading = false
+    }
+
     // @MainActor with a synchronous head: the guards and installs before the first await run
     // atomically with task entry, so a superseded pass can no longer resume from a pre-head
     // suspension AFTER the newer pass finished and set the spinner nothing would clear — the last
@@ -418,10 +557,12 @@ struct MergeToolView: View {
     private func refreshPageSummary() async {
         guard !Task.isCancelled else { return }
         let snapshot = entries
+        // Drop stale page-drops for files no longer in the list before anything else.
+        let liveIDs = Set(snapshot.map(\.id))
+        droppedByEntryID = droppedByEntryID.filter { liveIDs.contains($0.key) }
         guard !snapshot.isEmpty else {
             pagesByEntryID = [:]
             lockedEntryIDs = []
-            totalPages = 0
             pageSummaryLoading = false
             return
         }
@@ -429,7 +570,6 @@ struct MergeToolView: View {
         pageSummaryLoading = true
         pagesByEntryID = [:]
         lockedEntryIDs = []
-        totalPages = 0
         do {
             let summary: (counts: [UUID: Int], locked: Set<UUID>) = try await PDFBackgroundWork.run {
                 try URLCollectionSecurityScope.withAccess(urls) {
@@ -458,52 +598,30 @@ struct MergeToolView: View {
             guard !Task.isCancelled else { return }
             pagesByEntryID = summary.counts
             lockedEntryIDs = summary.locked
-            totalPages = summary.counts.values.reduce(0, +)
-            // Locked entries carry no count, so the layout skips them by construction — the strip,
-            // the header total, and the run's refusal all tell the same story.
-            (previewSpecs, previewPageLookup) = Self.previewLayout(entries: snapshot, pages: summary.counts)
             pageSummaryLoading = false
         } catch {
             guard !Task.isCancelled else { return }
             pagesByEntryID = [:]
             lockedEntryIDs = []
-            totalPages = 0
-            previewSpecs = []
-            previewPageLookup = [:]
             pageSummaryLoading = false
         }
-    }
-
-    /// The preview strip as a pure function of the queue and its page counts: global page numbers
-    /// run top to bottom across entries, and each cell's cache key is content-addressed to its own
-    /// file + local page — so reordering (or re-adding) entries re-maps positions to already
-    /// rendered cells instead of re-rendering, and a duplicate entry's pages share their renders.
-    /// Locked entries have no count and therefore no cells — the row's lock badge and the header
-    /// summary carry the explanation, and the run itself surfaces the hard error.
-    private static func previewLayout(
-        entries: [MergeEntry],
-        pages: [UUID: Int]
-    ) -> ([PreviewPageSpec], [Int: (URL, Int)]) {
-        var specs: [PreviewPageSpec] = []
-        var lookup: [Int: (URL, Int)] = [:]
-        var globalPage = 1
-        for entry in entries {
-            let count = pages[entry.id] ?? 0
-            guard count > 0 else { continue }
-            let base = PreviewPageSpec.fileKey(for: entry.url)
-            for local in 0..<count {
-                specs.append(PreviewPageSpec(id: globalPage, cacheKey: "\(base)#\(local)"))
-                lookup[globalPage] = (entry.url, local)
-                globalPage += 1
-            }
-        }
-        return (specs, lookup)
     }
 
     @MainActor
     private func runMerge() async {
         guard !entries.isEmpty else {
             alertMessage = PDFOperationError.noInputFiles.localizedDescription
+            return
+        }
+
+        // Resolve every row's pages up front so an unparseable range (or a page outside the file) is
+        // reported the same way Extract/Split do — before the user is asked to pick a destination.
+        let plans: [(url: URL, pageIndices: [Int]?)]
+        do {
+            plans = try makeMergePlans()
+        } catch {
+            alertMessage = error.localizedDescription
+            ActivityLog.shared.error("\(Tool.merge.title) failed: \(error.localizedDescription)")
             return
         }
 
@@ -532,17 +650,17 @@ struct MergeToolView: View {
             AppStateManager.shared.endOperation(Tool.merge.title)
         }
 
-        let urlsSnapshot = entries.map(\.url)
+        let urlsSnapshot = plans.map(\.url)
         let stripMetadata = UserDefaults.standard.bool(forKey: SettingsKeys.stripMetadataOnExport)
 
         do {
-            // Materialize the merged bytes in a temp file first, then land them atomically: writing
-            // the PDFDocument straight onto the destination would truncate an existing file before
-            // the merge finished serializing, so a mid-write failure (full disk, crash) destroys
+            // Materialize the merged bytes in memory, then land them atomically: writing the
+            // PDFDocument straight onto the destination would truncate an existing file before the
+            // merge finished serializing, so a mid-write failure (full disk, crash) destroys
             // whatever the user chose to replace. Every single-file tool already works this way.
             try await PDFBackgroundWork.run {
                 let merged = try URLCollectionSecurityScope.withAccess(urlsSnapshot) {
-                    try PDFToolkit.mergeData(inputURLs: urlsSnapshot)
+                    try PDFToolkit.mergeData(inputs: plans)
                 }
                 // Honor the Files-tab "Strip metadata on export" setting, exactly like the
                 // single-file tools do via PDFExportCoordinator.route.
@@ -568,6 +686,22 @@ struct MergeToolView: View {
         }
     }
 
+    /// Turns each row into a merge input via ``MergePageSelection/resolve(rangeText:dropped:pageCount:)``
+    /// — blank-and-undropped rows stay `nil` (whole file), the rest resolve to their chosen pages in
+    /// typed order minus any inline-dropped pages. Throws the same errors Extract raises on a bad
+    /// range so the run surfaces them identically. A locked file resolves to `nil` here and fails at
+    /// merge time with the actionable encryptedInput error, exactly as before.
+    private func makeMergePlans() throws -> [(url: URL, pageIndices: [Int]?)] {
+        try entries.map { entry in
+            let indices = try MergePageSelection.resolve(
+                rangeText: entry.rangeText,
+                dropped: droppedByEntryID[entry.id] ?? [],
+                pageCount: pagesByEntryID[entry.id] ?? 0
+            )
+            return (entry.url, indices)
+        }
+    }
+
     private func formatBytes(_ bytes: Int64) -> String {
         let formatter = ByteCountFormatter()
         formatter.allowedUnits = [.useAll]
@@ -575,4 +709,3 @@ struct MergeToolView: View {
         return formatter.string(fromByteCount: bytes)
     }
 }
-

@@ -81,4 +81,99 @@ import PDFKit
         // A failed merge leaves no output file behind.
         #expect(!FileManager.default.fileExists(atPath: out.path))
     }
+
+    // MARK: - Per-file page selection (merge(inputs:))
+
+    @Test func perFileSelectionKeepsChosenPagesInFileOrder() throws {
+        // A: keep pages 1,3,5 of 5; B: keep page 2 of 3. Output = A1, A3, A5, B2.
+        let dir = FixtureDir()
+        let a = dir.url("a.pdf"), b = dir.url("b.pdf"), out = dir.url("out.pdf")
+        try PDFFixtures.writePDF(markers: ["A1", "A2", "A3", "A4", "A5"], to: a)
+        try PDFFixtures.writePDF(markers: ["B1", "B2", "B3"], to: b)
+
+        try PDFToolkit.merge(inputs: [(a, [0, 2, 4]), (b, [1])], outputURL: out)
+
+        let texts = try PDFFixtures.pageTexts(at: out)
+        #expect(texts.count == 4)
+        #expect(texts[0].contains("A1"))
+        #expect(texts[1].contains("A3"))
+        #expect(texts[2].contains("A5"))
+        #expect(texts[3].contains("B2"))
+    }
+
+    @Test func nilSelectionMeansEveryPageOfThatFile() throws {
+        // nil = whole file; mix a whole file with a subset of another.
+        let dir = FixtureDir()
+        let a = dir.url("a.pdf"), b = dir.url("b.pdf"), out = dir.url("out.pdf")
+        try PDFFixtures.writePDF(markers: ["A1", "A2"], to: a)
+        try PDFFixtures.writePDF(markers: ["B1", "B2", "B3"], to: b)
+
+        try PDFToolkit.merge(inputs: [(a, nil), (b, [2])], outputURL: out)
+
+        let texts = try PDFFixtures.pageTexts(at: out)
+        #expect(texts.count == 3)
+        #expect(texts[0].contains("A1"))
+        #expect(texts[1].contains("A2"))
+        #expect(texts[2].contains("B3"))
+    }
+
+    @Test func perFileSelectionHonorsTypedOrderWithinAFile() throws {
+        // Order inside a file's selection is preserved (5,1,2-style), matching Extract.
+        let dir = FixtureDir()
+        let a = dir.url("a.pdf"), out = dir.url("out.pdf")
+        try PDFFixtures.writePDF(markers: ["P1", "P2", "P3"], to: a)
+
+        try PDFToolkit.merge(inputs: [(a, [2, 0])], outputURL: out)
+
+        let texts = try PDFFixtures.pageTexts(at: out)
+        #expect(texts.count == 2)
+        #expect(texts[0].contains("P3"))
+        #expect(texts[1].contains("P1"))
+    }
+
+    @Test func emptySelectionContributesNoPagesFromThatFile() throws {
+        // A file with an empty selection is skipped; the others still merge.
+        let dir = FixtureDir()
+        let a = dir.url("a.pdf"), b = dir.url("b.pdf"), out = dir.url("out.pdf")
+        try PDFFixtures.writePDF(markers: ["A1", "A2"], to: a)
+        try PDFFixtures.writePDF(markers: ["B1"], to: b)
+
+        try PDFToolkit.merge(inputs: [(a, []), (b, nil)], outputURL: out)
+
+        let texts = try PDFFixtures.pageTexts(at: out)
+        #expect(texts.count == 1)
+        #expect(texts[0].contains("B1"))
+    }
+
+    @Test func selectingNoPagesAnywhereThrowsNoPagesSelected() throws {
+        // Every file empty ⇒ a zero-page result, which PDFKit can't persist — refuse it up front.
+        let dir = FixtureDir()
+        let a = dir.url("a.pdf"), b = dir.url("b.pdf"), out = dir.url("out.pdf")
+        try PDFFixtures.writePDF(markers: ["A1"], to: a)
+        try PDFFixtures.writePDF(markers: ["B1"], to: b)
+
+        #expect(#expect(throws: PDFOperationError.self) {
+            try PDFToolkit.merge(inputs: [(a, []), (b, [])], outputURL: out)
+        }?.kind == "noPagesSelected")
+        #expect(!FileManager.default.fileExists(atPath: out.path))
+    }
+
+    @Test func outOfBoundsSelectionThrowsPageOutOfBounds() throws {
+        let dir = FixtureDir()
+        let a = dir.url("a.pdf"), out = dir.url("out.pdf")
+        try PDFFixtures.writePDF(markers: ["A1", "A2"], to: a)
+
+        let error = #expect(throws: PDFOperationError.self) {
+            try PDFToolkit.merge(inputs: [(a, [5])], outputURL: out)
+        }
+        #expect(error?.kind == "pageOutOfBounds")
+        #expect(!FileManager.default.fileExists(atPath: out.path))
+    }
+
+    @Test func emptyInputsListThrowsNoInputFiles() {
+        let dir = FixtureDir()
+        #expect(#expect(throws: PDFOperationError.self) {
+            try PDFToolkit.merge(inputs: [], outputURL: dir.url("out.pdf"))
+        }?.kind == "noInputFiles")
+    }
 }

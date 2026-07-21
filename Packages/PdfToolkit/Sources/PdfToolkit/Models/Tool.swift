@@ -46,7 +46,7 @@ public enum Tool: String, CaseIterable, Identifiable, Hashable {
         case .rotate:
             return "Turn pages 90° at a time"
         case .merge:
-            return "Combine PDFs in order"
+            return "Combine PDFs, whole or by page"
         case .split:
             return "Break one PDF into several files"
         case .extract:
@@ -82,7 +82,7 @@ public enum Tool: String, CaseIterable, Identifiable, Hashable {
         case .rotate:
             return "Turn every page or only the pages you list. Rotation is written into a new PDF; your original file stays untouched until you save over it from the save panel."
         case .merge:
-            return "Stack several PDFs into one file in the order shown. Use the arrows beside each row to change order, or remove a file from the list without deleting it from disk."
+            return "Stack several PDFs into one file in the order shown. Take only some pages of a file by typing a range in its Pages field (for example 1, 3-5); leave it blank for all pages. Reorder rows with the arrows, or drop a stray page straight from the combined preview."
         case .split:
             return "Cut one PDF into several. Split into fixed chunks of N pages, or list custom page ranges where each group becomes its own file. Parts are written into a folder you choose; the original file stays untouched."
         case .extract:

@@ -29,6 +29,12 @@ struct SinglePDFPreviewColumn: View {
     /// Optional one-line hint shown under the subtitle while selecting, explaining what a click does.
     var selectionPrompt: String? = nil
 
+    /// Invoked with a cell's 1-based display number to *remove* that page from the preview (Merge's
+    /// inline page-drop). When non-nil, each thumbnail gains a small trash button. Independent of the
+    /// selection layer above — Merge sets this and leaves `selectedPages`/`onTogglePage` nil, so the
+    /// pages render as plain (non-toggleable) previews that can each be dropped.
+    var onDeletePage: ((Int) -> Void)? = nil
+
     /// Produces one cell's image off the main actor (PDF pages via the loader's serial queue,
     /// image files via ImageIO). Runs when a cell appears and its key misses the shared cache.
     var render: (PreviewPageSpec) async -> NSImage?
@@ -167,6 +173,12 @@ struct SinglePDFPreviewColumn: View {
                             .padding(7)
                     }
                 }
+                .overlay(alignment: .topTrailing) {
+                    if let onDeletePage {
+                        deleteBadge(pageNumber: spec.id) { onDeletePage(spec.id) }
+                            .padding(7)
+                    }
+                }
 
             Text("\(spec.id)")
                 .font(.caption.weight(.bold))
@@ -179,6 +191,21 @@ struct SinglePDFPreviewColumn: View {
         }
         // Selected pages stay opaque; unselected dim slightly so the chosen set reads at a glance.
         .opacity(!selectable || isSelected ? 1 : 0.72)
+    }
+
+    /// Top-right trash for a droppable thumbnail (Merge's inline page-drop). Carries its own dark disc
+    /// so the glyph stays legible over any page, mirroring the unselected selection badge.
+    private func deleteBadge(pageNumber: Int, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: "trash.fill")
+                .font(.footnote.weight(.semibold))
+                .foregroundStyle(.white)
+                .padding(6)
+                .background(Circle().fill(.black.opacity(0.45)))
+        }
+        .buttonStyle(.plain)
+        .help("Leave this page out of the merged PDF")
+        .accessibilityLabel("Drop page \(pageNumber) from the merge")
     }
 
     /// Top-left check for a selectable thumbnail. Both states carry their own backing disc so they

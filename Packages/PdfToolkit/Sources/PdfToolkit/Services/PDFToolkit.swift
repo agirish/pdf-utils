@@ -1,6 +1,7 @@
 import AppKit
 import CoreGraphics
 import Foundation
+import ImageIO
 import PDFKit
 
 struct PDFRedactionExportOptions: Sendable {
@@ -482,42 +483,64 @@ public enum PDFToolkit {
         return attempts.min { $0.byteCount < $1.byteCount }
     }
 
+    /// JPEG factor for rebuilt compress pages — calibrated to what `PDFPage(image:)` (the previous
+    /// path) effectively encoded at, so output sizes stay on the historical curve: a photo-class
+    /// bitmap through PDFPage(image:) landed within ~8% of an explicit 0.85 encode (probed).
+    private static let compressedPageJPEGFactor = 0.85
+
     /// Rebuilds every page as a bitmap at the resolution implied by `quality` and returns the new PDF
     /// as in-memory `Data`. Shared by `compress` (writes it once) and `compressToTarget` (measures the
     /// size at several qualities before writing the best one) so the page-rebuild loop lives in one place.
+    ///
+    /// **Streamed**: each page's JPEG bytes flow into the growing output as they're produced, so
+    /// peak memory is one page's render/encode scratch plus the compressed output — not every page
+    /// bitmap pinned in a `PDFDocument` until a final serialization, which peaked at gigabytes on
+    /// long scans. CGPDFContext embeds a JPEG-sourced CGImage as its original DCT data (probed:
+    /// a 579 KB JPEG emitted a 583 KB page), so this is `PDFPage(image:)`'s encoding made explicit.
     private static func compressedData(from source: PDFDocument, quality: Double) throws -> Data {
         let q = min(1, max(0.05, quality))
         let maxPixel = CGFloat(600 + (2400 - 600) * q)
 
-        let output = PDFDocument()
-        for i in 0..<source.pageCount {
-            // Per-page pool: rendering leaves autoreleased scratch (contexts, reps) the size of the
-            // page bitmap — without draining per page, a long scan accumulates all of it until the
-            // whole document finishes. The NSImage that matters survives: the inserted page owns it.
-            try autoreleasepool {
-                guard let page = source.page(at: i) else { return }
-                guard let image = renderPage(page, maxPixelDimension: maxPixel) else {
-                    throw PDFOperationError.compressionFailed
-                }
-                // The bitmap is the page as *displayed* (rotation applied, crop box), so the emitted
-                // page must use that size — the raw media box would letterbox rotated pages.
-                let pageRect = CGRect(origin: .zero, size: image.size)
-                let imageOpts: [PDFPage.ImageInitializationOption: Any] = [
-                    .mediaBox: NSValue(rect: pageRect),
-                ]
-                guard let newPage = PDFPage(image: image, options: imageOpts) else {
-                    throw PDFOperationError.compressionFailed
-                }
-                // Bitmap already includes PDF rotation via CGPDFPage drawing transform; do not re-apply PDFPage.rotation.
-                newPage.rotation = 0
-                output.insert(newPage, at: output.pageCount)
-            }
-        }
-
-        guard output.pageCount > 0, let data = output.dataRepresentation() else {
+        let pdfData = NSMutableData()
+        guard let consumer = CGDataConsumer(data: pdfData as CFMutableData),
+              let ctx = CGContext(consumer: consumer, mediaBox: nil, nil)
+        else {
             throw PDFOperationError.compressionFailed
         }
-        return data
+
+        var emitted = 0
+        for i in 0..<source.pageCount {
+            // Per-page pool: the render bitmap, its rep, and the JPEG bytes are all page-sized
+            // transients — drained page by page, only the compressed stream accumulates.
+            try autoreleasepool {
+                guard let page = source.page(at: i), let cgPage = page.pageRef else { return }
+                guard
+                    let geometry = rasterGeometry(for: page, maxPixelDimension: maxPixel, allowUpscale: false),
+                    let bitmap = renderBitmap(page, cgPage: cgPage, geometry: geometry, redactionFills: []),
+                    let jpeg = NSBitmapImageRep(cgImage: bitmap)
+                        .representation(using: .jpeg, properties: [.compressionFactor: compressedPageJPEGFactor]),
+                    let jpegSource = CGImageSourceCreateWithData(jpeg as CFData, nil),
+                    let jpegImage = CGImageSourceCreateImageAtIndex(jpegSource, 0, nil)
+                else {
+                    throw PDFOperationError.compressionFailed
+                }
+                // The bitmap is the page as *displayed* (rotation applied, crop box), so the
+                // emitted page uses that size — the raw media box would letterbox rotated pages,
+                // and no PDFPage.rotation is re-applied on top.
+                let box = CGRect(origin: .zero, size: geometry.displaySize)
+                beginDisplayedPage(ctx, box: box)
+                ctx.interpolationQuality = .high
+                ctx.draw(jpegImage, in: box)
+                ctx.endPDFPage()
+                emitted += 1
+            }
+        }
+        ctx.closePDF()
+
+        guard emitted > 0, pdfData.length > 0 else {
+            throw PDFOperationError.compressionFailed
+        }
+        return pdfData as Data
     }
 
     /// Stamps `options.text` onto every page and writes a new PDF.
@@ -1019,7 +1042,7 @@ public enum PDFToolkit {
     /// Renders the page — content plus visible annotations — upright at its displayed size via the
     /// shared raster pipeline (rotation-swapped crop box, exact scale). Compression never upscales.
     /// Internal for the OCR extension: the page as displayed (rotation and crop applied), upscaled
-    /// when the page is small so Vision has pixels to read. Compression's `renderPage` deliberately
+    /// when the page is small so Vision has pixels to read. Compression's raster path deliberately
     /// never upscales; recognition wants the opposite.
     static func renderPageBitmap(_ page: PDFPage, maxPixelDimension: CGFloat) -> CGImage? {
         guard
@@ -1027,15 +1050,5 @@ public enum PDFToolkit {
             let geometry = rasterGeometry(for: page, maxPixelDimension: maxPixelDimension, allowUpscale: true)
         else { return nil }
         return renderBitmap(page, cgPage: cgPage, geometry: geometry, redactionFills: [])
-    }
-
-    private static func renderPage(_ page: PDFPage, maxPixelDimension: CGFloat) -> NSImage? {
-        guard
-            let cgPage = page.pageRef,
-            let geometry = rasterGeometry(for: page, maxPixelDimension: maxPixelDimension, allowUpscale: false),
-            let cgImage = renderBitmap(page, cgPage: cgPage, geometry: geometry, redactionFills: [])
-        else { return nil }
-        let logicalSize = NSSize(width: geometry.displaySize.width, height: geometry.displaySize.height)
-        return NSImage(cgImage: cgImage, size: logicalSize)
     }
 }

@@ -109,6 +109,20 @@ struct CompressToolView: View {
     // Target file size in megabytes for `.targetSize` mode. A plain, friendly unit for the field.
     @State private var targetMB: Double = 2
     @State private var busy = false
+    // Per-page progress for a single-file run, so a long scan shows a determinate bar + Cancel
+    // instead of an opaque spinner — the OCR tool's pattern. `progressTotal > 0` is what gates the
+    // bar into view; both reset in `runCompress`'s defer.
+    @State private var progressPage = 0
+    @State private var progressTotal = 0
+    /// The in-flight single-file compress, kept so Cancel (and leaving the screen) can abort it —
+    /// compression holds the shared PDF serial queue, so an unabortable run starves every preview and
+    /// every other tool until it finishes. Cancelling this task trips `PDFBackgroundWork`'s
+    /// cancellation handler, which is the `isCancelled` probe the engine polls between pages.
+    @State private var runTask: Task<Void, Never>?
+    /// Bumped at every run start AND end. Progress callbacks hop to the main actor as unordered tasks;
+    /// the generation check drops both stragglers from a finished run and out-of-order updates (paired
+    /// with the monotonic page guard) — mirrors OCR exactly.
+    @State private var progressGeneration = 0
     @State private var alertMessage: String?
     @State private var showExporter = false
     @State private var exportDoc: PDFFileDocument?
@@ -224,6 +238,11 @@ struct CompressToolView: View {
         .task(id: estimateContext) {
             await refreshEstimates()
         }
+        // Leaving the screen mid-run must free the PDF serial queue, not let a multi-second compress
+        // finish for a result nobody will see (the panel's own onDisappear only cancels batch runs).
+        .onDisappear {
+            runTask?.cancel()
+        }
     }
 
     /// Task key for the size lookup: the lone queued file's path, or empty when 0 or many files.
@@ -251,6 +270,23 @@ struct CompressToolView: View {
                 qualityControls
             case .targetSize:
                 targetSizeControls
+            }
+
+            if busy && progressTotal > 0 {
+                Divider()
+                ProgressView(value: Double(progressPage), total: Double(progressTotal))
+                    .tint(accent)
+                HStack {
+                    Text("Compressing… page \(progressPage) of \(progressTotal)")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Spacer(minLength: 8)
+                    Button("Cancel") {
+                        runTask?.cancel()
+                    }
+                    .buttonStyle(.borderless)
+                    .font(.caption.weight(.medium))
+                }
             }
         }
         .padding(16)
@@ -666,13 +702,36 @@ struct CompressToolView: View {
 
     // MARK: - Single-file run
 
+    /// The panel awaits this for the one-file "Compress & save…" action. It owns the run as a
+    /// cancellable `runTask` so the sidebar Cancel button (and leaving the screen) can abort the
+    /// compression: the panel creates the task that calls this, which this view can't reach, so it
+    /// wraps the actual work in its own task instead. Cancelling `runTask` trips
+    /// `PDFBackgroundWork`'s cancellation handler — the `isCancelled` probe the engine polls between
+    /// pages — exactly as OCR cancels its own `runTask`.
     @MainActor
     private func runCompress(_ fileURL: URL) async {
+        let task = Task { await performCompress(fileURL) }
+        runTask = task
+        await task.value
+    }
+
+    @MainActor
+    private func performCompress(_ fileURL: URL) async {
         busy = true
         lastResult = nil
+        progressPage = 0
+        progressTotal = 0
+        progressGeneration += 1
+        let generation = progressGeneration
         AppStateManager.shared.beginOperation(Tool.compress.title)
         defer {
             busy = false
+            progressPage = 0
+            progressTotal = 0
+            // Invalidate straggler progress tasks still queued on the main actor — without this a late
+            // hop could repaint a "page N of M" readout after the run already finished.
+            progressGeneration += 1
+            runTask = nil
             AppStateManager.shared.endOperation(Tool.compress.title)
         }
 
@@ -690,19 +749,38 @@ struct CompressToolView: View {
         // finalizes them identically.
         let runKey: CompressCacheKey = selectedMode == .quality ? .quality(qKey(qualityValue)) : .target(targetByteBudget)
 
+        // Shared by both compress paths: hop each per-page report to the main actor, dropping
+        // out-of-order and after-the-run updates (main-actor hops aren't FIFO). The monotonic
+        // `page > progressPage` guard also keeps the bar from stepping backward on a target-size
+        // sweep, where each lower-quality pass restarts at page 1: the bar fills on the first pass and
+        // then holds at full through the remaining passes rather than jumping backward.
+        let onProgress: @Sendable (Int, Int) -> Void = { page, total in
+            Task { @MainActor in
+                guard generation == progressGeneration, page > progressPage else { return }
+                progressPage = page
+                progressTotal = total
+            }
+        }
+
         do {
             let data: Data
             if let cached = reusableOutput, cached.path == fileURL.path, cached.key == runKey,
                let fingerprint = FileFingerprint.of(fileURL), fingerprint == cached.fingerprint {
                 data = cached.data
             } else {
-                data = try await PDFBackgroundWork.run {
+                data = try await PDFBackgroundWork.run { isCancelled in
                     try fileURL.withSecurityScopedAccess {
                         switch selectedMode {
                         case .quality:
-                            return try PDFToolkit.compressData(inputURL: fileURL, quality: qualityValue)
+                            return try PDFToolkit.compressData(
+                                inputURL: fileURL, quality: qualityValue,
+                                onProgress: onProgress, isCancelled: isCancelled
+                            )
                         case .targetSize:
-                            return try PDFToolkit.compressToTargetData(inputURL: fileURL, targetBytes: targetByteBudget)
+                            return try PDFToolkit.compressToTargetData(
+                                inputURL: fileURL, targetBytes: targetByteBudget,
+                                onProgress: onProgress, isCancelled: isCancelled
+                            )
                         }
                     }
                 }
@@ -730,6 +808,9 @@ struct CompressToolView: View {
                 suggestedName = name
                 showExporter = true
             }
+        } catch is CancellationError {
+            // Cancelled deliberately — the Cancel button or leaving the screen. Cancelling records
+            // nothing: no error alert, no error log, exactly like OCR.
         } catch {
             alertMessage = error.localizedDescription
             ActivityLog.shared.error("\(Tool.compress.title) failed: \(error.localizedDescription)")

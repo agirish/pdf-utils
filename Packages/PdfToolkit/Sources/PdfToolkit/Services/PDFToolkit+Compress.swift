@@ -15,9 +15,19 @@ extension PDFToolkit {
 
     /// In-memory core of ``compress(inputURL:outputURL:quality:)`` — the guarded open plus the
     /// shared page-rebuild loop.
-    internal static func compressData(inputURL: URL, quality: Double) throws -> Data {
+    ///
+    /// `onProgress` reports the 1-based page being rebuilt and the total, once per page, so a long
+    /// single-file run can drive a determinate bar; `isCancelled` is polled between pages to stop a
+    /// multi-second scan promptly (both mirror the OCR engine). Both default to `nil`, so the batch
+    /// path and the size-estimate callers compile unchanged.
+    internal static func compressData(
+        inputURL: URL,
+        quality: Double,
+        onProgress: (@Sendable (_ page: Int, _ total: Int) -> Void)? = nil,
+        isCancelled: (@Sendable () -> Bool)? = nil
+    ) throws -> Data {
         let source = try openUnlockedDocument(at: inputURL)
-        return try compressedData(from: source, quality: quality)
+        return try compressedData(from: source, quality: quality, onProgress: onProgress, isCancelled: isCancelled)
     }
 
     /// Compresses toward a byte budget by sweeping a bounded ladder of qualities from high to low,
@@ -55,7 +65,17 @@ extension PDFToolkit {
 
     /// In-memory core of ``compressToTarget(inputURL:outputURL:targetBytes:)`` — the quality-ladder
     /// sweep. A source that already fits the target passes through as its own unchanged bytes.
-    internal static func compressToTargetData(inputURL: URL, targetBytes: Int) throws -> Data {
+    ///
+    /// `onProgress`/`isCancelled` (defaulted `nil`, so existing callers are unchanged) thread straight
+    /// into each ladder rung's page loop: progress is reported per page *within the current pass* — a
+    /// lower rung simply re-reports 1…total — which is enough to keep the bar moving without inventing
+    /// multi-pass math, and cancellation is honored between pages exactly as in ``compressData``.
+    internal static func compressToTargetData(
+        inputURL: URL,
+        targetBytes: Int,
+        onProgress: (@Sendable (_ page: Int, _ total: Int) -> Void)? = nil,
+        isCancelled: (@Sendable () -> Bool)? = nil
+    ) throws -> Data {
         // The byte count, not the bytes: pinning the whole source Data across a multi-rung sweep
         // doubled peak memory on exactly the scan-heavy files this operation exists for. The full
         // bytes are read only in the rare inflation fallback at the end.
@@ -89,7 +109,9 @@ extension PDFToolkit {
             let mid = (lo + hi) / 2
             // Per-attempt pool: each rung rebuilds the whole document; its scratch must not stack
             // across rungs. The returned Data survives the drain — it's retained, not autoreleased.
-            let data = try autoreleasepool { try compressedData(from: source, quality: ladder[mid]) }
+            let data = try autoreleasepool {
+                try compressedData(from: source, quality: ladder[mid], onProgress: onProgress, isCancelled: isCancelled)
+            }
             if data.count <= targetBytes {
                 fittingBest = data      // fits — hunt a higher-quality rung
                 smallest = nil
@@ -143,7 +165,12 @@ extension PDFToolkit {
     /// bitmap pinned in a `PDFDocument` until a final serialization, which peaked at gigabytes on
     /// long scans. CGPDFContext embeds a JPEG-sourced CGImage as its original DCT data (probed:
     /// a 579 KB JPEG emitted a 583 KB page), so this is `PDFPage(image:)`'s encoding made explicit.
-    private static func compressedData(from source: PDFDocument, quality: Double) throws -> Data {
+    private static func compressedData(
+        from source: PDFDocument,
+        quality: Double,
+        onProgress: (@Sendable (_ page: Int, _ total: Int) -> Void)? = nil,
+        isCancelled: (@Sendable () -> Bool)? = nil
+    ) throws -> Data {
         let q = min(1, max(0.05, quality))
         let maxPixel = CGFloat(600 + (2400 - 600) * q)
 
@@ -156,6 +183,11 @@ extension PDFToolkit {
 
         var emitted = 0
         for i in 0..<source.pageCount {
+            // Report the page about to be rebuilt, then bail before its (expensive) render if the run
+            // was cancelled — same order as the OCR engine, so a cancelled compress stops promptly
+            // between pages and surfaces as a `CancellationError`.
+            onProgress?(i + 1, source.pageCount)
+            if isCancelled?() == true { throw CancellationError() }
             // Per-page pool: the render bitmap, its rep, and the JPEG bytes are all page-sized
             // transients — drained page by page, only the compressed stream accumulates.
             try autoreleasepool {

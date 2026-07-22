@@ -140,4 +140,53 @@ import PDFKit
         #expect(brightness(310, 290) < 0.8)   // green square at (250,250)+(80x60): origin subtracted once
         #expect(brightness(215, 215) > 0.9)   // where double-subtraction used to put it — blank now
     }
+
+    // MARK: - Progress & cancellation
+
+    @Test func progressReportsEveryPageOnceInOrderEndingAtTheTotal() throws {
+        // Drives the sidebar's determinate bar: the engine must fire the callback once per page, with a
+        // monotonic 1-based index and a constant total, so a long single-file run reads "page N of M".
+        let dir = FixtureDir()
+        let src = dir.url("src.pdf")
+        try PDFFixtures.writePDF(pageCount: 3, to: src)
+
+        final class Progress: @unchecked Sendable {
+            var pages: [Int] = []
+            var totals: Set<Int> = []
+        }
+        let seen = Progress()
+        _ = try PDFToolkit.compressData(
+            inputURL: src, quality: 0.5,
+            onProgress: { page, total in
+                seen.pages.append(page)
+                seen.totals.insert(total)
+            }
+        )
+        #expect(seen.pages == [1, 2, 3])   // once per page, monotonic, ending at the page count
+        #expect(seen.totals == [3])        // total is always the page count
+    }
+
+    @Test func cancellationAbortsCompressBetweenPages() throws {
+        // The Cancel button trips this probe; an always-true probe must stop the run at the first page
+        // and surface as `CancellationError` — the outcome the UI treats as a non-error (no alert/log).
+        let dir = FixtureDir()
+        let src = dir.url("src.pdf")
+        try PDFFixtures.writePDF(pageCount: 3, to: src)
+
+        #expect(throws: CancellationError.self) {
+            _ = try PDFToolkit.compressData(inputURL: src, quality: 0.5, isCancelled: { true })
+        }
+    }
+
+    @Test func cancellationAbortsTheTargetSizeSweep() throws {
+        // The target sweep rebuilds the document at several qualities; an unreachably small target forces
+        // it into the ladder (skipping the pass-through), where cancellation must abort mid-pass too.
+        let dir = FixtureDir()
+        let src = dir.url("src.pdf")
+        try PDFFixtures.writePDF(pageCount: 3, to: src)
+
+        #expect(throws: CancellationError.self) {
+            _ = try PDFToolkit.compressToTargetData(inputURL: src, targetBytes: 1, isCancelled: { true })
+        }
+    }
 }

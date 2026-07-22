@@ -113,9 +113,9 @@ struct FillSignPDFEditor: NSViewRepresentable {
         context.coordinator.overlay?.selectedID = selectedID
         context.coordinator.overlay?.accent = NSColor(accent)
         context.coordinator.overlay?.needsDisplay = true
-        // Only ever resign here (never steal from a text field): if the selection was cleared from the
-        // sidebar, hand focus back to the PDFView so arrows scroll again.
-        context.coordinator.resignKeyFocusIfDeselected()
+        // An item selected from the Items list (not the canvas) should still enable keyboard editing;
+        // acquire focus safely (never from a text field).
+        context.coordinator.acquireKeyFocusIfSelected()
     }
 
     @MainActor
@@ -205,7 +205,7 @@ struct FillSignPDFEditor: NSViewRepresentable {
             parent.selectedID = hit?.id
             overlay?.selectedID = hit?.id
             overlay?.needsDisplay = true
-            syncKeyFocus()
+            focusOverlayForKeys()
         }
 
         @objc func handlePan(_ g: NSPanGestureRecognizer) {
@@ -266,7 +266,7 @@ struct FillSignPDFEditor: NSViewRepresentable {
                 dragMode = nil
                 lastPagePoint = nil
                 resizeAnchor = nil
-                syncKeyFocus()
+                focusOverlayForKeys()
                 // Flip LAST — the tool commits the settled drag when this goes false.
                 parent.isInteracting = false
 
@@ -320,31 +320,33 @@ struct FillSignPDFEditor: NSViewRepresentable {
             overlay?.selectedID = nil
             overlay?.items = parent.items
             overlay?.needsDisplay = true
-            syncKeyFocus()
+            focusOverlayForKeys()
             return true
         }
 
         // MARK: First responder
 
-        /// Focus the overlay for keyboard editing when an item is selected; return focus to the PDFView
-        /// (so arrows scroll) when nothing is. Called from canvas gestures only, so it can't yank focus
-        /// out of a text field.
-        private func syncKeyFocus() {
-            guard let overlay, let window = overlay.window else { return }
-            if parent.selectedID != nil {
-                if window.firstResponder !== overlay { window.makeFirstResponder(overlay) }
-            } else if window.firstResponder === overlay {
-                window.makeFirstResponder(pdfView)
-            }
+        /// Give the overlay keyboard focus so nudge / ⌘Z / delete are live. Called from any canvas
+        /// gesture — unconditionally, even a click that deselects, so ⌘Z keeps undoing past a deselect;
+        /// the overlay's `keyDown` forwards anything it doesn't handle to the PDFView, so scrolling still
+        /// works. Clicking a text field resigns this automatically.
+        private func focusOverlayForKeys() {
+            guard let overlay, let window = overlay.window,
+                  window.firstResponder !== overlay else { return }
+            window.makeFirstResponder(overlay)
         }
 
-        /// The one-directional half of ``syncKeyFocus()`` safe to call from `updateNSView`: it only
-        /// resigns the overlay's focus when nothing is selected, and never steals it.
-        func resignKeyFocusIfDeselected() {
-            guard parent.selectedID == nil,
+        /// Safe to call from `updateNSView`: when an item is selected from OUTSIDE the canvas (the Items
+        /// list), give the overlay focus so arrows/⌘Z/delete work there too — but only by taking focus
+        /// from the PDFView or an unfocused window, NEVER from a text field.
+        func acquireKeyFocusIfSelected() {
+            guard parent.selectedID != nil,
                   let overlay, let window = overlay.window,
-                  window.firstResponder === overlay else { return }
-            window.makeFirstResponder(pdfView)
+                  window.firstResponder !== overlay else { return }
+            let fr = window.firstResponder
+            if fr === pdfView || fr === window || fr == nil {
+                window.makeFirstResponder(overlay)
+            }
         }
     }
 }

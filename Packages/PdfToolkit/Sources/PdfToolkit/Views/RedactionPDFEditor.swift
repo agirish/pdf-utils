@@ -97,9 +97,9 @@ struct RedactionPDFEditor: NSViewRepresentable {
         context.coordinator.overlay?.marks = marks
         context.coordinator.overlay?.selectedID = selectedID
         context.coordinator.overlay?.needsDisplay = true
-        // If the selection was cleared elsewhere (a list-row trash tap), hand focus back so arrow keys
-        // scroll again — but only ever RESIGN here, never steal focus from a text field.
-        context.coordinator.resignKeyFocusIfDeselected()
+        // A mark selected from the Regions list (not the canvas) should still enable keyboard editing;
+        // acquire focus safely (never from a text field). See acquireKeyFocusIfSelected.
+        context.coordinator.acquireKeyFocusIfSelected()
     }
 
     @MainActor
@@ -174,7 +174,7 @@ struct RedactionPDFEditor: NSViewRepresentable {
             parent.selectedID = hit?.id
             overlay?.selectedID = hit?.id
             overlay?.needsDisplay = true
-            syncKeyFocus()
+            focusOverlayForKeys()
         }
 
         @objc func handlePan(_ g: NSPanGestureRecognizer) {
@@ -208,7 +208,7 @@ struct RedactionPDFEditor: NSViewRepresentable {
                 editPage = nil
                 lastPagePoint = nil
                 resizeAnchor = nil
-                syncKeyFocus()
+                focusOverlayForKeys()
                 // Flip LAST — the tool commits the settled drag when this goes false.
                 parent.isInteracting = false
 
@@ -263,31 +263,34 @@ struct RedactionPDFEditor: NSViewRepresentable {
             overlay?.selectedID = nil
             overlay?.marks = marksBinding.wrappedValue
             overlay?.needsDisplay = true
-            syncKeyFocus()
+            focusOverlayForKeys()
             return true
         }
 
         // MARK: First responder
 
-        /// Focus the overlay for keyboard editing when a mark is selected; return focus to the PDFView
-        /// (so arrows scroll) when nothing is. Called from canvas gestures only — never from
-        /// `updateNSView` — so it can't yank focus out of a text field.
-        private func syncKeyFocus() {
-            guard let overlay, let window = overlay.window else { return }
-            if parent.selectedID != nil {
-                if window.firstResponder !== overlay { window.makeFirstResponder(overlay) }
-            } else if window.firstResponder === overlay {
-                window.makeFirstResponder(pdfView)
-            }
+        /// Give the overlay keyboard focus so nudge / ⌘Z / delete are live. Called from any canvas
+        /// gesture — unconditionally, even a click that deselects: keeping focus here is what lets ⌘Z
+        /// keep undoing past a deselect, and the overlay's `keyDown` forwards anything it doesn't handle
+        /// (arrows with nothing selected, Page Up/Down) to the PDFView, so scrolling still works.
+        /// Clicking a text field resigns this automatically, so it can't trap focus.
+        private func focusOverlayForKeys() {
+            guard let overlay, let window = overlay.window,
+                  window.firstResponder !== overlay else { return }
+            window.makeFirstResponder(overlay)
         }
 
-        /// The one-directional half of ``syncKeyFocus()`` safe to call from `updateNSView`: it only
-        /// resigns the overlay's focus when the selection is gone, and never steals it.
-        func resignKeyFocusIfDeselected() {
-            guard parent.selectedID == nil,
+        /// Safe to call from `updateNSView`: when a mark is selected from OUTSIDE the canvas (a
+        /// Regions-list tap), give the overlay focus so arrows/⌘Z work there too — but only by taking
+        /// focus from the PDFView or an unfocused window, NEVER from a text field.
+        func acquireKeyFocusIfSelected() {
+            guard parent.selectedID != nil,
                   let overlay, let window = overlay.window,
-                  window.firstResponder === overlay else { return }
-            window.makeFirstResponder(pdfView)
+                  window.firstResponder !== overlay else { return }
+            let fr = window.firstResponder
+            if fr === pdfView || fr === window || fr == nil {
+                window.makeFirstResponder(overlay)
+            }
         }
 
         // MARK: ⇧-drag create

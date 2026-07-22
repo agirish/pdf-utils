@@ -22,7 +22,15 @@ class PDFViewSyncedOverlay: NSView {
 
     override func keyDown(with event: NSEvent) {
         if onKeyDown?(event) == true { return }
-        super.keyDown(with: event)
+        // Unhandled keys — Page Up/Down, Space, Home/End scrolling, ⌘C, etc. — must still reach the
+        // PDFView. It is a SIBLING of this overlay, not an ancestor, so `super.keyDown` (which walks up
+        // to our superview) would never reach it; forward explicitly so scrolling a zoomed page keeps
+        // working while this overlay holds focus.
+        if let pdfView {
+            pdfView.keyDown(with: event)
+        } else {
+            super.keyDown(with: event)
+        }
     }
 
     /// Owns the notification tokens so removal can happen in a nonisolated deinit — an NSView's

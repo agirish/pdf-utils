@@ -25,6 +25,11 @@ struct FillSignPDFEditor: NSViewRepresentable {
     @Binding var selectedID: UUID?
     @Binding var currentPageIndex: Int
     let accent: Color
+    /// True from a drag's start to its end, so the tool records the whole drag as one undo step.
+    @Binding var isInteracting: Bool
+    /// ⌘Z / ⌘⇧Z, routed to the tool's shared history when this canvas holds focus (an item selected).
+    var onUndo: () -> Void
+    var onRedo: () -> Void
 
     func makeCoordinator() -> Coordinator { Coordinator(self) }
 
@@ -70,9 +75,12 @@ struct FillSignPDFEditor: NSViewRepresentable {
         click.delegate = context.coordinator
         pdfView.addGestureRecognizer(click)
 
-        context.coordinator.pdfView = pdfView
-        context.coordinator.overlay = overlay
-        context.coordinator.observePageChanges(on: pdfView)
+        let coordinator = context.coordinator
+        overlay.onKeyDown = { [weak coordinator] event in coordinator?.handleKeyDown(event) ?? false }
+
+        coordinator.pdfView = pdfView
+        coordinator.overlay = overlay
+        coordinator.observePageChanges(on: pdfView)
 
         overlay.items = items
         overlay.selectedID = selectedID
@@ -88,6 +96,9 @@ struct FillSignPDFEditor: NSViewRepresentable {
         context.coordinator.overlay?.selectedID = selectedID
         context.coordinator.overlay?.accent = NSColor(accent)
         context.coordinator.overlay?.needsDisplay = true
+        // Only ever resign here (never steal from a text field): if the selection was cleared from the
+        // sidebar, hand focus back to the PDFView so arrows scroll again.
+        context.coordinator.resignKeyFocusIfDeselected()
     }
 
     @MainActor
@@ -163,6 +174,7 @@ struct FillSignPDFEditor: NSViewRepresentable {
             parent.selectedID = hit?.id
             overlay?.selectedID = hit?.id
             overlay?.needsDisplay = true
+            syncKeyFocus()
         }
 
         @objc func handlePan(_ g: NSPanGestureRecognizer) {
@@ -175,6 +187,8 @@ struct FillSignPDFEditor: NSViewRepresentable {
                       let item = parent.items.first(where: { $0.id == hit.id }),
                       let page = pdfView.document?.page(at: item.pageIndex)
                 else { return }
+                // One undo step per drag: the tool defers its history push until this settles.
+                parent.isInteracting = true
                 parent.selectedID = hit.id
                 dragItemID = hit.id
                 dragMode = hit.mode
@@ -221,10 +235,85 @@ struct FillSignPDFEditor: NSViewRepresentable {
                 dragMode = nil
                 lastPagePoint = nil
                 resizeAnchor = nil
+                syncKeyFocus()
+                // Flip LAST — the tool commits the settled drag when this goes false.
+                parent.isInteracting = false
 
             default:
                 break
             }
+        }
+
+        // MARK: Keyboard editing
+
+        func handleKeyDown(_ event: NSEvent) -> Bool {
+            guard let command = EditorKeyMapping.command(
+                keyCode: event.keyCode,
+                characters: event.charactersIgnoringModifiers?.lowercased(),
+                hasCommand: event.modifierFlags.contains(.command),
+                hasShift: event.modifierFlags.contains(.shift)
+            ) else { return false }
+
+            switch command {
+            case .undo: parent.onUndo(); return true
+            case .redo: parent.onRedo(); return true
+            case .delete: return deleteSelected()
+            case .nudge(let dx, let dy): return nudgeSelected(dx: dx, dy: dy)
+            }
+        }
+
+        /// Moves the selected item by a fixed page-point step in the arrow's screen direction —
+        /// zoom-independent and rotation-correct. A single mutation, so the tool records one undo step.
+        private func nudgeSelected(dx: CGFloat, dy: CGFloat) -> Bool {
+            guard let pdfView,
+                  let id = parent.selectedID,
+                  let index = parent.items.firstIndex(where: { $0.id == id }),
+                  let page = pdfView.document?.page(at: parent.items[index].pageIndex) else { return false }
+            let step = max(abs(dx), abs(dy))
+            let flip: CGFloat = pdfView.isFlipped ? -1 : 1
+            let base = pdfView.convert(CGPoint.zero, to: page)
+            let tip = pdfView.convert(CGPoint(x: dx, y: dy * flip), to: page)
+            let delta = EditorNudge.scaled(CGSize(width: tip.x - base.x, height: tip.y - base.y), to: step)
+            let box = page.bounds(for: .cropBox)
+            parent.items[index].rect = EditorNudge.moved(parent.items[index].rect, by: delta, within: box)
+            overlay?.items = parent.items
+            overlay?.needsDisplay = true
+            return true
+        }
+
+        private func deleteSelected() -> Bool {
+            guard let id = parent.selectedID,
+                  parent.items.contains(where: { $0.id == id }) else { return false }
+            parent.items.removeAll { $0.id == id }
+            parent.selectedID = nil
+            overlay?.selectedID = nil
+            overlay?.items = parent.items
+            overlay?.needsDisplay = true
+            syncKeyFocus()
+            return true
+        }
+
+        // MARK: First responder
+
+        /// Focus the overlay for keyboard editing when an item is selected; return focus to the PDFView
+        /// (so arrows scroll) when nothing is. Called from canvas gestures only, so it can't yank focus
+        /// out of a text field.
+        private func syncKeyFocus() {
+            guard let overlay, let window = overlay.window else { return }
+            if parent.selectedID != nil {
+                if window.firstResponder !== overlay { window.makeFirstResponder(overlay) }
+            } else if window.firstResponder === overlay {
+                window.makeFirstResponder(pdfView)
+            }
+        }
+
+        /// The one-directional half of ``syncKeyFocus()`` safe to call from `updateNSView`: it only
+        /// resigns the overlay's focus when nothing is selected, and never steals it.
+        func resignKeyFocusIfDeselected() {
+            guard parent.selectedID == nil,
+                  let overlay, let window = overlay.window,
+                  window.firstResponder === overlay else { return }
+            window.makeFirstResponder(pdfView)
         }
     }
 }

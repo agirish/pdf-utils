@@ -25,6 +25,13 @@ struct CropToolView: View {
     @State private var leftInset: Double = 0
     @State private var bottomInset: Double = 0
     @State private var rightInset: Double = 0
+    /// ⌘Z / ⌘⇧Z history over the crop marquee — drag, nudge, typed margins, and Reset selection.
+    @State private var undo = UndoHistory<CropInsets>(CropInsets())
+    /// True while the marquee is being dragged, so the whole drag collapses to one undo step.
+    @State private var canvasInteracting = false
+    /// Any of the four margin fields is focused — a typing session there is one undo step, not one per
+    /// keystroke.
+    @FocusState private var insetFieldFocused: Bool
     @State private var busy = false
     @State private var alertMessage: String?
     @State private var showImporter = false
@@ -47,6 +54,22 @@ struct CropToolView: View {
 
     private var customInsets: CropInsets {
         CropInsets(top: topInset, left: leftInset, bottom: bottomInset, right: rightInset)
+    }
+
+    /// While either is true the user is mid-edit, so undo snapshots are deferred and the whole gesture
+    /// (a marquee drag or a typing session in the margin fields) collapses to one undo step on settle.
+    private var editingContinuously: Bool {
+        canvasInteracting || insetFieldFocused
+    }
+
+    private func performUndo() {
+        guard let restored = undo.undo() else { return }
+        setInsets(restored)
+    }
+
+    private func performRedo() {
+        guard let restored = undo.redo() else { return }
+        setInsets(restored)
     }
 
     private var canRun: Bool {
@@ -92,12 +115,25 @@ struct CropToolView: View {
         }
         .toolErrorAlert($alertMessage)
         .task(id: selectionPathKey) {
+            // A new file: re-seed the crop history with the (persistent) current margins so ⌘Z can't
+            // cross the file boundary, then load thumbnails.
+            undo.reset(customInsets)
             await loadThumbnails()
         }
         .onChange(of: mode) { _, newMode in
             // The interactive PDFView is drag-only; drop the loaded document when leaving so a big
             // file isn't pinned in memory while Auto/Custom use the virtualized thumbnail grid.
             if newMode != .drag { pdfDocument = nil }
+        }
+        // Record each settled margin change as one undo step, but never the intermediate frames of a
+        // live drag or an in-progress typing session (editingContinuously gates those; each commits its
+        // settled value below). A commit equal to the current snapshot is a no-op, so the re-commit
+        // that fires when undo/redo reassigns the margins records nothing.
+        .onChange(of: customInsets) { _, newInsets in
+            if !editingContinuously { undo.commit(newInsets) }
+        }
+        .onChange(of: editingContinuously) { _, active in
+            if !active { undo.commit(customInsets) }
         }
     }
 
@@ -154,9 +190,10 @@ struct CropToolView: View {
                     Text("Drag to crop")
                         .font(.title3.weight(.semibold))
                     Spacer(minLength: 8)
+                    EditorUndoButtons(canUndo: undo.canUndo, canRedo: undo.canRedo, accent: accent, undo: performUndo, redo: performRedo)
                     if pageCount > 1 { pageNavigator(pageCount: pageCount) }
                 }
-                Text("Drag a box on the page, or pull the handles. The dimmed area is trimmed away.")
+                Text("Drag a box on the page, or pull the handles. Nudge it with the arrow keys, ⌘Z to undo. The dimmed area is trimmed away.")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -170,7 +207,10 @@ struct CropToolView: View {
                 pageIndex: min(dragPageIndex, pageCount - 1),
                 insets: Binding(get: { customInsets }, set: { setInsets($0) }),
                 zoom: dragZoom,
-                accent: accent
+                accent: accent,
+                isInteracting: $canvasInteracting,
+                onUndo: performUndo,
+                onRedo: performRedo
             )
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(Color(nsColor: .underPageBackgroundColor))
@@ -508,6 +548,7 @@ struct CropToolView: View {
                 .textFieldStyle(.roundedBorder)
                 .frame(width: 56)
                 .multilineTextAlignment(.trailing)
+                .focused($insetFieldFocused)
             Text("pt")
                 .font(.caption)
                 .foregroundStyle(.secondary)

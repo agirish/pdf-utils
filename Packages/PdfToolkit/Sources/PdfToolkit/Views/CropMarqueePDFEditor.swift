@@ -54,6 +54,11 @@ struct CropMarqueePDFEditor: NSViewRepresentable {
     /// Fit-to-view zoom multiplier from the slider — 1 fits the whole page to the pane.
     let zoom: CGFloat
     let accent: Color
+    /// True from a drag's start to its end, so the tool records the whole drag as one undo step.
+    @Binding var isInteracting: Bool
+    /// ⌘Z / ⌘⇧Z, routed to the tool's shared history while the marquee holds keyboard focus.
+    var onUndo: () -> Void
+    var onRedo: () -> Void
 
     func makeCoordinator() -> Coordinator { Coordinator(self) }
 
@@ -96,9 +101,19 @@ struct CropMarqueePDFEditor: NSViewRepresentable {
         pan.delegate = context.coordinator
         pdfView.addGestureRecognizer(pan)
 
-        context.coordinator.pdfView = pdfView
-        context.coordinator.overlay = overlay
-        context.coordinator.syncPageAndSelection()
+        let coordinator = context.coordinator
+        overlay.onKeyDown = { [weak coordinator] event in coordinator?.handleKeyDown(event) ?? false }
+
+        coordinator.pdfView = pdfView
+        coordinator.overlay = overlay
+        coordinator.syncPageAndSelection()
+        // Focus the marquee so arrow-key nudging works as soon as the drag pane appears. The window
+        // isn't attached yet inside makeNSView, so defer to the next runloop turn; clicking a sidebar
+        // inset field still takes focus away normally.
+        DispatchQueue.main.async { [weak overlay] in
+            guard let overlay, let window = overlay.window, window.firstResponder === window else { return }
+            window.makeFirstResponder(overlay)
+        }
         return container
     }
 
@@ -203,6 +218,12 @@ struct CropMarqueePDFEditor: NSViewRepresentable {
             switch g.state {
             case .began:
                 isDragging = true
+                // One undo step per drag: the tool defers its history push until this settles.
+                parent.isInteracting = true
+                // A drag focuses the marquee, so arrow-nudge and ⌘Z work right after it.
+                if let window = overlay.window, window.firstResponder !== overlay {
+                    window.makeFirstResponder(overlay)
+                }
                 dragStartMouse = loc
                 let hit = kind(at: loc)
                 dragKind = hit
@@ -225,10 +246,49 @@ struct CropMarqueePDFEditor: NSViewRepresentable {
             case .ended, .cancelled:
                 isDragging = false
                 dragKind = nil
+                // Flip LAST — the tool commits the settled drag when this goes false.
+                parent.isInteracting = false
 
             default:
                 break
             }
+        }
+
+        // MARK: Keyboard editing
+
+        func handleKeyDown(_ event: NSEvent) -> Bool {
+            guard let command = EditorKeyMapping.command(
+                keyCode: event.keyCode,
+                characters: event.charactersIgnoringModifiers?.lowercased(),
+                hasCommand: event.modifierFlags.contains(.command),
+                hasShift: event.modifierFlags.contains(.shift)
+            ) else { return false }
+
+            switch command {
+            case .undo: parent.onUndo(); return true
+            case .redo: parent.onRedo(); return true
+            case .delete: return false  // Crop has one persistent marquee; nothing to delete.
+            case .nudge(let dx, let dy): return nudgeMarquee(dx: dx, dy: dy)
+            }
+        }
+
+        /// Slides the whole crop marquee by a fixed page-point step in the arrow's screen direction —
+        /// zoom-independent and rotation-correct — and writes the resulting insets back. One mutation,
+        /// so the tool records it as a single undo step.
+        private func nudgeMarquee(dx: CGFloat, dy: CGFloat) -> Bool {
+            guard let pdfView, let overlay, let page = activePage,
+                  let sel = overlay.selectionPageRect else { return false }
+            let step = max(abs(dx), abs(dy))
+            let flip: CGFloat = pdfView.isFlipped ? -1 : 1
+            let base = pdfView.convert(CGPoint.zero, to: page)
+            let tip = pdfView.convert(CGPoint(x: dx, y: dy * flip), to: page)
+            let delta = EditorNudge.scaled(CGSize(width: tip.x - base.x, height: tip.y - base.y), to: step)
+            let box = page.bounds(for: .cropBox)
+            let moved = EditorNudge.moved(sel, by: delta, within: box)
+            overlay.selectionPageRect = moved
+            overlay.needsDisplay = true
+            parent.insets = PDFToolkit.insets(from: moved, rotation: page.rotation, in: box)
+            return true
         }
 
         /// Turns the drag delta into a clamped view-space selection rect for the current handle/mode.

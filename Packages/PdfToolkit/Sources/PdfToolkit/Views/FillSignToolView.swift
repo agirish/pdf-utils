@@ -13,6 +13,12 @@ struct FillSignToolView: View {
     @State private var items: [FillSignItem] = []
     @State private var selectedID: UUID?
     @State private var currentPageIndex = 0
+    /// ⌘Z / ⌘⇧Z history over the whole item set — placement, move, resize, nudge, delete, edits, Clear.
+    @State private var undo = UndoHistory<[FillSignItem]>([])
+    /// True while a canvas drag is in flight, so the whole drag collapses to one undo step.
+    @State private var canvasInteracting = false
+    /// True while the font-size slider is being dragged, so a slider sweep is one undo step, not dozens.
+    @State private var fontSliderEditing = false
 
     @State private var inkID = "black"
     @State private var newFontSize: CGFloat = 14
@@ -36,6 +42,13 @@ struct FillSignToolView: View {
 
     private var selectionPathKey: String {
         inputURL?.standardizedFileURL.path ?? ""
+    }
+
+    /// While any of these is true the user is mid-edit, so undo snapshots are deferred and the whole
+    /// gesture (a canvas drag, a slider sweep, or a typing session in the inspector field) collapses to
+    /// a single undo step captured when it settles.
+    private var editingContinuously: Bool {
+        canvasInteracting || fontSliderEditing || textFieldFocused
     }
 
     private var selectedInk: InkColor {
@@ -86,6 +99,28 @@ struct FillSignToolView: View {
         .task(id: selectionPathKey) {
             await reloadDocumentForSelection()
         }
+        // Record each settled change to the items as one undo step, but never the intermediate frames
+        // of a live drag / slider sweep / typing session (editingContinuously gates those; each ends
+        // by committing its settled value below). A commit equal to the current snapshot is a no-op, so
+        // the re-commit that fires when undo/redo reassigns `items` records nothing.
+        .onChange(of: items) { _, newItems in
+            if !editingContinuously { undo.commit(newItems) }
+        }
+        .onChange(of: editingContinuously) { _, active in
+            if !active { undo.commit(items) }
+        }
+    }
+
+    private func performUndo() {
+        guard let restored = undo.undo() else { return }
+        items = restored
+        if let sel = selectedID, !items.contains(where: { $0.id == sel }) { selectedID = nil }
+    }
+
+    private func performRedo() {
+        guard let restored = undo.redo() else { return }
+        items = restored
+        if let sel = selectedID, !items.contains(where: { $0.id == sel }) { selectedID = nil }
     }
 
     // MARK: - Sidebar
@@ -152,6 +187,7 @@ struct FillSignToolView: View {
                             pdfDocument = nil
                             items = []
                             selectedID = nil
+                            undo.reset([])
                         }
                         .buttonStyle(.borderless)
                         .font(.subheadline.weight(.medium))
@@ -393,7 +429,10 @@ struct FillSignToolView: View {
                                 .font(.caption.weight(.semibold).monospacedDigit())
                                 .foregroundStyle(.secondary)
                         }
-                        Slider(value: fontSizeBinding(id: id), in: 8...48)
+                        Slider(value: fontSizeBinding(id: id), in: 8...48) { editing in
+                            // Coalesce the whole slider sweep into one undo step.
+                            fontSliderEditing = editing
+                        }
                     }
                 case .signature:
                     Text("Drag the signature to position it, or drag its corner handle to resize. It scales as vector ink.")
@@ -479,15 +518,22 @@ struct FillSignToolView: View {
     private var editorPane: some View {
         Group {
             if let doc = pdfDocument {
-                FillSignPDFEditor(
-                    document: doc,
-                    items: $items,
-                    selectedID: $selectedID,
-                    currentPageIndex: $currentPageIndex,
-                    accent: accent
-                )
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .background(Color(nsColor: .underPageBackgroundColor))
+                VStack(spacing: 0) {
+                    editorToolbar
+                    Divider().opacity(0.35)
+                    FillSignPDFEditor(
+                        document: doc,
+                        items: $items,
+                        selectedID: $selectedID,
+                        currentPageIndex: $currentPageIndex,
+                        accent: accent,
+                        isInteracting: $canvasInteracting,
+                        onUndo: performUndo,
+                        onRedo: performRedo
+                    )
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .background(Color(nsColor: .underPageBackgroundColor))
+                }
             } else if inputURL != nil {
                 ProgressView("Opening PDF…")
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -502,6 +548,23 @@ struct FillSignToolView: View {
                 .background(Color(nsColor: .underPageBackgroundColor))
             }
         }
+    }
+
+    /// A thin bar above the canvas: Undo/Redo (the mouse path to the same history ⌘Z reaches) and a
+    /// one-line reminder of the direct-manipulation gestures.
+    private var editorToolbar: some View {
+        HStack(spacing: 10) {
+            EditorUndoButtons(canUndo: undo.canUndo, canRedo: undo.canRedo, accent: accent, undo: performUndo, redo: performRedo)
+            Spacer(minLength: 8)
+            Text("drag to move · handle to resize · arrows to nudge · delete to remove · ⌘Z to undo")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .truncationMode(.tail)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 8)
+        .background(.bar)
     }
 
     // MARK: - Placement
@@ -641,6 +704,7 @@ struct FillSignToolView: View {
     private func reloadDocumentForSelection() async {
         items = []
         selectedID = nil
+        undo.reset([])
         currentPageIndex = 0
         pdfDocument = nil
         guard let url = inputURL else { return }

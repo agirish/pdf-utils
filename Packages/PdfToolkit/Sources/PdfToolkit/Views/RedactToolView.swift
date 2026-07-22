@@ -13,6 +13,11 @@ struct RedactToolView: View {
     /// The region selected for editing — shared with the canvas so a click there and a tap in the
     /// Regions list agree, and so the corner handle and keyboard edits know what to act on.
     @State private var selectedMarkID: UUID?
+    /// ⌘Z / ⌘⇧Z history over the whole marks set. Driven from `.onChange(of: marks)`, so every way the
+    /// set changes — draw, move, resize, nudge, delete, Find & redact, Clear — is one coherent undo.
+    @State private var undo = UndoHistory<[RedactionMark]>([])
+    /// True while a canvas drag is in flight, so the whole drag collapses into a single undo step.
+    @State private var canvasInteracting = false
     @State private var stripAnnotationsFromOtherPages = false
     @State private var busy = false
     @State private var alertMessage: String?
@@ -93,10 +98,32 @@ struct RedactToolView: View {
         .task(id: selectionPathKey) {
             await reloadDocumentForSelection()
         }
+        // Record every settled change to the marks as one undo step — but not the intermediate frames
+        // of a live drag (canvasInteracting gates those; the drag's final value is committed when the
+        // interaction flag flips false, below). A commit equal to the current snapshot is a no-op, so
+        // the re-commit that fires when undo/redo reassigns `marks` records nothing.
+        .onChange(of: marks) { _, newMarks in
+            if !canvasInteracting { undo.commit(newMarks) }
+        }
+        .onChange(of: canvasInteracting) { _, interacting in
+            if !interacting { undo.commit(marks) }
+        }
         // Leaving the screen must free the PDF serial queue rather than let a scan finish unseen.
         .onDisappear {
             searchTask?.cancel()
         }
+    }
+
+    private func performUndo() {
+        guard let restored = undo.undo() else { return }
+        marks = restored
+        if let sel = selectedMarkID, !marks.contains(where: { $0.id == sel }) { selectedMarkID = nil }
+    }
+
+    private func performRedo() {
+        guard let restored = undo.redo() else { return }
+        marks = restored
+        if let sel = selectedMarkID, !marks.contains(where: { $0.id == sel }) { selectedMarkID = nil }
     }
 
     // MARK: - Sidebar
@@ -167,6 +194,7 @@ struct RedactToolView: View {
                             pdfDocument = nil
                             marks = []
                             selectedMarkID = nil
+                            undo.reset([])
                             resetFindState()
                         }
                         .buttonStyle(.borderless)
@@ -541,9 +569,20 @@ struct RedactToolView: View {
     private var editorPane: some View {
         Group {
             if let doc = pdfDocument {
-                RedactionPDFEditor(document: doc, marks: $marks, selectedID: $selectedMarkID)
+                VStack(spacing: 0) {
+                    editorToolbar
+                    Divider().opacity(0.35)
+                    RedactionPDFEditor(
+                        document: doc,
+                        marks: $marks,
+                        selectedID: $selectedMarkID,
+                        isInteracting: $canvasInteracting,
+                        onUndo: performUndo,
+                        onRedo: performRedo
+                    )
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .background(Color(nsColor: .underPageBackgroundColor))
+                }
             } else if inputURL != nil {
                 ProgressView("Opening PDF…")
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -560,12 +599,30 @@ struct RedactToolView: View {
         }
     }
 
+    /// A thin bar above the canvas: Undo/Redo (mouse path for the same history ⌘Z reaches) plus a
+    /// one-line reminder of the direct-manipulation gestures.
+    private var editorToolbar: some View {
+        HStack(spacing: 10) {
+            EditorUndoButtons(canUndo: undo.canUndo, canRedo: undo.canRedo, accent: accent, undo: performUndo, redo: performRedo)
+            Spacer(minLength: 8)
+            Text("⇧-drag to draw · drag to move · handle to resize · arrows to nudge · ⌘Z to undo")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .truncationMode(.tail)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 8)
+        .background(.bar)
+    }
+
     // MARK: - Data
 
     private func reloadDocumentForSelection() async {
         searchTask?.cancel()
         marks = []
         selectedMarkID = nil
+        undo.reset([])
         pdfDocument = nil
         resetFindState()
         guard let url = inputURL else { return }

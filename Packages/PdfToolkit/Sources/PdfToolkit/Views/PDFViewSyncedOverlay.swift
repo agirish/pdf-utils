@@ -11,6 +11,20 @@ class PDFViewSyncedOverlay: NSView {
         didSet { registerForMappingChanges() }
     }
 
+    /// Set by an editor that wants keyboard editing (arrow-nudge, ⌘Z/⌘⇧Z, delete) while this overlay
+    /// is first responder; it returns true when it consumed the event. Left nil by overlays that don't
+    /// opt in, which then stay non-focusable plain layers exactly as before. The overlay is made first
+    /// responder by the editor only in the contexts where these keys should win (a mark selected, the
+    /// crop marquee active) — otherwise focus stays with the `PDFView` so arrows scroll normally.
+    var onKeyDown: ((NSEvent) -> Bool)?
+
+    override var acceptsFirstResponder: Bool { onKeyDown != nil }
+
+    override func keyDown(with event: NSEvent) {
+        if onKeyDown?(event) == true { return }
+        super.keyDown(with: event)
+    }
+
     /// Owns the notification tokens so removal can happen in a nonisolated deinit — an NSView's
     /// MainActor isolation forbids touching stored state from its own deinit.
     private final class ObserverBag {

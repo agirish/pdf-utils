@@ -86,44 +86,46 @@ struct ExtractToolView: View {
 
     private var sidebarColumn: some View {
         VStack(spacing: 0) {
-            VStack(alignment: .leading, spacing: 14) {
-                FileSidebarHeader(
-                    accent: accent,
-                    icon: "doc.on.clipboard",
-                    subtitle: sidebarSubtitle,
-                    hasFile: inputURL != nil,
-                    onClear: { inputURL = nil },
-                    onAdd: { showImporter = true }
-                )
+            ScrollView {
+                VStack(alignment: .leading, spacing: 14) {
+                    FileSidebarHeader(
+                        accent: accent,
+                        icon: "doc.on.clipboard",
+                        subtitle: sidebarSubtitle,
+                        hasFile: inputURL != nil,
+                        onClear: { inputURL = nil },
+                        onAdd: { showImporter = true }
+                    )
 
-                Group {
-                    if inputURL == nil {
-                        EmptyFileDropZone(
-                            accent: accent,
-                            icon: "doc.on.clipboard",
-                            description: "Preview pages on the right, then type which pages to copy into a new PDF.",
-                            isTargeted: isDropTargeted,
-                            onChoose: { showImporter = true }
-                        )
-                    } else if let url = inputURL {
-                        SelectedFileCard(
-                            accent: accent,
-                            url: url,
-                            isLoadingPreview: isGeneratingPreviews,
-                            pageCount: pageSpecs.count
-                        )
+                    Group {
+                        if inputURL == nil {
+                            EmptyFileDropZone(
+                                accent: accent,
+                                icon: "doc.on.clipboard",
+                                description: "Preview pages on the right, then type which pages to copy into a new PDF.",
+                                isTargeted: isDropTargeted,
+                                onChoose: { showImporter = true }
+                            )
+                        } else if let url = inputURL {
+                            SelectedFileCard(
+                                accent: accent,
+                                url: url,
+                                isLoadingPreview: isGeneratingPreviews,
+                                pageCount: pageSpecs.count
+                            )
+                        }
                     }
-                }
-                .onDrop(of: [.pdf, .fileURL], isTargeted: $isDropTargeted) { providers in
-                    consumeDroppedProviders(providers)
-                    return true
-                }
+                    .onDrop(of: [.pdf, .fileURL], isTargeted: $isDropTargeted) { providers in
+                        consumeDroppedProviders(providers)
+                        return true
+                    }
 
-                pagesSection
+                    pagesSection
+                }
+                .padding(18)
+                .formCard()
+                .padding(12)
             }
-            .padding(18)
-            .formCard()
-            .padding(12)
 
             Spacer(minLength: 0)
 

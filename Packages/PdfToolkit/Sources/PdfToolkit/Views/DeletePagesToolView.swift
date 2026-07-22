@@ -98,44 +98,46 @@ struct DeletePagesToolView: View {
 
     private var sidebarColumn: some View {
         VStack(spacing: 0) {
-            VStack(alignment: .leading, spacing: 14) {
-                FileSidebarHeader(
-                    accent: accent,
-                    icon: Tool.deletePages.symbolName,
-                    subtitle: sidebarSubtitle,
-                    hasFile: inputURL != nil,
-                    onClear: { inputURL = nil },
-                    onAdd: { showImporter = true }
-                )
+            ScrollView {
+                VStack(alignment: .leading, spacing: 14) {
+                    FileSidebarHeader(
+                        accent: accent,
+                        icon: Tool.deletePages.symbolName,
+                        subtitle: sidebarSubtitle,
+                        hasFile: inputURL != nil,
+                        onClear: { inputURL = nil },
+                        onAdd: { showImporter = true }
+                    )
 
-                Group {
-                    if inputURL == nil {
-                        EmptyFileDropZone(
-                            accent: accent,
-                            icon: Tool.deletePages.symbolName,
-                            description: "See every page on the right, then enter which page numbers to remove.",
-                            isTargeted: isDropTargeted,
-                            onChoose: { showImporter = true }
-                        )
-                    } else if let url = inputURL {
-                        SelectedFileCard(
-                            accent: accent,
-                            url: url,
-                            isLoadingPreview: isGeneratingPreviews,
-                            pageCount: pageSpecs.count
-                        )
+                    Group {
+                        if inputURL == nil {
+                            EmptyFileDropZone(
+                                accent: accent,
+                                icon: Tool.deletePages.symbolName,
+                                description: "See every page on the right, then enter which page numbers to remove.",
+                                isTargeted: isDropTargeted,
+                                onChoose: { showImporter = true }
+                            )
+                        } else if let url = inputURL {
+                            SelectedFileCard(
+                                accent: accent,
+                                url: url,
+                                isLoadingPreview: isGeneratingPreviews,
+                                pageCount: pageSpecs.count
+                            )
+                        }
                     }
-                }
-                .onDrop(of: [.pdf, .fileURL], isTargeted: $isDropTargeted) { providers in
-                    consumeDroppedProviders(providers)
-                    return true
-                }
+                    .onDrop(of: [.pdf, .fileURL], isTargeted: $isDropTargeted) { providers in
+                        consumeDroppedProviders(providers)
+                        return true
+                    }
 
-                pagesSection
+                    pagesSection
+                }
+                .padding(18)
+                .formCard()
+                .padding(12)
             }
-            .padding(18)
-            .formCard()
-            .padding(12)
 
             Spacer(minLength: 0)
 

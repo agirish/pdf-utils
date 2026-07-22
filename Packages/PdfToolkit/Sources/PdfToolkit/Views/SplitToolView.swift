@@ -218,46 +218,48 @@ struct SplitToolView: View {
 
     private var sidebarColumn: some View {
         VStack(spacing: 0) {
-            VStack(alignment: .leading, spacing: 14) {
-                FileSidebarHeader(
-                    accent: accent,
-                    icon: "scissors",
-                    subtitle: sidebarSubtitle,
-                    hasFile: inputURL != nil,
-                    onClear: { inputURL = nil },
-                    onAdd: { showImporter = true }
-                )
+            ScrollView {
+                VStack(alignment: .leading, spacing: 14) {
+                    FileSidebarHeader(
+                        accent: accent,
+                        icon: "scissors",
+                        subtitle: sidebarSubtitle,
+                        hasFile: inputURL != nil,
+                        onClear: { inputURL = nil },
+                        onAdd: { showImporter = true }
+                    )
 
-                Group {
-                    if inputURL == nil {
-                        EmptyFileDropZone(
-                            accent: accent,
-                            icon: "scissors",
-                            description: "Preview pages on the right, then choose how to divide the document.",
-                            isTargeted: isDropTargeted,
-                            onChoose: { showImporter = true }
-                        )
-                    } else if let url = inputURL {
-                        SelectedFileCard(
-                            accent: accent,
-                            url: url,
-                            isLoadingPreview: isGeneratingPreviews,
-                            pageCount: pageCount
-                        )
+                    Group {
+                        if inputURL == nil {
+                            EmptyFileDropZone(
+                                accent: accent,
+                                icon: "scissors",
+                                description: "Preview pages on the right, then choose how to divide the document.",
+                                isTargeted: isDropTargeted,
+                                onChoose: { showImporter = true }
+                            )
+                        } else if let url = inputURL {
+                            SelectedFileCard(
+                                accent: accent,
+                                url: url,
+                                isLoadingPreview: isGeneratingPreviews,
+                                pageCount: pageCount
+                            )
+                        }
+                    }
+                    .onDrop(of: [.pdf, .fileURL], isTargeted: $isDropTargeted) { providers in
+                        consumeDroppedProviders(providers)
+                        return true
+                    }
+
+                    if inputURL != nil {
+                        splitOptions
                     }
                 }
-                .onDrop(of: [.pdf, .fileURL], isTargeted: $isDropTargeted) { providers in
-                    consumeDroppedProviders(providers)
-                    return true
-                }
-
-                if inputURL != nil {
-                    splitOptions
-                }
+                .padding(18)
+                .formCard()
+                .padding(12)
             }
-            .padding(18)
-            .formCard()
-            .padding(12)
 
             Spacer(minLength: 0)
 

@@ -23,6 +23,14 @@ import Testing
         #expect(PasswordStrengthEstimator.estimate("Abcdef1!ghij") == .strong) // 12, four classes
     }
 
+    @Test func lowDistinctCharacterCountIsCappedRegardlessOfLength() {
+        // Length buckets alone would rate these Good/Fair; the distinct-character cap pulls them down.
+        #expect(PasswordStrengthEstimator.estimate("aaaaaaaaaaaaaaaa") == .weak) // 16 identical
+        #expect(PasswordStrengthEstimator.estimate("1212121212") == .weak)       // 2 distinct
+        #expect(PasswordStrengthEstimator.estimate("            ") == .weak)      // 12 spaces, 1 distinct
+        #expect(PasswordStrengthEstimator.estimate("Ab1!Ab1!Ab1!") == .fair)     // 4 distinct, repeated
+    }
+
     @Test func aLongPassphraseRatesWellOnLengthAlone() {
         // Four+ words of lowercase clears the single-class cap purely on length (>= 12).
         #expect(PasswordStrengthEstimator.estimate("correcthorsebatterystaple") >= .good)

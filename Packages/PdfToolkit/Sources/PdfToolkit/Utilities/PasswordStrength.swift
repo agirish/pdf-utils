@@ -60,6 +60,15 @@ enum PasswordStrengthEstimator {
         score += max(0, classes - 1)
         // A short, single-class password is guessable regardless of the length bucket it lands in.
         if classes <= 1 && length < 12 { score = min(score, 1) }
+        // Very few distinct characters is low entropy no matter the length — "aaaaaaaaaaaa",
+        // "121212", or a run of spaces would otherwise ride the length buckets up to Good. Cap it:
+        // ≤2 distinct can't exceed weak, ≤4 can't exceed fair.
+        let distinctCharacters = Set(password).count
+        if distinctCharacters <= 2 {
+            score = min(score, 1)
+        } else if distinctCharacters <= 4 {
+            score = min(score, 2)
+        }
 
         switch score {
         case ...1: return .weak

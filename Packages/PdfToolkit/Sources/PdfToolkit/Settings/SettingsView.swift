@@ -133,8 +133,8 @@ struct SettingsSearchEntry: Identifiable {
         .init(title: "Default compression quality", tab: .advanced, keywords: ["compress", "quality", "default", "size"]),
         .init(title: "Strip metadata on export", tab: .advanced, keywords: ["metadata", "strip", "privacy", "author", "title", "dates"]),
         .init(title: "Activity logging level", tab: .advanced, keywords: ["log", "logging", "level", "activity", "debug", "warnings", "errors"]),
-        .init(title: "Reset order", tab: .advanced, keywords: ["reset", "order", "arrange", "rearrange", "default", "dashboard", "sections", "tools"]),
         .init(title: "Clear pinned tools", tab: .advanced, keywords: ["clear", "pin", "pinned", "unpin", "dashboard", "tools", "shelf", "reset"]),
+        .init(title: "Reset order", tab: .advanced, keywords: ["reset", "order", "arrange", "rearrange", "default", "dashboard", "sections", "tools"]),
         .init(title: "Reset all settings", tab: .advanced, keywords: ["reset", "defaults", "restore", "clear", "all"]),
     ]
 
@@ -630,21 +630,21 @@ struct AdvancedSettingsTab: View {
             // resets lead; the total reset closes it out.
             Section {
                 ResetRow(
-                    title: "Reset order",
-                    description: hasCustomDashboardOrder
-                        ? "Restores the default order of the dashboard sections and the tools within them. Rearrange them by dragging a section header or a tile on the dashboard; pinned tools aren’t affected."
-                        : "Drag a section header or a tile on the dashboard to rearrange it. Reset order restores the default arrangement; pinned tools aren’t affected.",
-                    isDisabled: !hasCustomDashboardOrder,
-                    action: resetDashboardOrder
-                )
-
-                ResetRow(
                     title: "Clear pinned tools",
                     description: hasPinnedTools
                         ? "Unpins every tool from the dashboard. Individual pins can also be removed from a tool’s tile; the dashboard order isn’t affected."
                         : "No tools are pinned. Pin one from its tile on the dashboard and it’ll appear at the top of the dashboard.",
                     isDisabled: !hasPinnedTools,
                     action: clearPinnedTools
+                )
+
+                ResetRow(
+                    title: "Reset order",
+                    description: hasCustomDashboardOrder
+                        ? "Restores the default order of the dashboard sections and the tools within them. Rearrange them by dragging a section header or a tile on the dashboard; pinned tools aren’t affected."
+                        : "Drag a section header or a tile on the dashboard to rearrange it. Reset order restores the default arrangement; pinned tools aren’t affected.",
+                    isDisabled: !hasCustomDashboardOrder,
+                    action: resetDashboardOrder
                 )
 
                 ResetRow(

@@ -21,6 +21,11 @@ struct MetadataToolView: View {
     @State private var isGeneratingPreviews = false
     @State private var thumbnailSize: CGFloat = 120
 
+    /// The inline confirmation shown after a successful save, and the summary stashed while the save
+    /// dialog is open (its URL is filled in from the dialog's success callback).
+    @State private var saveSummary: ToolSaveSummary?
+    @State private var pendingSaveSummary: ToolSaveSummary?
+
     private var selectionPathKey: String {
         inputURL?.standardizedFileURL.path ?? ""
     }
@@ -68,11 +73,16 @@ struct MetadataToolView: View {
             switch result {
             case .success(let url):
                 PDFExportCoordinator.didExport(to: url, toolTitle: Tool.metadata.title, bytes: savedBytes)
+                if var summary = pendingSaveSummary {
+                    summary.url = url
+                    saveSummary = summary
+                }
             case .failure(let err):
                 guard !err.isUserCancelled else { break }
                 alertMessage = err.localizedDescription
                 ActivityLog.shared.error("\(Tool.metadata.title) failed: \(err.localizedDescription)")
             }
+            pendingSaveSummary = nil
         }
         .toolErrorAlert($alertMessage)
         .task(id: selectionPathKey) {
@@ -103,6 +113,10 @@ struct MetadataToolView: View {
                     }
                     .padding(18)
                     .formCard()
+
+                    if let saveSummary {
+                        ToolSaveBanner(accent: accent, summary: saveSummary)
+                    }
 
                     if inputURL != nil {
                         fieldsSection
@@ -334,9 +348,19 @@ struct MetadataToolView: View {
         return "This file still names \(named.map(\.1).joined(separator: " and "))."
     }
 
+    /// The confirmation copy for a finished run, from a snapshot of the saved fields so it reflects
+    /// what was written (not whatever the fields hold by the time a dialog returns).
+    private func summaryText(for saved: PDFMetadataFields) -> (title: String, detail: String) {
+        saved.isCleared
+            ? ("Metadata stripped", "Every editable field was removed; the app name and dates were reset.")
+            : ("Metadata cleaned", "The saved copy carries your edits; the app name and dates were reset.")
+    }
+
     // MARK: - Loading
 
     private func loadFile() async {
+        // A different (or removed) file: the last run's confirmation no longer describes what's loaded.
+        saveSummary = nil
         guard let url = inputURL else {
             pageSpecs = []
             isGeneratingPreviews = false
@@ -398,6 +422,7 @@ struct MetadataToolView: View {
         }
 
         busy = true
+        saveSummary = nil
         AppStateManager.shared.beginOperation(Tool.metadata.title)
         defer {
             busy = false
@@ -406,6 +431,7 @@ struct MetadataToolView: View {
 
         suggestedName = fileURL.deletingPathExtension().lastPathComponent + "-cleaned.pdf"
         let snapshot = fields
+        let summary = summaryText(for: snapshot)
 
         do {
             let data = try await PDFBackgroundWork.run {
@@ -423,11 +449,12 @@ struct MetadataToolView: View {
                 suffixWord: "cleaned",
                 applyMetadataStrip: false
             ) {
-            case .savedBeside:
-                break
+            case .savedBeside(let url):
+                saveSummary = ToolSaveSummary(title: summary.title, detail: summary.detail, url: url)
             case .present(let document, let name):
                 exportDoc = document
                 suggestedName = name
+                pendingSaveSummary = ToolSaveSummary(title: summary.title, detail: summary.detail, url: nil)
                 showExporter = true
             }
         } catch {

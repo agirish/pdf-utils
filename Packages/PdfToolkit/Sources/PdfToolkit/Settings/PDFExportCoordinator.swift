@@ -101,15 +101,20 @@ enum PDFExportCoordinator {
 
     // MARK: Metadata
 
-    /// Returns `data` with its document info dictionary (author, title, creator, dates, keywords)
-    /// cleared. Fail-safe: any parse/serialize failure returns the input unchanged rather than losing
-    /// the export.
+    /// Returns `data` with all document metadata cleared — the Info dictionary (author, title, creator,
+    /// dates, keywords) AND the catalog XMP `/Metadata` packet, which a plain Info clear leaves behind
+    /// (see ``PDFToolkit/dataStrippingHiddenMetadata(from:applying:)``). Fail-safe: any failure returns
+    /// the input unchanged rather than losing the export.
     ///
-    /// Encrypted output (the Protect tool's password mode) is returned untouched: re-serializing a
-    /// locked/encrypted `PDFDocument` would drop or corrupt its encryption, which matters far more
-    /// than clearing its info dictionary.
+    /// The catalog XMP can only be dropped by rebuilding the document, so a form-bearing PDF keeps the
+    /// lighter Info-only clear (the rebuild would flatten its fields) and an encrypted PDF (the Protect
+    /// tool's password mode) is returned untouched — re-serializing it would corrupt its encryption.
     static func stripMetadata(_ data: Data) -> Data {
         guard let doc = PDFDocument(data: data), !doc.isEncrypted, !doc.isLocked else { return data }
+        if !PDFToolkit.hasInteractiveForm(doc),
+           let rebuilt = PDFToolkit.dataStrippingHiddenMetadata(from: doc, applying: [:]) {
+            return rebuilt
+        }
         doc.documentAttributes = [:]
         return doc.dataRepresentation() ?? data
     }

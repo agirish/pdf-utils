@@ -143,4 +143,71 @@ import Testing
         }
         #expect(error?.kind == "outputMatchesInput")
     }
+
+    /// The privacy guarantee: clearing the Info dictionary alone leaves the catalog XMP `/Metadata`
+    /// packet (which Adobe/Office duplicate identity into) — cleaning must drop that packet too.
+    @Test func cleaningDropsTheCatalogXMPPacket() throws {
+        let dir = FixtureDir()
+        let src = dir.url("xmp.pdf"), out = dir.url("cleaned.pdf")
+        try PDFFixtures.writeRawPDF(xmpCreator: "SECRET-XMP-CREATOR", to: src)
+        #expect(try PDFFixtures.catalogHasEntry("Metadata", at: src))   // sanity: source carries XMP
+
+        try PDFToolkit.writeMetadata(inputURL: src, outputURL: out, fields: .cleared)
+
+        #expect(try PDFFixtures.catalogHasEntry("Metadata", at: out) == false)
+        #expect(try PDFFixtures.pageCount(at: out) == 1)
+    }
+
+    /// The rebuild that sheds XMP would otherwise drop the outline (it lives on the catalog, not the
+    /// pages); reattaching `outlineRoot` must keep bookmarks intact through a clean.
+    @Test func cleaningPreservesBookmarks() throws {
+        let dir = FixtureDir()
+        let base = dir.url("base.pdf"), src = dir.url("outlined.pdf"), out = dir.url("cleaned.pdf")
+        try PDFFixtures.writePDF(pageCount: 3, to: base)
+        let doc = try #require(PDFDocument(url: base))
+        let root = PDFOutline()
+        for (i, item) in [("Intro", 0), ("Appendix", 2)].enumerated() {
+            let child = PDFOutline()
+            child.label = item.0
+            if let page = doc.page(at: item.1) {
+                child.destination = PDFDestination(page: page, at: CGPoint(x: 0, y: 792))
+            }
+            root.insertChild(child, at: i)
+        }
+        doc.outlineRoot = root
+        #expect(doc.write(to: src))
+        #expect(try #require(PDFDocument(url: src)).outlineRoot?.numberOfChildren == 2)   // sanity
+
+        try PDFToolkit.writeMetadata(inputURL: src, outputURL: out, fields: .cleared)
+
+        let cleaned = try #require(PDFDocument(url: out))
+        #expect(cleaned.outlineRoot?.numberOfChildren == 2)
+        #expect(cleaned.outlineRoot?.child(at: 0)?.label == "Intro")
+    }
+
+    /// The form guard: a real catalog `/AcroForm` is detected so the rebuild is skipped for it (the
+    /// rebuild would flatten the form), while ordinary PDFs report no form and take the XMP-dropping path.
+    @Test func detectsInteractiveFormsInTheCatalog() throws {
+        let dir = FixtureDir()
+        let form = dir.url("form.pdf"), plain = dir.url("plain.pdf")
+        try PDFFixtures.writeRawPDF(includeAcroForm: true, to: form)
+        try PDFFixtures.writePDF(pageCount: 1, to: plain)
+
+        #expect(try PDFFixtures.catalogHasEntry("AcroForm", at: form))   // sanity
+        #expect(PDFToolkit.hasInteractiveForm(try #require(PDFDocument(url: form))) == true)
+        #expect(PDFToolkit.hasInteractiveForm(try #require(PDFDocument(url: plain))) == false)
+    }
+
+    /// A form-bearing PDF skips the rebuild and cleans via the in-place Info clear — it must still
+    /// succeed and keep its page (XMP may remain for that file; the documented tradeoff to keep the
+    /// form fillable).
+    @Test func formBearingPDFCleansViaTheInPlacePath() throws {
+        let dir = FixtureDir()
+        let form = dir.url("form.pdf"), out = dir.url("cleaned.pdf")
+        try PDFFixtures.writeRawPDF(xmpCreator: "SECRET", includeAcroForm: true, to: form)
+
+        try PDFToolkit.writeMetadata(inputURL: form, outputURL: out, fields: .cleared)
+
+        #expect(try PDFFixtures.pageCount(at: out) == 1)
+    }
 }

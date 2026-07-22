@@ -124,6 +124,55 @@ enum PDFFixtures {
         try Data([0xDE, 0xAD, 0xBE, 0xEF]).write(to: url, options: .atomic)
     }
 
+    /// A hand-authored minimal 1-page PDF that can carry catalog-level constructs PDFKit's writer can't
+    /// produce: an XMP `/Metadata` packet (the metadata-leak vector) and/or an interactive `/AcroForm`.
+    /// Byte offsets for the xref table are computed as the buffer is assembled, so the result loads as a
+    /// real `PDFDocument` (and via CoreGraphics for catalog probing). See ``catalogHasEntry(_:at:)``.
+    static func writeRawPDF(xmpCreator: String? = nil, includeAcroForm: Bool = false, to url: URL) throws {
+        var catalog = "<< /Type /Catalog /Pages 2 0 R"
+        if xmpCreator != nil { catalog += " /Metadata 5 0 R" }
+        if includeAcroForm { catalog += " /AcroForm << /Fields [] >>" }
+        catalog += " >>"
+
+        var bodies = [
+            catalog,
+            "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+            "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Resources << >> >>",
+            "<< /Length 0 >>\nstream\n\nendstream",
+        ]
+        if let xmpCreator {
+            let packet = "<?xpacket begin=\"\u{FEFF}\" id=\"W5M0MpCehiHzreSzNTczkc9d\"?>"
+                + "<x:xmpmeta xmlns:x=\"adobe:ns:meta/\"><rdf:RDF xmlns:rdf=\"http://www.w3.org/1999/02/22-rdf-syntax-ns#\">"
+                + "<rdf:Description xmlns:dc=\"http://purl.org/dc/elements/1.1/\">"
+                + "<dc:creator><rdf:Seq><rdf:li>\(xmpCreator)</rdf:li></rdf:Seq></dc:creator>"
+                + "</rdf:Description></rdf:RDF></x:xmpmeta><?xpacket end=\"w\"?>"
+            bodies.append("<< /Type /Metadata /Subtype /XML /Length \(packet.utf8.count) >>\nstream\n\(packet)\nendstream")
+        }
+
+        var pdf = "%PDF-1.5\n"
+        var offsets: [Int] = []
+        for (i, body) in bodies.enumerated() {
+            offsets.append(pdf.utf8.count)
+            pdf += "\(i + 1) 0 obj\n\(body)\nendobj\n"
+        }
+        let xrefOffset = pdf.utf8.count
+        let size = bodies.count + 1
+        pdf += "xref\n0 \(size)\n0000000000 65535 f \n"
+        for off in offsets { pdf += String(format: "%010d 00000 n \n", off) }
+        pdf += "trailer\n<< /Size \(size) /Root 1 0 R >>\nstartxref\n\(xrefOffset)\n%%EOF"
+        try Data(pdf.utf8).write(to: url, options: .atomic)
+    }
+
+    /// Whether the PDF's document catalog carries an entry under `name` (e.g. "Metadata" for the XMP
+    /// packet, "AcroForm" for a form) — read straight off the CoreGraphics catalog, so it sees
+    /// catalog-level constructs PDFKit doesn't surface. Presence-only; doesn't decode the value.
+    static func catalogHasEntry(_ name: String, at url: URL) throws -> Bool {
+        let doc = try #require(PDFDocument(url: url))
+        guard let catalog = doc.documentRef?.catalog else { return false }
+        var obj: CGPDFObjectRef?
+        return CGPDFDictionaryGetObject(catalog, name, &obj)
+    }
+
     /// A marker PDF encrypted with an OWNER password only (empty user password): it opens with no
     /// prompt (`isLocked == false`) yet reports `isEncrypted == true` — the shape of third-party
     /// "restrictions-only" PDFs. PDFKit's writer can't produce one (`PDFToolkit.encrypt` always

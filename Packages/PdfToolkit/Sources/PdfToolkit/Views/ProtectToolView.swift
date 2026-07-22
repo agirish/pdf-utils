@@ -95,7 +95,8 @@ struct ProtectToolView: View {
             lockedPreviewMessage: "This PDF is password-protected. Enter its password on the left, then remove it to preview and unlock the file.",
             runSingle: { url in await run(url) }
         ) {
-            if let saveSummary {
+            // The banner is a single-file receipt; don't let it linger once the queue is a batch.
+            if let saveSummary, runner.items.count <= 1 {
                 ToolSaveBanner(accent: accent, summary: saveSummary)
             }
             modeCard
@@ -108,6 +109,11 @@ struct ProtectToolView: View {
             // A different (or removed) file: the last run's confirmation no longer describes what's loaded.
             saveSummary = nil
         }
+        .onChange(of: runner.items.count) { _, _ in
+            // Adding a second file (which leaves the first URL unchanged) turns this into a batch;
+            // the single-file receipt no longer applies.
+            saveSummary = nil
+        }
         .fileExporter(
             isPresented: $showExporter,
             document: exportDoc,
@@ -116,9 +122,11 @@ struct ProtectToolView: View {
         ) { result in
             let savedBytes = exportDoc?.data.count
             exportDoc = nil
-            clearPasswords()
             switch result {
             case .success(let url):
+                // Clear the password only on a real save — a cancelled dialog should leave the fields
+                // populated so the user can retry, matching the error path (which also retains them).
+                clearPasswords()
                 PDFExportCoordinator.didExport(to: url, toolTitle: Tool.protect.title, bytes: savedBytes)
                 if var summary = pendingSaveSummary {
                     summary.url = url
@@ -275,10 +283,9 @@ struct ProtectToolView: View {
         let summary = summaryText(mode: modeSnapshot, style: styleSnapshot)
 
         do {
-            let protection = ProtectionOptions(
-                userPassword: styleSnapshot == .restrictEditing ? "" : newPassword,
-                ownerPassword: newPassword,
-                permissionBits: styleSnapshot == .restrictEditing ? PDFPermissionPreset.openAndPrintOnly : nil
+            let protection = ProtectionOptions.addPassword(
+                restrictEditing: styleSnapshot == .restrictEditing,
+                password: newPassword
             )
             let removalSecret = currentPassword
             let data = try await PDFBackgroundWork.run {

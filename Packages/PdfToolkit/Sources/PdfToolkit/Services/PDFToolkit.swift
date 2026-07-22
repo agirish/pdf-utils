@@ -50,6 +50,17 @@ enum PDFPermissionPreset {
     }
 }
 
+extension ProtectionOptions {
+    /// The options for Protect's Add-password styles. The single source both the tool's single-file
+    /// run and the batch builder derive from, so a change to a style can't silently make the two paths
+    /// encrypt differently. `restrictEditing` picks the style (see ``ProtectionOptions``).
+    static func addPassword(restrictEditing: Bool, password: String) -> ProtectionOptions {
+        restrictEditing
+            ? ProtectionOptions(userPassword: "", ownerPassword: password, permissionBits: PDFPermissionPreset.openAndPrintOnly)
+            : ProtectionOptions(userPassword: password, ownerPassword: password, permissionBits: nil)
+    }
+}
+
 /// A decoded logo carried by value so ``WatermarkOptions`` stays `Sendable` across the PDF serial
 /// queue and can be snapshotted into a batch operation. The `CGImage` is immutable and only ever
 /// read (drawn), so `@unchecked Sendable` is safe — nothing mutates it after decode.

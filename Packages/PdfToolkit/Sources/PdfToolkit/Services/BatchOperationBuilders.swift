@@ -47,10 +47,7 @@ extension BatchOperation {
     /// password only and the file opens/prints freely while copying and editing stay locked.
     static func encryptConfig(restrictEditing: Bool, newPassword: String, confirmPassword: String) -> BatchOperation? {
         guard !newPassword.isEmpty, newPassword == confirmPassword else { return nil }
-        let options = restrictEditing
-            ? ProtectionOptions(userPassword: "", ownerPassword: newPassword, permissionBits: PDFPermissionPreset.openAndPrintOnly)
-            : ProtectionOptions(userPassword: newPassword, ownerPassword: newPassword, permissionBits: nil)
-        return .encrypt(options)
+        return .encrypt(ProtectionOptions.addPassword(restrictEditing: restrictEditing, password: newPassword))
     }
 
     /// Protect · Remove password: `nil` until a current password is entered. Mirrors `ProtectToolView`.

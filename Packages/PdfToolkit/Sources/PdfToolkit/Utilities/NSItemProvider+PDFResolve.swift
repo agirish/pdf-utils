@@ -5,6 +5,16 @@ import UniformTypeIdentifiers
 /// when SwiftUI’s drop handler resumes (providers are not `Sendable`).
 @MainActor
 extension NSItemProvider {
+    /// The first dropped provider that resolves to a PDF, in drop order — the "first PDF wins" rule
+    /// every single-file PDF tool's drop target used to inline. `nil` if none resolve. Callers keep the
+    /// one-liner that assigns the result to their own `inputURL` state.
+    static func firstResolvablePDFURL(from providers: [NSItemProvider]) async -> URL? {
+        for provider in providers {
+            if let url = await provider.resolvePDFItemURL() { return url }
+        }
+        return nil
+    }
+
     func resolvePDFItemURL() async -> URL? {
         // A provider that matched UTType.pdf IS a PDF — don't second-guess it by extension, or
         // valid extensionless/renamed PDFs get silently rejected on drop.

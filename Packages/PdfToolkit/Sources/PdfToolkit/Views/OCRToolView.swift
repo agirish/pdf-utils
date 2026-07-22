@@ -373,11 +373,8 @@ struct OCRToolView: View {
 
     private func consumeDroppedProviders(_ providers: [NSItemProvider]) {
         Task { @MainActor in
-            for p in providers {
-                if let url = await p.resolvePDFItemURL() {
-                    inputURL = url
-                    return
-                }
+            if let url = await NSItemProvider.firstResolvablePDFURL(from: providers) {
+                inputURL = url
             }
         }
     }

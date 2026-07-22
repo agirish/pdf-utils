@@ -71,6 +71,10 @@ struct SinglePDFPreviewColumn: View {
     /// cleared on exit or drop so it never persists.
     @State private var dropTargetID: Int? = nil
 
+    @Environment(\.colorScheme) private var scheme
+    @Environment(\.colorSchemeContrast) private var contrast
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
     var body: some View {
         Group {
             if !pages.isEmpty || isGenerating {
@@ -93,7 +97,7 @@ struct SinglePDFPreviewColumn: View {
                         if let selectionPrompt {
                             Label(selectionPrompt, systemImage: "hand.tap")
                                 .font(.subheadline.weight(.medium))
-                                .foregroundStyle(accent)
+                                .foregroundStyle(Color.accentText(accent, on: scheme, contrast: contrast))
                                 .frame(maxWidth: .infinity, alignment: .leading)
                                 .fixedSize(horizontal: false, vertical: true)
                         }
@@ -101,7 +105,7 @@ struct SinglePDFPreviewColumn: View {
                         if let reorderHint {
                             Label(reorderHint, systemImage: "hand.draw")
                                 .font(.subheadline.weight(.medium))
-                                .foregroundStyle(accent)
+                                .foregroundStyle(Color.accentText(accent, on: scheme, contrast: contrast))
                                 .frame(maxWidth: .infinity, alignment: .leading)
                                 .fixedSize(horizontal: false, vertical: true)
                         }
@@ -188,7 +192,7 @@ struct SinglePDFPreviewColumn: View {
                         .padding(7)
                 }
                 .scaleEffect(dropTargetID == spec.id && draggingSpecID != spec.id ? 1.06 : 1)
-                .animation(.easeInOut(duration: 0.12), value: dropTargetID)
+                .animation(reduceMotion ? nil : .easeInOut(duration: 0.12), value: dropTargetID)
                 .onDrag {
                     draggingSpecID = spec.id
                     // Register under our private, in-process type — not plain `.text` — so a stray text
@@ -346,7 +350,8 @@ struct SinglePDFPreviewColumn: View {
 
             Text("\(spec.id)")
                 .font(.caption.weight(.bold))
-                .foregroundStyle(.white)
+                // White on a light accent fill (amber ≈2.1:1) fails; pick the legible ink for the fill.
+                .foregroundStyle(Color.onFillLabel(accent))
                 .padding(.horizontal, 6)
                 .padding(.vertical, 2)
                 .background(accent)

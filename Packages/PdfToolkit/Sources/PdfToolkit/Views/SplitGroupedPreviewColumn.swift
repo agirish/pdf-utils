@@ -17,6 +17,17 @@ enum SplitGroupPalette {
     ]
 
     static func color(_ index: Int) -> Color { colors[((index % colors.count) + colors.count) % colors.count] }
+
+    /// A per-group border dash pattern for the Differentiate-Without-Color accommodation: solid,
+    /// dashed, then dotted, cycling — so consecutive group frames are distinguishable by line style,
+    /// not hue. An empty array is a solid stroke.
+    static func borderDash(_ index: Int) -> [CGFloat] {
+        switch ((index % 3) + 3) % 3 {
+        case 1: return [7, 4]
+        case 2: return [2, 4]
+        default: return []
+        }
+    }
 }
 
 /// Right-hand preview for Split's visual grid: the document's pages, grouped into one colored frame per
@@ -51,6 +62,10 @@ struct SplitGroupedPreviewColumn: View {
     /// Produces one cell's image off the main actor (via the loader's serial queue). Runs when a cell
     /// appears and its key misses the shared cache.
     let render: (PreviewPageSpec) async -> NSImage?
+
+    @Environment(\.colorScheme) private var scheme
+    @Environment(\.colorSchemeContrast) private var contrast
+    @Environment(\.accessibilityDifferentiateWithoutColor) private var differentiateWithoutColor
 
     private var isInteractive: Bool { onToggleCut != nil }
 
@@ -121,7 +136,7 @@ struct SplitGroupedPreviewColumn: View {
                     systemImage: "scissors"
                 )
                 .font(.subheadline.weight(.medium))
-                .foregroundStyle(accent)
+                .foregroundStyle(Color.accentText(accent, on: scheme, contrast: contrast))
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .fixedSize(horizontal: false, vertical: true)
             }
@@ -177,7 +192,9 @@ struct SplitGroupedPreviewColumn: View {
             HStack(spacing: 8) {
                 Text("PDF \(index + 1)")
                     .font(.caption.weight(.bold))
-                    .foregroundStyle(.white)
+                    // Legible ink for the group's own fill color, not a fixed white that vanishes on
+                    // the lighter palette entries (amber/terracotta).
+                    .foregroundStyle(Color.onFillLabel(color))
                     .padding(.horizontal, 8)
                     .padding(.vertical, 3)
                     .background(color)
@@ -211,8 +228,17 @@ struct SplitGroupedPreviewColumn: View {
                 .fill(color.opacity(0.08))
         }
         .overlay {
+            // When the user asks not to rely on color alone, give each consecutive group frame a
+            // distinct line style (solid / dashed / dotted, cycling) so adjacent files are told apart
+            // by their border, not just by hue — the "PDF N" chip already names them.
             RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .strokeBorder(color.opacity(0.55), lineWidth: 1.5)
+                .strokeBorder(
+                    color.opacity(0.55),
+                    style: StrokeStyle(
+                        lineWidth: 1.5,
+                        dash: differentiateWithoutColor ? SplitGroupPalette.borderDash(index) : []
+                    )
+                )
         }
         .accessibilityElement(children: .contain)
         .accessibilityLabel("File \(index + 1), \(group.count) page\(group.count == 1 ? "" : "s")")
@@ -300,7 +326,8 @@ private struct SplitGroupCell: View {
 
             Text("\(spec.id)")
                 .font(.caption.weight(.bold))
-                .foregroundStyle(.white)
+                // Legible ink for the group's fill, not a fixed white that fails on the light entries.
+                .foregroundStyle(Color.onFillLabel(groupColor))
                 .padding(.horizontal, 6)
                 .padding(.vertical, 2)
                 .background(groupColor)

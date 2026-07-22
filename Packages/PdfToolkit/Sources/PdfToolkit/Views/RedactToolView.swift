@@ -4,6 +4,8 @@ import UniformTypeIdentifiers
 
 struct RedactToolView: View {
     @Environment(\.toolAccent) private var accent
+    @Environment(\.colorScheme) private var scheme
+    @Environment(\.colorSchemeContrast) private var contrast
     @AppStorage(SettingsKeys.redactRasterLongEdge)
     private var rasterLongEdge: Double = 4000
 
@@ -369,7 +371,7 @@ struct RedactToolView: View {
                 }
                 .buttonStyle(.borderless)
                 .font(.subheadline.weight(.medium))
-                .foregroundStyle(accent)
+                .foregroundStyle(Color.accentText(accent, on: scheme, contrast: contrast))
             }
             Text("Click a region here or on the page to select it, then drag it to move or drag its corner handle to resize.")
                 .font(.caption)
@@ -390,7 +392,7 @@ struct RedactToolView: View {
                     }
                     .buttonStyle(.borderless)
                     .font(.caption.weight(.medium))
-                    .foregroundStyle(accent)
+                    .foregroundStyle(Color.accentText(accent, on: scheme, contrast: contrast))
                 }
             }
             ForEach(marks) { mark in
@@ -405,7 +407,7 @@ struct RedactToolView: View {
                             .padding(.horizontal, 6)
                             .padding(.vertical, 2)
                             .background(Capsule().fill(accent.opacity(0.14)))
-                            .foregroundStyle(accent)
+                            .foregroundStyle(Color.accentText(accent, on: scheme, contrast: contrast))
                             .accessibilityLabel("Auto-detected match")
                     }
                     Button {
@@ -516,7 +518,7 @@ struct RedactToolView: View {
                 RoundedRectangle(cornerRadius: 8, style: .continuous)
                     .strokeBorder(accent.opacity(0.28), lineWidth: 1)
             }
-            .foregroundStyle(accent)
+            .foregroundStyle(Color.accentText(accent, on: scheme, contrast: contrast))
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)

@@ -40,6 +40,8 @@ private struct MergePreviewLayout {
 
 struct MergeToolView: View {
     @Environment(\.toolAccent) private var accent
+    @Environment(\.colorScheme) private var scheme
+    @Environment(\.colorSchemeContrast) private var contrast
     @State private var entries: [MergeEntry] = []
     @State private var busy = false
     @State private var alertMessage: String?
@@ -300,7 +302,7 @@ struct MergeToolView: View {
                         }
                         .buttonStyle(.borderless)
                         .font(.caption.weight(.medium))
-                        .foregroundStyle(accent)
+                        .foregroundStyle(Color.accentText(accent, on: scheme, contrast: contrast))
                         .help("Bring back every page dropped from the preview")
                     }
                 }
@@ -447,7 +449,7 @@ struct MergeToolView: View {
             } else {
                 Text("\(plan.indices.count) of \(plan.rawCount) pages")
                     .font(.caption.weight(.medium))
-                    .foregroundStyle(accent)
+                    .foregroundStyle(Color.accentText(accent, on: scheme, contrast: contrast))
             }
         } else if pageSummaryLoading {
             Text("Reading pages…")

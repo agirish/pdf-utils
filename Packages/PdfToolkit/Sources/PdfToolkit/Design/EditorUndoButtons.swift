@@ -13,6 +13,8 @@ struct EditorUndoButtons: View {
     var accent: Color
     let undo: () -> Void
     let redo: () -> Void
+    @Environment(\.colorScheme) private var scheme
+    @Environment(\.colorSchemeContrast) private var contrast
 
     var body: some View {
         HStack(spacing: 4) {
@@ -32,6 +34,6 @@ struct EditorUndoButtons: View {
         }
         .buttonStyle(.borderless)
         .font(.body.weight(.medium))
-        .foregroundStyle(accent)
+        .foregroundStyle(Color.accentText(accent, on: scheme, contrast: contrast))
     }
 }

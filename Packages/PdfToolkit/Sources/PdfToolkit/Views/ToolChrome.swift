@@ -117,16 +117,20 @@ extension EnvironmentValues {
 struct RowIndexBadge: View {
     let number: Int
     let accent: Color
+    @Environment(\.colorScheme) private var scheme
+    @Environment(\.colorSchemeContrast) private var contrast
 
     var body: some View {
         ZStack {
             RoundedRectangle(cornerRadius: 8, style: .continuous)
                 .fill(accent.opacity(0.14))
                 .frame(width: 30, height: 30)
+            // The number is accent-as-text on a faint accent chip; route it through the
+            // appearance-adjusted accent so it clears contrast on both light and dark cards.
             Text("\(number)")
                 .font(.subheadline.weight(.bold))
                 .monospacedDigit()
-                .foregroundStyle(accent)
+                .foregroundStyle(Color.accentText(accent, on: scheme, contrast: contrast))
         }
         .accessibilityHidden(true)
     }

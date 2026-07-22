@@ -8,6 +8,8 @@ private enum SignatureMode: Hashable {
 }
 
 struct FillSignToolView: View {
+    @Environment(\.colorScheme) private var scheme
+    @Environment(\.colorSchemeContrast) private var contrast
     @State private var inputURL: URL?
     @State private var pdfDocument: PDFDocument?
     @State private var items: [FillSignItem] = []
@@ -432,7 +434,7 @@ struct FillSignToolView: View {
                         Label("Delete", systemImage: "trash")
                     }
                     .buttonStyle(.borderless)
-                    .foregroundStyle(accent)
+                    .foregroundStyle(Color.accentText(accent, on: scheme, contrast: contrast))
                 }
 
                 switch items[index].content {
@@ -482,7 +484,7 @@ struct FillSignToolView: View {
                 }
                 .buttonStyle(.borderless)
                 .font(.subheadline.weight(.medium))
-                .foregroundStyle(accent)
+                .foregroundStyle(Color.accentText(accent, on: scheme, contrast: contrast))
             }
             ForEach(items) { item in
                 Button {

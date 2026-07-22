@@ -6,6 +6,7 @@ struct DashboardView: View {
     @EnvironmentObject private var settings: SettingsPresenter
     @EnvironmentObject private var help: HelpPresenter
     @Environment(\.openWindow) private var openWindow
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     @AppStorage(LiquidGlass.surfaceStyleKey)
     private var surfaceStyleRaw: String = SurfaceStyle.unified.rawValue
@@ -61,7 +62,11 @@ struct DashboardView: View {
     /// The spring the reorder/pinning reflow settles with — a light overshoot so tiles and sections
     /// snap into place rather than sliding linearly. Shared by the drag drops and the accessibility
     /// moves so every rearrangement lands the same way. (Reset order itself now lives in Settings.)
-    private let reorderSpring: Animation = .spring(response: 0.3, dampingFraction: 0.72)
+    /// Collapses to an instant, motionless change when the user has asked to reduce motion — the
+    /// reflow still happens, just without the spring travel/overshoot.
+    private var reorderSpring: Animation {
+        reduceMotion ? .linear(duration: 0) : .spring(response: 0.3, dampingFraction: 0.72)
+    }
 
     /// Tools matching the current query, fuzzy-ranked by the very matcher the ⌘K palette uses
     /// (`rankedToolMatches`), flattened across categories with non-matches dropped. Only read while
@@ -587,6 +592,8 @@ struct ToolTileView: View {
     var onTogglePin: (() -> Void)? = nil
     @State private var hovered = false
     @Environment(\.colorScheme) private var scheme
+    @Environment(\.colorSchemeContrast) private var contrast
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     private var dark: Bool { scheme == .dark }
 
     private let chrome = DashboardTileChrome()
@@ -657,7 +664,9 @@ struct ToolTileView: View {
                 Image(systemName: "arrow.right")
             }
             .font(.caption.weight(.semibold))
-            .foregroundStyle(accent)
+            // The hover "Open" cue is accent-as-text; route it through the appearance-adjusted accent
+            // so it clears contrast against the tile surface in both light and dark.
+            .foregroundStyle(Color.accentText(accent, on: scheme, contrast: contrast))
             .opacity(hovered ? 1 : 0)
             .offset(x: hovered ? 0 : -4)
         }
@@ -690,8 +699,8 @@ struct ToolTileView: View {
         }
         .overlay(alignment: .topTrailing) { pinButton }
         .shadow(color: .black.opacity(shadowOpacity), radius: shadowRadius, y: shadowY)
-        .scaleEffect(hovered ? 1.02 : 1)
-        .animation(.easeOut(duration: 0.18), value: hovered)
+        .scaleEffect(hovered && !reduceMotion ? 1.02 : 1)
+        .animation(reduceMotion ? nil : .easeOut(duration: 0.18), value: hovered)
         .onHover { hovered = $0 }
         .accessibilityElement(children: .combine)
         .accessibilityLabel("\(tool.title). \(tool.subtitle)\(isPinned ? ". Pinned" : "")")

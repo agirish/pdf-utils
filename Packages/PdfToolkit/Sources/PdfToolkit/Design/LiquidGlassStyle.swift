@@ -270,20 +270,11 @@ public extension View {
     }
 
     /// The material fill for one content surface — the single place the level → appearance decision
-    /// is made (SyncCloud `Design/glassSurface`).
-    @ViewBuilder
+    /// is made (SyncCloud `Design/glassSurface`). Reads the accessibility environment (via
+    /// `GlassSurface`) so Reduce Transparency / Increase Contrast can swap the translucent glass for an
+    /// opaque panel; the Clear/Solid level logic is otherwise untouched.
     func glassSurface(_ level: GlassLevel, cornerRadius: CGFloat) -> some View {
-        let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-        switch level {
-        case .solid:
-            self.background(Color(nsColor: .controlBackgroundColor), in: shape)
-        case .clear, .frosted:
-            if #available(macOS 26.0, *) {
-                self.glassEffect(level == .frosted ? .regular : .clear, in: .rect(cornerRadius: cornerRadius))
-            } else {
-                self.background(level == .frosted ? Material.thinMaterial : Material.ultraThinMaterial, in: shape)
-            }
-        }
+        modifier(GlassSurface(level: level, cornerRadius: cornerRadius))
     }
 
     /// Frosted glass card style for floating overlay chrome (the Settings overlay). Applies
@@ -358,12 +349,19 @@ private struct LiquidGlassBackground: ViewModifier {
     let hue: LiquidGlassHue
     let respectTopSafeArea: Bool
     @Environment(\.colorScheme) private var scheme
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+    @Environment(\.colorSchemeContrast) private var contrast
 
     func body(content: Content) -> some View {
         let dark = scheme == .dark
         let t = level.backgroundIntensity
         // Only `.clear` goes see-through — the material base hides the desktop otherwise (SyncCloud parity).
         let seeThrough = level == .clear
+        // Reduce Transparency / Increase Contrast: drop the layered material + accent gradient wash for
+        // a flat, opaque ground. `.clear`'s desktop vibrancy is handled by `BehindWindowGlass`'s own
+        // NSVisualEffectView (which honors the system setting), so this only replaces the frosted/solid
+        // material stack — the Clear/Solid level logic stays intact.
+        let wantsOpaque = (reduceTransparency || contrast == .increased) && !seeThrough
         let safeEdges: Edge.Set = respectTopSafeArea ? [.horizontal, .bottom] : .all
 
         let colors = hue.gradientColors
@@ -380,44 +378,50 @@ private struct LiquidGlassBackground: ViewModifier {
                 BehindWindowGlass(isEnabled: seeThrough)
                     .ignoresSafeArea()
 
-                // Dark-only deep base: a near-black, faintly-cool gradient beneath the material so the
-                // ground reads as graded depth rather than one muddy plane.
-                if !seeThrough && dark {
-                    LinearGradient(
-                        colors: [Color(red: 0.065, green: 0.082, blue: 0.115),
-                                 Color(red: 0.02, green: 0.027, blue: 0.043)],
-                        startPoint: .top,
-                        endPoint: .bottom
-                    )
-                    .ignoresSafeArea(edges: safeEdges)
-                }
-
-                LinearGradient(
-                    colors: gradientColors,
-                    startPoint: .topLeading,
-                    endPoint: .bottomTrailing
-                )
-                .ignoresSafeArea(edges: safeEdges)
-
-                if !seeThrough {
-                    // Base material so content stays readable. Dark thins it a touch so the deep base
-                    // reads through instead of flattening back to system gray.
-                    Color.clear
-                        .background(.thinMaterial.opacity((dark ? 0.27 : 0.45) + 0.20 * t))
+                if wantsOpaque {
+                    // Accessibility fallback: one opaque window-colored plane, no translucency or wash.
+                    Color(nsColor: .windowBackgroundColor)
                         .ignoresSafeArea(edges: safeEdges)
-                }
+                } else {
+                    // Dark-only deep base: a near-black, faintly-cool gradient beneath the material so the
+                    // ground reads as graded depth rather than one muddy plane.
+                    if !seeThrough && dark {
+                        LinearGradient(
+                            colors: [Color(red: 0.065, green: 0.082, blue: 0.115),
+                                     Color(red: 0.02, green: 0.027, blue: 0.043)],
+                            startPoint: .top,
+                            endPoint: .bottom
+                        )
+                        .ignoresSafeArea(edges: safeEdges)
+                    }
 
-                // Dark-only accent glow: a soft pool of the hue at the top, over the material so the
-                // accent reads. `.none` opts out (it defers to the system accent).
-                if !seeThrough && dark && hue != .none {
-                    RadialGradient(
-                        colors: [hue.accentColor.opacity(0.26 + 0.10 * t), .clear],
-                        center: .top,
-                        startRadius: 0,
-                        endRadius: 700
+                    LinearGradient(
+                        colors: gradientColors,
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
                     )
-                    .blendMode(.plusLighter)
                     .ignoresSafeArea(edges: safeEdges)
+
+                    if !seeThrough {
+                        // Base material so content stays readable. Dark thins it a touch so the deep base
+                        // reads through instead of flattening back to system gray.
+                        Color.clear
+                            .background(.thinMaterial.opacity((dark ? 0.27 : 0.45) + 0.20 * t))
+                            .ignoresSafeArea(edges: safeEdges)
+                    }
+
+                    // Dark-only accent glow: a soft pool of the hue at the top, over the material so the
+                    // accent reads. `.none` opts out (it defers to the system accent).
+                    if !seeThrough && dark && hue != .none {
+                        RadialGradient(
+                            colors: [hue.accentColor.opacity(0.26 + 0.10 * t), .clear],
+                            center: .top,
+                            startRadius: 0,
+                            endRadius: 700
+                        )
+                        .blendMode(.plusLighter)
+                        .ignoresSafeArea(edges: safeEdges)
+                    }
                 }
             }
         }
@@ -441,6 +445,38 @@ private struct OverlayCardChrome: ViewModifier {
         content
             .overlay(shape.strokeBorder(border, lineWidth: dark ? 1 : 0.5))
             .shadow(color: .black.opacity(dark ? 0.55 : 0.3), radius: dark ? 34 : 30, y: dark ? 12 : 8)
+    }
+}
+
+/// Backs `View.glassSurface`. Picks the fill for one content surface from the glass level and, when
+/// the viewer has turned on **Reduce Transparency** or **Increase Contrast**, drops the translucent
+/// material/`glassEffect` for an opaque panel plus a firmer hairline — so text never competes with
+/// whatever would otherwise read through the glass. `.solid` is already opaque (unaffected), and the
+/// Clear/Frosted level distinction only matters for the translucent path, so the accommodation keeps
+/// the level logic intact. Every surface that routes through `glassSurface` — form cards, glass bars,
+/// the overlay cards — inherits this fallback for free.
+private struct GlassSurface: ViewModifier {
+    let level: GlassLevel
+    let cornerRadius: CGFloat
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+    @Environment(\.colorSchemeContrast) private var contrast
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+        let wantsOpaque = reduceTransparency || contrast == .increased
+        if level == .solid {
+            content.background(Color(nsColor: .controlBackgroundColor), in: shape)
+        } else if wantsOpaque {
+            // Accessibility fallback: an opaque panel with a stronger edge, not translucent glass.
+            content
+                .background(Color(nsColor: .controlBackgroundColor), in: shape)
+                .overlay(shape.strokeBorder(Color.primary.opacity(0.28), lineWidth: 1))
+        } else if #available(macOS 26.0, *) {
+            content.glassEffect(level == .frosted ? .regular : .clear, in: .rect(cornerRadius: cornerRadius))
+        } else {
+            content.background(level == .frosted ? Material.thinMaterial : Material.ultraThinMaterial, in: shape)
+        }
     }
 }
 

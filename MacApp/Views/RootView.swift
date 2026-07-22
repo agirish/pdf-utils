@@ -9,15 +9,8 @@ struct RootView: View {
 
     @AppStorage(LiquidGlass.appearanceModeKey)
     private var appearanceModeRaw: String = AppearanceMode.system.rawValue
-    @AppStorage(LiquidGlass.levelKey)
-    private var glassLevelRaw: String = LiquidGlass.defaultLevel.rawValue
-    @AppStorage(LiquidGlass.hueKey)
-    private var glassHueRaw: String = LiquidGlass.defaultHue.rawValue
-    @AppStorage(LiquidGlass.tintKey)
-    private var glassTint: Double = LiquidGlass.defaultTint
 
-    private var glassLevel: GlassLevel { GlassLevel(rawValue: glassLevelRaw) ?? LiquidGlass.defaultLevel }
-    private var glassHue: LiquidGlassHue { LiquidGlassHue(rawValue: glassHueRaw) ?? LiquidGlass.defaultHue }
+    private let glass = GlassAppearance()
 
     /// The tool navigation path, owned here (not implicit) so launch can open straight to the last-used
     /// tool. Seeded in `init` rather than `onAppear`: mutating the path on the first render cycle races
@@ -83,7 +76,7 @@ struct RootView: View {
     private var settingsOverlay: some View {
         ZStack {
             Rectangle()
-                .fill(Color.black.opacity(glassLevel.overlayScrimOpacity))
+                .fill(Color.black.opacity(glass.level.overlayScrimOpacity))
                 .ignoresSafeArea()
                 .onTapGesture { settings.close() }
 
@@ -96,9 +89,7 @@ struct RootView: View {
 
     private var settingsCard: some View {
         SettingsView(selection: $settings.tab, onClose: { settings.close() })
-            .contentSurface(hue: glassHue, tint: glassTint)
-            .glassCardStyle(level: glassLevel)
-            .overlayCardChrome()
+            .overlayGlassCard()
     }
 
     /// In-window ⌘K palette overlay — the exact parallel of `settingsOverlay`: the same dimmed,
@@ -108,7 +99,7 @@ struct RootView: View {
     private var quickActionsOverlay: some View {
         ZStack {
             Rectangle()
-                .fill(Color.black.opacity(glassLevel.overlayScrimOpacity))
+                .fill(Color.black.opacity(glass.level.overlayScrimOpacity))
                 .ignoresSafeArea()
                 .onTapGesture { quickActions.close() }
 
@@ -125,9 +116,7 @@ struct RootView: View {
             onActivate: { activateQuickAction($0) },
             onClose: { quickActions.close() }
         )
-        .contentSurface(hue: glassHue, tint: glassTint)
-        .glassCardStyle(level: glassLevel)
-        .overlayCardChrome()
+        .overlayGlassCard()
     }
 
     /// In-window Help overlay — the exact parallel of `settingsOverlay`: a dimmed, tap-to-dismiss
@@ -135,7 +124,7 @@ struct RootView: View {
     private var helpOverlay: some View {
         ZStack {
             Rectangle()
-                .fill(Color.black.opacity(glassLevel.overlayScrimOpacity))
+                .fill(Color.black.opacity(glass.level.overlayScrimOpacity))
                 .ignoresSafeArea()
                 .onTapGesture { help.close() }
 
@@ -148,9 +137,7 @@ struct RootView: View {
 
     private var helpCard: some View {
         HelpView(initialTopicID: help.initialTopicID, onClose: { help.close() })
-            .contentSurface(hue: glassHue, tint: glassTint)
-            .glassCardStyle(level: glassLevel)
-            .overlayCardChrome()
+            .overlayGlassCard()
     }
 
     /// Runs a chosen Quick Action, then dismisses the palette. Navigating replaces the stack with just

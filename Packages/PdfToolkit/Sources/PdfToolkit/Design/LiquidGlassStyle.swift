@@ -312,12 +312,33 @@ public extension View {
         modifier(OverlayCardChrome(cornerRadius: cornerRadius))
     }
 
+    /// The full glass treatment shared by the in-window overlay cards — Settings, the ⌘K palette, and
+    /// Help — bundling the accent wash, the glass card material, and the overlay chrome. Reads the live
+    /// appearance itself (via `GlassAppearance`), so all three cards track the Glass level / hue / tint
+    /// together and no longer each re-spell `contentSurface(…).glassCardStyle(…).overlayCardChrome()`.
+    func overlayGlassCard() -> some View {
+        modifier(OverlayGlassCardStyle())
+    }
+
     /// The accent-color wash driven by the Tint slider (`tint`, 0...1). Apply ONCE per region.
     /// `.none` gets no wash at any tint (its accentColor is the system accent, which would repaint).
     @ViewBuilder
     func contentSurface(hue: LiquidGlassHue = LiquidGlass.defaultHue, tint: Double = 0) -> some View {
         let wash = hue == .none ? Color.clear : hue.accentColor.opacity(max(0.0, min(1.0, tint)) * 0.32)
         self.background(wash)
+    }
+}
+
+/// Backs `overlayGlassCard()`. Reads the live glass appearance so the overlay cards wash + frost +
+/// chrome themselves without their host re-declaring the appearance triad.
+private struct OverlayGlassCardStyle: ViewModifier {
+    private let glass = GlassAppearance()
+
+    func body(content: Content) -> some View {
+        content
+            .contentSurface(hue: glass.hue, tint: glass.tint)
+            .glassCardStyle(level: glass.level)
+            .overlayCardChrome()
     }
 }
 

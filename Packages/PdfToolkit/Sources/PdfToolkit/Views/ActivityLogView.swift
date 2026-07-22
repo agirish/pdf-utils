@@ -20,14 +20,10 @@ public struct ActivityLogView: View {
     @State private var historyLimit = ActivityLogView.historyPageSize
     @State private var isLoadingHistory = false
 
-    @AppStorage(LiquidGlass.levelKey) private var glassLevelRaw: String = LiquidGlass.defaultLevel.rawValue
-    @AppStorage(LiquidGlass.hueKey) private var glassHueRaw: String = LiquidGlass.defaultHue.rawValue
-    @AppStorage(LiquidGlass.tintKey) private var glassTint: Double = LiquidGlass.defaultTint
+    private let glass = GlassAppearance()
     @AppStorage(ListDensity.defaultsKey) private var listDensityRaw: String = ListDensity.comfortable.rawValue
 
-    private var glassLevel: GlassLevel { GlassLevel(rawValue: glassLevelRaw) ?? LiquidGlass.defaultLevel }
-    private var glassHue: LiquidGlassHue { LiquidGlassHue(rawValue: glassHueRaw) ?? LiquidGlass.defaultHue }
-    private var hueAccent: Color { glassHue.accentColor }
+    private var hueAccent: Color { glass.hue.accentColor }
     private var density: ListDensity { ListDensity(rawValue: listDensityRaw) ?? .comfortable }
 
     /// Page size for on-demand history: the first "Show older history" reveals this many, and each
@@ -72,7 +68,7 @@ public struct ActivityLogView: View {
             list(filtered: filtered, visibleHistory: visibleHistory, moreHistory: moreHistory)
         }
         .frame(minWidth: 420, minHeight: 420)
-        .liquidGlassAppBackground(level: glassLevel, hue: glassHue)
+        .liquidGlassAppBackground(level: glass.level, hue: glass.hue)
         // Stream in entries written by the menu-bar helper (Finder-triggered runs) while this window
         // is open, so it updates live instead of only on the next launch. Idempotent.
         .onAppear { log.beginLiveTailing() }
@@ -131,7 +127,7 @@ public struct ActivityLogView: View {
         }
         .padding(.horizontal, 20)
         .padding(.vertical, 14)
-        .glassBarStyle(level: glassLevel)
+        .glassBarStyle(level: glass.level)
     }
 
     // MARK: Level chips
@@ -199,7 +195,7 @@ public struct ActivityLogView: View {
             }
         }
         .padding(12)
-        .glassBarStyle(level: glassLevel)
+        .glassBarStyle(level: glass.level)
         .padding(.horizontal, 16)
         .padding(.vertical, 12)
     }

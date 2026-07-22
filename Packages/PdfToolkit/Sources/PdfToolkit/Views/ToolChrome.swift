@@ -77,13 +77,8 @@ extension View {
 /// panes now show liquid glass. Mirrors `RootView`'s Settings-card styling (`contentSurface` wash +
 /// `glassSurface`) at the tools' 16-pt card radius, with a hairline border to define the edge.
 private struct FormCardStyle: ViewModifier {
-    @AppStorage(LiquidGlass.levelKey) private var glassLevelRaw: String = LiquidGlass.defaultLevel.rawValue
-    @AppStorage(LiquidGlass.hueKey) private var glassHueRaw: String = LiquidGlass.defaultHue.rawValue
-    @AppStorage(LiquidGlass.tintKey) private var glassTint: Double = LiquidGlass.defaultTint
+    private let glass = GlassAppearance()
     @Environment(\.colorScheme) private var scheme
-
-    private var level: GlassLevel { GlassLevel(rawValue: glassLevelRaw) ?? LiquidGlass.defaultLevel }
-    private var hue: LiquidGlassHue { LiquidGlassHue(rawValue: glassHueRaw) ?? LiquidGlass.defaultHue }
 
     func body(content: Content) -> some View {
         let dark = scheme == .dark
@@ -95,9 +90,9 @@ private struct FormCardStyle: ViewModifier {
                                            startPoint: .top, endPoint: .bottom))
             : AnyShapeStyle(.quaternary.opacity(0.6))
         content
-            .contentSurface(hue: hue, tint: glassTint)
+            .contentSurface(hue: glass.hue, tint: glass.tint)
             .clipShape(shape)
-            .glassSurface(level, cornerRadius: 16)
+            .glassSurface(glass.level, cornerRadius: 16)
             .overlay { shape.strokeBorder(border, lineWidth: 1) }
             .shadow(color: .black.opacity(dark ? 0.48 : 0), radius: dark ? 16 : 0, y: dark ? 8 : 0)
     }

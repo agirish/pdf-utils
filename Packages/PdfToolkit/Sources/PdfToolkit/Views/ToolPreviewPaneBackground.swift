@@ -6,22 +6,10 @@ struct ToolPreviewPaneBackground: View {
     @AppStorage(SettingsKeys.mergePreviewBackground)
     private var mergeRaw: String = MergePreviewBackgroundStyle.matchMain.rawValue
 
-    @AppStorage(LiquidGlass.levelKey)
-    private var glassLevelRaw: String = LiquidGlass.defaultLevel.rawValue
-
-    @AppStorage(LiquidGlass.hueKey)
-    private var glassHueRaw: String = LiquidGlass.defaultHue.rawValue
+    private let glass = GlassAppearance()
 
     private var mergeStyle: MergePreviewBackgroundStyle {
         MergePreviewBackgroundStyle(rawValue: mergeRaw) ?? .matchMain
-    }
-
-    private var glassLevel: GlassLevel {
-        GlassLevel(rawValue: glassLevelRaw) ?? LiquidGlass.defaultLevel
-    }
-
-    private var glassHue: LiquidGlassHue {
-        LiquidGlassHue(rawValue: glassHueRaw) ?? LiquidGlass.defaultHue
     }
 
     var body: some View {
@@ -33,8 +21,8 @@ struct ToolPreviewPaneBackground: View {
                 Color(nsColor: .windowBackgroundColor)
             case .matchMain:
                 MainWindowBackgroundLayer(
-                    glassLevel: glassLevel,
-                    glassHue: glassHue,
+                    glassLevel: glass.level,
+                    glassHue: glass.hue,
                     liquidGlassRespectsTopSafeArea: false
                 )
             }

@@ -159,7 +159,13 @@ extension PDFToolkit {
             // Per-page pool: the render bitmap, its rep, and the JPEG bytes are all page-sized
             // transients — drained page by page, only the compressed stream accumulates.
             try autoreleasepool {
-                guard let page = source.page(at: i), let cgPage = page.pageRef else { return }
+                guard let page = source.page(at: i), let cgPage = page.pageRef else {
+                    // A page we can't reach (nil page/pageRef) must fail loudly, not vanish: the old
+                    // `return` skipped it, so the output silently came out with fewer pages than the
+                    // input, caught only by the coarse `emitted > 0` backstop. Match the render-failure
+                    // guard right below and throw, so a page that can't be rebuilt is an error.
+                    throw PDFOperationError.compressionFailed
+                }
                 guard
                     let geometry = rasterGeometry(for: page, maxPixelDimension: maxPixel, allowUpscale: false),
                     let bitmap = renderBitmap(page, cgPage: cgPage, geometry: geometry, redactionFills: []),

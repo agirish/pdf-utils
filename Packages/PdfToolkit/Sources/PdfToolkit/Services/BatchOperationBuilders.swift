@@ -8,13 +8,32 @@ import Foundation
 /// exercise directly, instead of burying it in SwiftUI view bodies where it can't be reached.
 extension BatchOperation {
 
+    /// The Compress "target size" field's accepted range in megabytes, mirroring its `Stepper(in:)`.
+    /// The Stepper only bounds its own increments — a typed value can be anything — so the byte
+    /// conversion clamps to this before it ever reaches `Int`.
+    static let compressTargetRangeMB: ClosedRange<Double> = 0.1...500
+
+    /// Megabytes → the byte budget the compress sweep receives, made crash-proof. `Int(Double)` TRAPS
+    /// once the value exceeds `Int.max`, so a free-entry field (a ~13-digit MB figure) could hard-crash
+    /// the app on the next render. Clamp into ``compressTargetRangeMB`` — treating a non-finite value
+    /// (NaN / ±inf, which `min`/`max` can't order) as the low end — BEFORE the multiply-and-convert, so
+    /// the result is always finite and in range. The non-crashing guarantee lives here, in the one
+    /// conversion shared by `CompressToolView.targetBytes` and ``compressConfig(usesTargetSize:quality:targetMegabytes:)``,
+    /// not merely behind the UI, so the single-file and batch paths are both safe.
+    static func targetBytes(forMegabytes megabytes: Double) -> Int {
+        let lo = compressTargetRangeMB.lowerBound
+        let hi = compressTargetRangeMB.upperBound
+        let clamped = megabytes.isFinite ? min(max(megabytes, lo), hi) : lo
+        return Int((clamped * 1_000_000).rounded())
+    }
+
     /// Compress: the quality slider maps straight through; target-size converts megabytes → bytes and
     /// is `nil` when the field is cleared (there is no size to aim for). Mirrors `CompressToolView`,
     /// including its decimal-MB (1,000,000) unit so the "MB" field matches the shown source size.
     static func compressConfig(usesTargetSize: Bool, quality: Double, targetMegabytes: Double) -> BatchOperation? {
         if usesTargetSize {
             guard targetMegabytes > 0 else { return nil }
-            return .compressTarget(targetBytes: max(1, Int((targetMegabytes * 1_000_000).rounded())))
+            return .compressTarget(targetBytes: targetBytes(forMegabytes: targetMegabytes))
         }
         return .compressQuality(quality: quality)
     }

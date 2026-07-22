@@ -157,9 +157,12 @@ struct CompressToolView: View {
     }
 
     /// Decimal MB (1,000,000) so the "MB" field, the "Now …" source hint (ByteCountFormatter `.file`),
-    /// and the byte budget handed to the target sweep all refer to the same unit.
+    /// and the byte budget handed to the target sweep all refer to the same unit. The clamp-and-convert
+    /// lives in `BatchOperation.targetBytes(forMegabytes:)` — `targetMB` is bound to a free-entry field,
+    /// and this property is read in `body`, so an out-of-range typed value would otherwise trap on the
+    /// next render.
     private var targetBytes: Int {
-        max(1, Int((targetMB * 1_000_000).rounded()))
+        BatchOperation.targetBytes(forMegabytes: targetMB)
     }
 
     /// The current quality/target config as a batch operation, mirroring `runCompress`'s single-file

@@ -83,7 +83,16 @@ struct OCRToolView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .overlay {
-            if busy { Color.black.opacity(0.08).ignoresSafeArea() }
+            // A dimming scrim only — it must NOT intercept clicks. A `Color` is hit-testable at any
+            // opacity, so without this it sits above the sidebar's Cancel button and swallows every
+            // press, leaving only "leave the screen" to cancel. Hit-testing off keeps Cancel reachable;
+            // the file controls are frozen separately below so the previewed file can't be swapped
+            // out from under an in-flight run.
+            if busy {
+                Color.black.opacity(0.08)
+                    .ignoresSafeArea()
+                    .allowsHitTesting(false)
+            }
         }
         .fileImporter(isPresented: $showImporter, allowedContentTypes: [.pdf], allowsMultipleSelection: false) { result in
             switch result {
@@ -117,6 +126,9 @@ struct OCRToolView: View {
         }
         .toolErrorAlert($alertMessage)
         .onChange(of: accurate) { _, nowAccurate in
+            // A different accuracy would produce a different file, so the last save's receipt no
+            // longer describes what a run now yields.
+            saveSummary = nil
             // Switching to Fast (which recognizes far fewer languages) must drop a now-unsupported
             // pick back to Automatic — otherwise recognition would silently return nothing for it.
             let available = nowAccurate ? Self.accurateLanguageChoices : Self.fastLanguageChoices
@@ -124,6 +136,8 @@ struct OCRToolView: View {
                 recognitionLanguage = ""
             }
         }
+        .onChange(of: recognitionLanguage) { _, _ in saveSummary = nil }
+        .onChange(of: skipPagesWithText) { _, _ in saveSummary = nil }
         .task(id: selectionPathKey) {
             await loadThumbnails()
         }
@@ -151,6 +165,10 @@ struct OCRToolView: View {
                             onClear: { inputURL = nil },
                             onAdd: { showImporter = true }
                         )
+                        // Now that the scrim no longer blocks clicks, freeze Add/Clear while a run is
+                        // busy so the file can't be swapped mid-run — the run keeps its captured URL,
+                        // but a swap would strand a save receipt describing a file no longer shown.
+                        .disabled(busy)
 
                         Group {
                             if inputURL == nil {
@@ -301,6 +319,9 @@ struct OCRToolView: View {
     }
 
     private func consumeDroppedProviders(_ providers: [NSItemProvider]) {
+        // A drop is another way to swap the file; block it while a run is busy, matching the disabled
+        // Add/Clear header.
+        guard !busy else { return }
         Task { @MainActor in
             if let url = await NSItemProvider.firstResolvablePDFURL(from: providers) {
                 inputURL = url
@@ -361,6 +382,11 @@ struct OCRToolView: View {
                     )
                 }
             }
+            // A Cancel that lands in the tail window — after recognition's last per-page cancel check
+            // but before we act on the result — must record nothing: no info banner, no save, no log,
+            // no Finder reveal. Abort here into the silent `CancellationError` catch below, exactly as a
+            // cancel during recognition would.
+            try Task.checkCancellation()
             // All pages skipped means the output would be a pointless rebuilt copy — say so and
             // save nothing instead of shipping a file that changed no behavior. This is a normal,
             // expected outcome (the file was already searchable), NOT a failure, so it goes to the

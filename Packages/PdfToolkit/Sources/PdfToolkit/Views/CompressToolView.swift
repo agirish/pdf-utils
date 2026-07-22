@@ -785,6 +785,12 @@ struct CompressToolView: View {
                     }
                 }
             }
+            // A Cancel that lands in the tail window — after the engine's last per-page cancel check
+            // (or the instant cached-bytes reuse path, which polls nothing) but before we route — must
+            // still abort: `route` would write the file, record `ActivityLog.recordSaved`, and reveal
+            // it in Finder, contradicting "cancelling records nothing." Throw here into the silent
+            // `CancellationError` catch below, before the generic error catch.
+            try Task.checkCancellation()
             switch try await PDFExportCoordinator.route(
                 data: data,
                 source: fileURL,

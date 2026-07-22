@@ -167,26 +167,45 @@ import PDFKit
     }
 
     @Test func cancellationAbortsCompressBetweenPages() throws {
-        // The Cancel button trips this probe; an always-true probe must stop the run at the first page
+        // The Cancel button trips this probe; an always-true probe must stop the run at the FIRST page
         // and surface as `CancellationError` — the outcome the UI treats as a non-error (no alert/log).
+        // A progress collector proves it stopped *between* pages: the engine reports a page, then polls
+        // cancel, so with a 3-page fixture only page 1 is seen before the throw. Asserting the throw
+        // alone would also pass for an engine that rendered all 3 pages and then threw.
         let dir = FixtureDir()
         let src = dir.url("src.pdf")
         try PDFFixtures.writePDF(pageCount: 3, to: src)
 
+        final class Progress: @unchecked Sendable { var pages: [Int] = [] }
+        let seen = Progress()
         #expect(throws: CancellationError.self) {
-            _ = try PDFToolkit.compressData(inputURL: src, quality: 0.5, isCancelled: { true })
+            _ = try PDFToolkit.compressData(
+                inputURL: src, quality: 0.5,
+                onProgress: { page, _ in seen.pages.append(page) },
+                isCancelled: { true }
+            )
         }
+        #expect(seen.pages == [1])   // aborted after page 1 was reported, before pages 2–3 — stopped early
     }
 
     @Test func cancellationAbortsTheTargetSizeSweep() throws {
         // The target sweep rebuilds the document at several qualities; an unreachably small target forces
         // it into the ladder (skipping the pass-through), where cancellation must abort mid-pass too.
+        // The progress collector proves the abort lands inside the FIRST ladder pass, on page 1 — not
+        // after rebuilding the whole document (or several ladder rungs) and only then throwing.
         let dir = FixtureDir()
         let src = dir.url("src.pdf")
         try PDFFixtures.writePDF(pageCount: 3, to: src)
 
+        final class Progress: @unchecked Sendable { var pages: [Int] = [] }
+        let seen = Progress()
         #expect(throws: CancellationError.self) {
-            _ = try PDFToolkit.compressToTargetData(inputURL: src, targetBytes: 1, isCancelled: { true })
+            _ = try PDFToolkit.compressToTargetData(
+                inputURL: src, targetBytes: 1,
+                onProgress: { page, _ in seen.pages.append(page) },
+                isCancelled: { true }
+            )
         }
+        #expect(seen.pages == [1])   // one page reported in the first pass, then the throw — no full rebuild
     }
 }

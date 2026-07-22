@@ -86,7 +86,16 @@ struct UnifiedFilePanel<Config: View>: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .overlay {
-            if busy { Color.black.opacity(0.08).ignoresSafeArea() }
+            // A dimming scrim only — it must NOT intercept clicks. A `Color` is hit-testable at any
+            // opacity, so without this it sits above the sidebar's Cancel button (which lives in the
+            // tool's `config`, beneath this overlay) and swallows every press, leaving only "leave the
+            // screen" to cancel. Hit-testing off keeps Cancel — and the capture-safe config controls —
+            // reachable; the file-mutation guards below stop a second run from being started mid-run.
+            if busy {
+                Color.black.opacity(0.08)
+                    .ignoresSafeArea()
+                    .allowsHitTesting(false)
+            }
         }
         .onDisappear {
             // Leaving mid-run keeps landing files headless with the Cancel control gone; stop cleanly.
@@ -159,14 +168,17 @@ struct UnifiedFilePanel<Config: View>: View {
                             .foregroundStyle(.secondary)
                             .lineLimit(1)
                             .fixedSize(horizontal: true, vertical: false)
-                            .disabled(runner.isRunning)
+                            .disabled(runner.isRunning || busy)
                             .help("Remove every file")
                     }
                     Button(runner.isEmpty ? "Add PDF…" : "Add PDFs…") { showImporter = true }
                         .font(.subheadline.weight(.medium))
                         .lineLimit(1)
                         .fixedSize(horizontal: true, vertical: false)
-                        .disabled(runner.isRunning)
+                        // Frozen while a single-file run is busy too, not just during a batch: adding a
+                        // file mid single-run would flip the count to the multi-file "Run on N" button
+                        // (which isn't busy-gated) and let a second, concurrent run start.
+                        .disabled(runner.isRunning || busy)
                 }
             }
             Text(sidebarSubtitle)
@@ -313,7 +325,7 @@ struct UnifiedFilePanel<Config: View>: View {
                 Image(systemName: "trash")
             }
             .buttonStyle(.borderless)
-            .disabled(runner.isRunning)
+            .disabled(runner.isRunning || busy)
             .help("Remove from the list")
         }
         .padding(.vertical, 2)
@@ -616,7 +628,9 @@ struct UnifiedFilePanel<Config: View>: View {
     }
 
     private func consumeDroppedProviders(_ providers: [NSItemProvider]) {
-        guard !runner.isRunning else { return }
+        // Freeze the file set during any run — a batch (`isRunning`) or a busy single-file run — so a
+        // drop can't start a concurrent run via the multi-file button, matching the Add/Clear guards.
+        guard !runner.isRunning, !busy else { return }
         Task { @MainActor in
             var urls: [URL] = []
             for p in providers {

@@ -94,6 +94,21 @@ struct SplitToolView: View {
         return "\(counts) page\(total == 1 ? "" : "s")"
     }
 
+    /// The reason the custom-ranges text can't be split, for the inline error under the field — the
+    /// same parse the export runs, so what it rejects here is exactly what Save would reject. Blank and
+    /// half-typed ("1-") states stay silent; only custom mode can produce one.
+    private var customRangeError: String? {
+        guard mode == .customRanges else { return nil }
+        let trimmed = rangeText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, !trimmed.hasSuffix("-"), pageCount > 0 else { return nil }
+        do {
+            _ = try PageRangeParser.parseSegments(trimmed, pageCount: pageCount)
+            return nil
+        } catch {
+            return error.localizedDescription
+        }
+    }
+
     /// The cut set the every-N stepper implies, so its reflection grid draws the same colored groups the
     /// setting will export.
     private var everyNPreviewCuts: Set<Int> {
@@ -401,7 +416,9 @@ struct SplitToolView: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
 
-            if let parts = estimatedParts {
+            if let customRangeError {
+                RangeFieldNote(text: customRangeError, systemImage: "exclamationmark.triangle", isError: true, accent: accent)
+            } else if let parts = estimatedParts {
                 VStack(alignment: .leading, spacing: 4) {
                     Label("Creates \(parts) file\(parts == 1 ? "" : "s")", systemImage: "doc.on.doc")
                         .font(.caption.weight(.medium))

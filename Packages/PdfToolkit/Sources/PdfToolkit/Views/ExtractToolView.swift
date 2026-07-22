@@ -250,9 +250,36 @@ struct ExtractToolView: View {
             .fixedSize(horizontal: false, vertical: true)
             TextField("e.g. 1, 3-5", text: $rangeText)
                 .textFieldStyle(.roundedBorder)
+            rangeNote
         }
         .padding(16)
         .formCard()
+    }
+
+    /// Live "N pages will be extracted" hint / inline error. A blank field is valid here (it extracts
+    /// every page), so it reports the whole count rather than staying silent; mid-type stays silent.
+    @ViewBuilder
+    private var rangeNote: some View {
+        switch PageRangeField.evaluate(rangeText, pageCount: pageSpecs.count, preserveOrder: true) {
+        case .empty:
+            if pageSpecs.count > 0 {
+                RangeFieldNote(
+                    text: "Extracts all \(pageSpecs.count) page\(pageSpecs.count == 1 ? "" : "s").",
+                    systemImage: "doc.on.doc",
+                    accent: accent
+                )
+            }
+        case .incomplete:
+            EmptyView()
+        case .pages(let indices):
+            RangeFieldNote(
+                text: "Extracts \(indices.count) page\(indices.count == 1 ? "" : "s") into the new PDF.",
+                systemImage: "doc.on.doc",
+                accent: accent
+            )
+        case .invalid(let message):
+            RangeFieldNote(text: message, systemImage: "exclamationmark.triangle", isError: true, accent: accent)
+        }
     }
 
     // MARK: - Thumbnails

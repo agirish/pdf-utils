@@ -40,6 +40,9 @@ struct DeletePagesToolView: View {
                 emptyTitle: "No PDF selected",
                 emptySubtitle: "Drop a PDF here, choose one, or use Add PDF… to see thumbnails.",
                 emptySystemImage: Tool.deletePages.symbolName,
+                selectedPages: VisualPageSelection.pages(from: rangeText, pageCount: pageSpecs.count),
+                onTogglePage: togglePage,
+                selectionPrompt: "Click pages to mark them for removal, or type them on the left.",
                 render: { spec in
                     guard let url = inputURL else { return nil }
                     return (try? await PDFPageThumbnailLoader.loadPage(from: url, pageIndex: spec.id - 1))?.image
@@ -248,9 +251,39 @@ struct DeletePagesToolView: View {
                 .fixedSize(horizontal: false, vertical: true)
             TextField("e.g. 2, 4-6", text: $rangeText)
                 .textFieldStyle(.roundedBorder)
+            rangeNote
         }
         .padding(16)
         .formCard()
+    }
+
+    /// Live "N will remain" hint / inline error, mirroring the export parse so the field can't claim
+    /// one thing and Save do another. Blank and mid-type states stay silent.
+    @ViewBuilder
+    private var rangeNote: some View {
+        switch PageRangeField.evaluate(rangeText, pageCount: pageSpecs.count, preserveOrder: false) {
+        case .empty, .incomplete:
+            EmptyView()
+        case .pages(let indices):
+            let removed = indices.count
+            let remaining = pageSpecs.count - removed
+            if remaining <= 0 {
+                RangeFieldNote(
+                    text: "That removes every page — at least one must remain.",
+                    systemImage: "exclamationmark.triangle",
+                    isError: true,
+                    accent: accent
+                )
+            } else {
+                RangeFieldNote(
+                    text: "Removes \(removed) page\(removed == 1 ? "" : "s") — \(remaining) will remain.",
+                    systemImage: "rectangle.stack.badge.minus",
+                    accent: accent
+                )
+            }
+        case .invalid(let message):
+            RangeFieldNote(text: message, systemImage: "exclamationmark.triangle", isError: true, accent: accent)
+        }
     }
 
     // MARK: - Thumbnails
@@ -299,6 +332,23 @@ struct DeletePagesToolView: View {
                 }
             }
         }
+    }
+
+    // MARK: - Visual selection
+
+    /// Toggles one 1-based page in/out of the removal set and writes the result back to the range
+    /// field — the field stays the single source of truth, so a click and a keystroke can never
+    /// disagree. Blank means nothing (Delete never treats an empty field as "all pages"), so the first
+    /// click on a fresh document marks just that page; clicking canonicalizes the text to ascending
+    /// runs (e.g. `5,1,2` typed, then a click, becomes `1-2, 5`).
+    private func togglePage(_ page: Int) {
+        var pages = VisualPageSelection.pages(from: rangeText, pageCount: pageSpecs.count)
+        if pages.contains(page) {
+            pages.remove(page)
+        } else {
+            pages.insert(page)
+        }
+        rangeText = VisualPageSelection.rangeString(from: pages)
     }
 
     // MARK: - Export

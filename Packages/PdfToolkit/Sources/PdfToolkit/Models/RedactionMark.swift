@@ -52,4 +52,29 @@ enum RedactionMarkGeometry {
         guard i.width >= minimumSidePt / 2, i.height >= minimumSidePt / 2 else { return nil }
         return i
     }
+
+    /// Keeps a mark fully inside the page while it is dragged to a new position: shrinks it if it is
+    /// larger than the page, then slides it back in from whichever edge it overhangs. Mirrors the
+    /// clamp Fill & Sign uses so a mark can't be dragged off-page.
+    static func clamped(_ rect: CGRect, in pageBox: CGRect) -> CGRect {
+        var r = rect
+        r.size.width = min(r.width, pageBox.width)
+        r.size.height = min(r.height, pageBox.height)
+        if r.minX < pageBox.minX { r.origin.x = pageBox.minX }
+        if r.minY < pageBox.minY { r.origin.y = pageBox.minY }
+        if r.maxX > pageBox.maxX { r.origin.x = pageBox.maxX - r.width }
+        if r.maxY > pageBox.maxY { r.origin.y = pageBox.maxY - r.height }
+        return r
+    }
+
+    /// Builds a rect from a fixed anchor corner (the one diagonally opposite the grabbed handle) and
+    /// the dragged corner, flooring each side at ``minimumSidePt`` so a resize can never collapse the
+    /// mark to nothing. The corner handle passes the anchor it captured at drag start.
+    static func resizedRect(anchor: CGPoint, corner: CGPoint) -> CGRect {
+        let minX = min(anchor.x, corner.x)
+        let minY = min(anchor.y, corner.y)
+        let width = max(minimumSidePt, abs(corner.x - anchor.x))
+        let height = max(minimumSidePt, abs(corner.y - anchor.y))
+        return CGRect(x: minX, y: minY, width: width, height: height)
+    }
 }

@@ -72,4 +72,45 @@ import CoreGraphics
         let clipped = RedactionMarkGeometry.clipToMediaBox(onBoundary, mediaBox: media)
         #expect(clipped == CGRect(x: 100 - half, y: 10, width: half, height: 20))
     }
+
+    // MARK: clamped (move a mark, keep it on the page)
+
+    @Test func clampLeavesAContainedMarkWhereItIs() {
+        let rect = CGRect(x: 10, y: 10, width: 20, height: 20)
+        #expect(RedactionMarkGeometry.clamped(rect, in: media) == rect)
+    }
+
+    @Test func clampSlidesAnOverhangingMarkBackInsideWithoutResizing() {
+        // Dragged partly past the right/top edge: pushed back so it sits flush, same size.
+        let rect = CGRect(x: 95, y: 92, width: 20, height: 20)
+        #expect(RedactionMarkGeometry.clamped(rect, in: media) == CGRect(x: 80, y: 80, width: 20, height: 20))
+    }
+
+    @Test func clampShrinksAMarkLargerThanThePageThenPinsIt() {
+        let rect = CGRect(x: -10, y: -10, width: 200, height: 50)
+        let out = RedactionMarkGeometry.clamped(rect, in: media)
+        #expect(out == CGRect(x: 0, y: 0, width: 100, height: 50))
+    }
+
+    // MARK: resizedRect (corner drag)
+
+    @Test func resizeBuildsAPositiveRectFromAnchorAndCorner() {
+        // Anchor bottom-left, corner dragged up-right → a normal rect between them.
+        let r = RedactionMarkGeometry.resizedRect(anchor: CGPoint(x: 10, y: 10), corner: CGPoint(x: 40, y: 60))
+        #expect(r == CGRect(x: 10, y: 10, width: 30, height: 50))
+    }
+
+    @Test func resizeNormalizesWhenTheCornerCrossesTheAnchor() {
+        // Dragging the corner below-left of the anchor still yields a positive-sized rect.
+        let r = RedactionMarkGeometry.resizedRect(anchor: CGPoint(x: 40, y: 60), corner: CGPoint(x: 10, y: 10))
+        #expect(r == CGRect(x: 10, y: 10, width: 30, height: 50))
+    }
+
+    @Test func resizeFloorsEachSideAtTheMinimum() {
+        // Collapsing the corner onto the anchor can't produce a zero (or sub-minimum) mark.
+        let min = RedactionMarkGeometry.minimumSidePt
+        let r = RedactionMarkGeometry.resizedRect(anchor: CGPoint(x: 20, y: 20), corner: CGPoint(x: 20, y: 20))
+        #expect(r.width == min)
+        #expect(r.height == min)
+    }
 }

@@ -10,6 +10,9 @@ struct RedactToolView: View {
     @State private var inputURL: URL?
     @State private var pdfDocument: PDFDocument?
     @State private var marks: [RedactionMark] = []
+    /// The region selected for editing — shared with the canvas so a click there and a tap in the
+    /// Regions list agree, and so the corner handle and keyboard edits know what to act on.
+    @State private var selectedMarkID: UUID?
     @State private var stripAnnotationsFromOtherPages = false
     @State private var busy = false
     @State private var alertMessage: String?
@@ -163,6 +166,7 @@ struct RedactToolView: View {
                             inputURL = nil
                             pdfDocument = nil
                             marks = []
+                            selectedMarkID = nil
                             resetFindState()
                         }
                         .buttonStyle(.borderless)
@@ -314,12 +318,17 @@ struct RedactToolView: View {
                 Spacer()
                 Button("Clear all") {
                     marks = []
+                    selectedMarkID = nil
                     lastFindSummary = nil
                 }
                 .buttonStyle(.borderless)
                 .font(.subheadline.weight(.medium))
                 .foregroundStyle(accent)
             }
+            Text("Click a region here or on the page to select it, then drag it to move or drag its corner handle to resize.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
             if autoMarkCount > 0 {
                 HStack {
                     Text("\(autoMarkCount) from Find & redact")
@@ -328,6 +337,9 @@ struct RedactToolView: View {
                     Spacer()
                     Button("Clear auto-marks") {
                         marks.removeAll { $0.origin == .autoMatch }
+                        if let sel = selectedMarkID, !marks.contains(where: { $0.id == sel }) {
+                            selectedMarkID = nil
+                        }
                         lastFindSummary = nil
                     }
                     .buttonStyle(.borderless)
@@ -336,6 +348,7 @@ struct RedactToolView: View {
                 }
             }
             ForEach(marks) { mark in
+                let isSelected = mark.id == selectedMarkID
                 HStack(spacing: 8) {
                     Text("Page \(mark.pageIndex + 1)")
                         .font(.subheadline.monospacedDigit())
@@ -351,6 +364,7 @@ struct RedactToolView: View {
                     }
                     Button {
                         marks.removeAll { $0.id == mark.id }
+                        if selectedMarkID == mark.id { selectedMarkID = nil }
                     } label: {
                         Image(systemName: "trash")
                             .foregroundStyle(.secondary)
@@ -362,8 +376,22 @@ struct RedactToolView: View {
                 .padding(.horizontal, 10)
                 .background {
                     RoundedRectangle(cornerRadius: 8, style: .continuous)
-                        .fill(Color.primary.opacity(0.03))
+                        .fill(isSelected ? accent.opacity(0.16) : Color.primary.opacity(0.03))
                 }
+                .overlay {
+                    if isSelected {
+                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                            .strokeBorder(accent.opacity(0.55), lineWidth: 1)
+                    }
+                }
+                .contentShape(Rectangle())
+                .onTapGesture {
+                    // Toggle: tapping the selected row again clears the selection.
+                    selectedMarkID = (selectedMarkID == mark.id) ? nil : mark.id
+                }
+                .accessibilityElement(children: .combine)
+                .accessibilityAddTraits(isSelected ? [.isButton, .isSelected] : .isButton)
+                .accessibilityLabel("Region on page \(mark.pageIndex + 1)")
             }
         }
         .padding(16)
@@ -513,7 +541,7 @@ struct RedactToolView: View {
     private var editorPane: some View {
         Group {
             if let doc = pdfDocument {
-                RedactionPDFEditor(document: doc, marks: $marks)
+                RedactionPDFEditor(document: doc, marks: $marks, selectedID: $selectedMarkID)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .background(Color(nsColor: .underPageBackgroundColor))
             } else if inputURL != nil {
@@ -537,6 +565,7 @@ struct RedactToolView: View {
     private func reloadDocumentForSelection() async {
         searchTask?.cancel()
         marks = []
+        selectedMarkID = nil
         pdfDocument = nil
         resetFindState()
         guard let url = inputURL else { return }

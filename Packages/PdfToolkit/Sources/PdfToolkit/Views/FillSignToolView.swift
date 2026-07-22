@@ -19,6 +19,10 @@ struct FillSignToolView: View {
     @State private var canvasInteracting = false
     /// True while the font-size slider is being dragged, so a slider sweep is one undo step, not dozens.
     @State private var fontSliderEditing = false
+    /// Bridge to the editor's live viewport, so a new item lands where the user is looking.
+    @State private var placement = FillSignPlacement()
+    /// Advances on each add so successive items fan out instead of stacking; reset on a new page or file.
+    @State private var placementCascade = 0
 
     @State private var inkID = "black"
     @State private var newFontSize: CGFloat = 14
@@ -188,6 +192,7 @@ struct FillSignToolView: View {
                             items = []
                             selectedID = nil
                             undo.reset([])
+                            placementCascade = 0
                         }
                         .buttonStyle(.borderless)
                         .font(.subheadline.weight(.medium))
@@ -303,7 +308,7 @@ struct FillSignToolView: View {
             .buttonStyle(.bordered)
             .controlSize(.large)
 
-            Text("New items land on the page centered in the preview. Drag to position; drag the corner to resize.")
+            Text("New items appear in the visible area of the page and fan out as you add more. Drag to position; drag the corner to resize.")
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -457,6 +462,7 @@ struct FillSignToolView: View {
                 Button("Clear all") {
                     items = []
                     selectedID = nil
+                    placementCascade = 0
                 }
                 .buttonStyle(.borderless)
                 .font(.subheadline.weight(.medium))
@@ -526,6 +532,7 @@ struct FillSignToolView: View {
                         items: $items,
                         selectedID: $selectedID,
                         currentPageIndex: $currentPageIndex,
+                        placement: placement,
                         accent: accent,
                         isInteracting: $canvasInteracting,
                         onUndo: performUndo,
@@ -533,6 +540,10 @@ struct FillSignToolView: View {
                     )
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .background(Color(nsColor: .underPageBackgroundColor))
+                    .onChange(of: currentPageIndex) { _, _ in
+                        // A fresh page starts the cascade over, so items don't inherit an off-page offset.
+                        placementCascade = 0
+                    }
                 }
             } else if inputURL != nil {
                 ProgressView("Opening PDF…")
@@ -582,16 +593,27 @@ struct FillSignToolView: View {
         return page.bounds(for: .cropBox)
     }
 
+    /// The rect a newly-placed item of `size` should occupy on `pageIndex`: centered on the visible
+    /// part of the page (so it lands in view even when the page is scrolled), nudged by a per-add
+    /// cascade so repeated adds fan out instead of stacking, then clamped inside the page. Advances
+    /// the cascade. The center falls back to the page's geometric center before the editor is mounted.
+    private func placementRect(size: CGSize, in box: CGRect, pageIndex: Int) -> CGRect {
+        let center = placement.visibleCenter?(pageIndex) ?? CGPoint(x: box.midX, y: box.midY)
+        let rect = FillSignGeometry.placedRect(center: center, size: size, cascade: placementCascade, in: box)
+        placementCascade += 1
+        return rect
+    }
+
     private func addTextItem(string: String) {
         let index = clampedPageIndex()
         guard let box = pageBox(index) else { return }
         let width = min(max(box.width * 0.45, 120), box.width - 20)
         let height = max(newFontSize * 1.8, 26)
-        let rect = CGRect(x: box.midX - width / 2, y: box.midY - height / 2, width: width, height: height)
+        let rect = placementRect(size: CGSize(width: width, height: height), in: box, pageIndex: index)
         let ink = selectedInk
         let item = FillSignItem(
             pageIndex: index,
-            rect: FillSignGeometry.clamped(rect, in: box),
+            rect: rect,
             content: .text(FillSignText(
                 string: string,
                 fontSize: newFontSize,
@@ -613,11 +635,11 @@ struct FillSignToolView: View {
         let aspect = max(signatureAspect, 0.2)
         let width = min(max(box.width * 0.4, 140), box.width - 20)
         let height = max(width / aspect, 30)
-        let rect = CGRect(x: box.midX - width / 2, y: box.midY - height / 2, width: width, height: height)
+        let rect = placementRect(size: CGSize(width: width, height: height), in: box, pageIndex: index)
         let ink = selectedInk
         let item = FillSignItem(
             pageIndex: index,
-            rect: FillSignGeometry.clamped(rect, in: box),
+            rect: rect,
             content: .signature(FillSignSignature(
                 strokes: strokes,
                 red: ink.red,
@@ -639,11 +661,11 @@ struct FillSignToolView: View {
         let fontSize: CGFloat = 30
         let width = min(max(box.width * 0.45, 160), box.width - 20)
         let height = fontSize * 1.7
-        let rect = CGRect(x: box.midX - width / 2, y: box.midY - height / 2, width: width, height: height)
+        let rect = placementRect(size: CGSize(width: width, height: height), in: box, pageIndex: index)
         let ink = selectedInk
         let item = FillSignItem(
             pageIndex: index,
-            rect: FillSignGeometry.clamped(rect, in: box),
+            rect: rect,
             content: .text(FillSignText(
                 string: name,
                 fontSize: fontSize,
@@ -706,6 +728,7 @@ struct FillSignToolView: View {
         selectedID = nil
         undo.reset([])
         currentPageIndex = 0
+        placementCascade = 0
         pdfDocument = nil
         guard let url = inputURL else { return }
         do {

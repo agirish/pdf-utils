@@ -15,6 +15,17 @@ private func handleRect(for viewRect: CGRect) -> CGRect {
     )
 }
 
+/// A bridge from the placement helpers (in `FillSignToolView`) to the live `PDFView` inside the
+/// editor. The editor installs `visibleCenter` when it mounts; the view calls it when placing a new
+/// item so the item lands in the currently-visible part of the page rather than at the geometric
+/// center of a page that may be scrolled off-screen. A reference type so the view holds one stable
+/// instance across redraws.
+@MainActor final class FillSignPlacement {
+    /// The page-space point (crop-box coordinates) at the center of the visible portion of
+    /// `pageIndex`, or nil when the editor isn't mounted. Installed by the editor's coordinator.
+    var visibleCenter: ((_ pageIndex: Int) -> CGPoint?)?
+}
+
 /// An interactive placement surface: the PDF renders underneath, and typed-text / signature items are
 /// drawn, selected, dragged, and resized on top — the direct analogue of `RedactionPDFEditor`, but the
 /// marks here carry content and can be moved after they land. A pan only begins when it starts on an
@@ -24,6 +35,7 @@ struct FillSignPDFEditor: NSViewRepresentable {
     @Binding var items: [FillSignItem]
     @Binding var selectedID: UUID?
     @Binding var currentPageIndex: Int
+    let placement: FillSignPlacement
     let accent: Color
     /// True from a drag's start to its end, so the tool records the whole drag as one undo step.
     @Binding var isInteracting: Bool
@@ -81,6 +93,11 @@ struct FillSignPDFEditor: NSViewRepresentable {
         coordinator.pdfView = pdfView
         coordinator.overlay = overlay
         coordinator.observePageChanges(on: pdfView)
+        // Let the sidebar's placement helpers read the live viewport. Weak so the closure never keeps
+        // the coordinator (and its PDFView) alive past the editor.
+        placement.visibleCenter = { [weak coordinator] pageIndex in
+            coordinator?.visibleCenter(onPage: pageIndex)
+        }
 
         overlay.items = items
         overlay.selectedID = selectedID
@@ -128,6 +145,20 @@ struct FillSignPDFEditor: NSViewRepresentable {
             guard let pdfView, let page = pdfView.currentPage, let doc = pdfView.document else { return }
             guard let idx = (0..<doc.pageCount).first(where: { doc.page(at: $0) === page }) else { return }
             if parent.currentPageIndex != idx { parent.currentPageIndex = idx }
+        }
+
+        /// The center of the visible portion of `pageIndex`, in that page's crop-box space — the space
+        /// the placement helpers build item rects in. The PDFView fills the pane, so its bounds mapped
+        /// into page space (accounting for the current scroll and zoom) is the on-screen viewport;
+        /// intersected with the page it yields where the user is actually looking. Falls back to the
+        /// page center when the page is entirely scrolled out of view.
+        func visibleCenter(onPage pageIndex: Int) -> CGPoint? {
+            guard let pdfView, let page = pdfView.document?.page(at: pageIndex) else { return nil }
+            let box = page.bounds(for: .cropBox)
+            let viewportInPage = pdfView.convert(pdfView.bounds, to: page)
+            let visible = viewportInPage.intersection(box)
+            let target = visible.isNull || visible.isEmpty ? box : visible
+            return CGPoint(x: target.midX, y: target.midY)
         }
 
         // MARK: Hit testing (view space)

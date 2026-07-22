@@ -131,6 +131,19 @@ enum FillSignGeometry {
         return r
     }
 
+    /// Where a newly-placed item of `size` lands: centered on `center`, then stepped by `cascade`
+    /// (0, 1, 2, …) along a fixed diagonal so successive adds fan out instead of stacking, then
+    /// clamped inside `pageBox`. The step is visually down-and-right; page space is y-up, so the y
+    /// term is subtracted. Pure so the placement behavior is unit-testable without a live PDFView.
+    static func placedRect(center: CGPoint, size: CGSize, cascade: Int, in pageBox: CGRect, step: CGFloat = 22, wrap: Int = 5) -> CGRect {
+        let n = CGFloat(((cascade % wrap) + wrap) % wrap)
+        let origin = CGPoint(
+            x: center.x - size.width / 2 + n * step,
+            y: center.y - size.height / 2 - n * step
+        )
+        return clamped(CGRect(origin: origin, size: size), in: pageBox)
+    }
+
     /// Builds a rect from a fixed anchor corner and the dragged opposite corner, enforcing a floor on
     /// each side so a resize can't collapse the box. Used by the corner resize handle.
     static func resizedRect(anchor: CGPoint, corner: CGPoint, minimumSide: CGFloat = minimumSidePt) -> CGRect {

@@ -81,4 +81,42 @@ import CoreGraphics
         #expect(r.width == min)
         #expect(r.height == min)
     }
+
+    // MARK: placedRect (new-item placement)
+
+    private let letterPage = CGRect(x: 0, y: 0, width: 612, height: 792)
+
+    @Test func firstPlacementCentersOnTheGivenPoint() {
+        // Cascade 0: the size is centered exactly on the target point (the visible center of the page).
+        let rect = FillSignGeometry.placedRect(center: CGPoint(x: 300, y: 400), size: CGSize(width: 100, height: 40), cascade: 0, in: letterPage)
+        #expect(rect == CGRect(x: 250, y: 380, width: 100, height: 40))
+    }
+
+    @Test func cascadeStepsDownAndRightSoAddsDoNotStack() {
+        let size = CGSize(width: 100, height: 40)
+        let center = CGPoint(x: 300, y: 400)
+        let first = FillSignGeometry.placedRect(center: center, size: size, cascade: 0, in: letterPage)
+        let second = FillSignGeometry.placedRect(center: center, size: size, cascade: 1, in: letterPage)
+        #expect(second.minX > first.minX)   // to the right
+        #expect(second.minY < first.minY)   // visually downward (page space is y-up)
+        #expect(second != first)
+    }
+
+    @Test func cascadeWrapsSoItNeverMarchesOffThePage() {
+        // The step wraps at `wrap`, so cascade 0 and cascade `wrap` land identically.
+        let size = CGSize(width: 100, height: 40)
+        let center = CGPoint(x: 300, y: 400)
+        let base = FillSignGeometry.placedRect(center: center, size: size, cascade: 0, in: letterPage, step: 22, wrap: 5)
+        let wrapped = FillSignGeometry.placedRect(center: center, size: size, cascade: 5, in: letterPage, step: 22, wrap: 5)
+        #expect(base == wrapped)
+    }
+
+    @Test func placementStaysInsideThePageEvenNearAnEdge() {
+        // Centered at the bottom-right corner: the box is clamped fully inside the page.
+        let rect = FillSignGeometry.placedRect(center: CGPoint(x: 610, y: 5), size: CGSize(width: 120, height: 40), cascade: 3, in: letterPage)
+        #expect(rect.minX >= letterPage.minX)
+        #expect(rect.minY >= letterPage.minY)
+        #expect(rect.maxX <= letterPage.maxX)
+        #expect(rect.maxY <= letterPage.maxY)
+    }
 }

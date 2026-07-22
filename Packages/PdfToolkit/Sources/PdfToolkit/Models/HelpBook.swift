@@ -167,7 +167,7 @@ enum HelpBook {
                     .bullets([
                         "Files — save location, what happens after exporting, output filename suffixes, and reopening your last tool on launch.",
                         "Appearance — Theme (System, Light, Dark), the Dashboard layout (Categories, Grid, List), the Accent color, Tool colors (Multicolor, Single, Monochrome), the Glass effect and Tint, the content surface, and tool preview panes.",
-                        "Advanced — activity-logging detail, default compression quality, redacted-page sharpness, stripping metadata on export, a Reset order button for the dashboard, a Reset all settings button, and the app's version.",
+                        "Advanced — activity-logging detail, default compression quality, redacted-page sharpness, stripping metadata on export, a Reset section with Reset order, Clear pinned tools, and Reset all settings, and the app's version.",
                     ]),
                     .tip("The Glass effect (Clear, Frosted, Solid) controls how much of the desktop shows through the window and the dashboard tiles."),
                 ],

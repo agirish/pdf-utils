@@ -133,7 +133,8 @@ struct SettingsSearchEntry: Identifiable {
         .init(title: "Default compression quality", tab: .advanced, keywords: ["compress", "quality", "default", "size"]),
         .init(title: "Strip metadata on export", tab: .advanced, keywords: ["metadata", "strip", "privacy", "author", "title", "dates"]),
         .init(title: "Activity logging level", tab: .advanced, keywords: ["log", "logging", "level", "activity", "debug", "warnings", "errors"]),
-        .init(title: "Reset order", tab: .advanced, keywords: ["reset", "order", "arrange", "rearrange", "default", "dashboard", "sections", "tools", "pin"]),
+        .init(title: "Reset order", tab: .advanced, keywords: ["reset", "order", "arrange", "rearrange", "default", "dashboard", "sections", "tools"]),
+        .init(title: "Clear pinned tools", tab: .advanced, keywords: ["clear", "pin", "pinned", "unpin", "dashboard", "tools", "shelf", "reset"]),
         .init(title: "Reset all settings", tab: .advanced, keywords: ["reset", "defaults", "restore", "clear", "all"]),
     ]
 
@@ -532,6 +533,8 @@ struct AdvancedSettingsTab: View {
     private var dashboardCategoryOrderRaw: String = ""
     @AppStorage(SettingsKeys.dashboardToolOrder)
     private var dashboardToolOrderRaw: String = ""
+    @AppStorage(SettingsKeys.dashboardPinnedTools)
+    private var dashboardPinnedToolsRaw: String = ""
 
     /// Whether the user has rearranged the dashboard away from its default section/tool order — gates
     /// the Reset order button. Pins are tracked separately (``SettingsKeys/dashboardPinnedTools``) and
@@ -539,6 +542,12 @@ struct AdvancedSettingsTab: View {
     private var hasCustomDashboardOrder: Bool {
         !ToolCategoryOrder.isDefault(ToolCategoryOrder.resolve(dashboardCategoryOrderRaw))
             || !ToolOrder.isDefault(dashboardToolOrderRaw)
+    }
+
+    /// Whether any tool is pinned — gates the Clear pinned tools button. Pins are the one dashboard
+    /// setting Reset order deliberately preserves, so they get their own targeted clear here.
+    private var hasPinnedTools: Bool {
+        !PinnedTools.resolve(dashboardPinnedToolsRaw).isEmpty
     }
 
     /// Coarser-to-finer thresholds shown in the logging picker, each paired with the `LogLevel` whose
@@ -615,9 +624,10 @@ struct AdvancedSettingsTab: View {
                 Text("Clears the document's author, title, and dates from every saved PDF. Everything already runs on your Mac; this keeps that info out of files you share.")
             }
 
-            // One "Reset" section holding both reset actions, each row carrying its own inline
-            // description so neither reads as the section's subject (a per-button "Dashboard order"
-            // header had made that control look like the whole section).
+            // One "Reset" section holding every reset action, each row carrying its own inline
+            // description so no single one reads as the section's subject (a per-button "Dashboard
+            // order" header had made that control look like the whole section). The two dashboard-scoped
+            // resets lead; the total reset closes it out.
             Section {
                 ResetRow(
                     title: "Reset order",
@@ -626,6 +636,15 @@ struct AdvancedSettingsTab: View {
                         : "Drag a section header or a tile on the dashboard to rearrange it. Reset order restores the default arrangement; pinned tools aren’t affected.",
                     isDisabled: !hasCustomDashboardOrder,
                     action: resetDashboardOrder
+                )
+
+                ResetRow(
+                    title: "Clear pinned tools",
+                    description: hasPinnedTools
+                        ? "Unpins every tool from the dashboard. Individual pins can also be removed from a tool’s tile; the dashboard order isn’t affected."
+                        : "No tools are pinned. Pin one from its tile on the dashboard and it’ll appear at the top of the dashboard.",
+                    isDisabled: !hasPinnedTools,
+                    action: clearPinnedTools
                 )
 
                 ResetRow(
@@ -662,6 +681,12 @@ struct AdvancedSettingsTab: View {
     private func resetDashboardOrder() {
         dashboardCategoryOrderRaw = ""
         dashboardToolOrderRaw = ""
+    }
+
+    /// Unpin every tool, emptying the dashboard's pinned shelf. The section/tool order is left in place
+    /// (its own Reset order handles that); an empty string resolves to "nothing pinned".
+    private func clearPinnedTools() {
+        dashboardPinnedToolsRaw = ""
     }
 
     private func resetAllSettings() {

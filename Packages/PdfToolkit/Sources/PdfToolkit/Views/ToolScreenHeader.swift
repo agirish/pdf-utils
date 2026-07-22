@@ -9,14 +9,15 @@ struct ToolScreenHeader: View {
     @State private var chipHovered = false
     @Environment(\.colorScheme) private var scheme
     @Environment(\.toolAccent) private var accent
+    private let glass = GlassAppearance()
     private var dark: Bool { scheme == .dark }
 
     var body: some View {
         HStack(alignment: .top, spacing: 16) {
-            // The icon plate echoes the dashboard tile's gradient plate (radius 16, accent gradient,
-            // accent hairline) so opening a tool reads as that tile expanding, not a flatter chip.
+            // The icon plate echoes the dashboard tile's gradient plate (the `cardRadius` tier, accent
+            // gradient, accent hairline) so opening a tool reads as that tile expanding, not a flatter chip.
             ZStack {
-                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                RoundedRectangle(cornerRadius: LiquidGlass.cardRadius, style: .continuous)
                     .fill(
                         LinearGradient(
                             colors: dark
@@ -28,7 +29,7 @@ struct ToolScreenHeader: View {
                     )
                     .frame(width: 52, height: 52)
                     .overlay {
-                        RoundedRectangle(cornerRadius: 16, style: .continuous)
+                        RoundedRectangle(cornerRadius: LiquidGlass.cardRadius, style: .continuous)
                             .strokeBorder(accent.opacity(dark ? 0.55 : 0.22), lineWidth: 1)
                     }
                 Image(systemName: tool.symbolName)
@@ -57,10 +58,11 @@ struct ToolScreenHeader: View {
         .padding(.horizontal, 28)
         .padding(.vertical, 18)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background {
-            Rectangle()
-                .fill(.ultraThinMaterial)
-        }
+        // Route the top bar through the level-aware glass surface (radius 0 — it's a full-bleed bar)
+        // rather than a hardcoded `.ultraThinMaterial`, so it tracks the Glass level like the form
+        // cards and action bar: opaque at Solid, frost matching its neighbors at Frosted, see-through
+        // at Clear (where it kept its prior look). Removes the seam the fixed material used to show.
+        .glassSurface(glass.level, cornerRadius: 0)
         .overlay(alignment: .bottom) {
             Divider()
         }

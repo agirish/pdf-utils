@@ -66,6 +66,13 @@ public enum AccentLabel {
 }
 
 public extension Color {
+    /// The single semantic color for a **non-blocking field warning** — a page range that doesn't
+    /// parse yet, a password confirmation that doesn't match yet, a file that can't be merged until its
+    /// password is removed. Amber, deliberately *not* red: these are recoverable "not ready yet" states
+    /// the user is still correcting, so red — reserved for a hard, committed error — would overstate
+    /// them. One token so every field's warning reads identically (they used to split red vs orange).
+    static let fieldWarning = Color.orange
+
     /// Glyph/label color for content drawn on a **static** fill (an accent swatch, a tinted chip).
     /// Resolves the fill's own luminance: near-black on light fills, white on dark ones. White on
     /// Amber is ~2.1:1 and on Cyan ~2.5:1 — both under the 3:1 large-text floor — so a fixed white

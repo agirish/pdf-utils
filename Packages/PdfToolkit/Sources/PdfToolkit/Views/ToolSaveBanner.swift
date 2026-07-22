@@ -53,11 +53,11 @@ struct ToolSaveBanner: View {
         }
         .padding(14)
         .background {
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
+            RoundedRectangle(cornerRadius: LiquidGlass.innerCardRadius, style: .continuous)
                 .fill(accent.opacity(0.10))
         }
         .overlay {
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
+            RoundedRectangle(cornerRadius: LiquidGlass.innerCardRadius, style: .continuous)
                 .strokeBorder(accent.opacity(0.30), lineWidth: 1)
         }
         .accessibilityElement(children: .combine)
@@ -94,11 +94,11 @@ struct ToolInfoBanner: View {
         }
         .padding(14)
         .background {
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
+            RoundedRectangle(cornerRadius: LiquidGlass.innerCardRadius, style: .continuous)
                 .fill(accent.opacity(0.10))
         }
         .overlay {
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
+            RoundedRectangle(cornerRadius: LiquidGlass.innerCardRadius, style: .continuous)
                 .strokeBorder(accent.opacity(0.30), lineWidth: 1)
         }
         .accessibilityElement(children: .combine)

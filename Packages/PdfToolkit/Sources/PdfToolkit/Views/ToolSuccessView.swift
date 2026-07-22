@@ -87,11 +87,11 @@ struct ToolSuccessView: View {
         .padding(.vertical, 12)
         .padding(.horizontal, 16)
         .background {
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
+            RoundedRectangle(cornerRadius: LiquidGlass.innerCardRadius, style: .continuous)
                 .fill(Color.primary.opacity(0.05))
         }
         .overlay {
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
+            RoundedRectangle(cornerRadius: LiquidGlass.innerCardRadius, style: .continuous)
                 .strokeBorder(Color.primary.opacity(0.08), lineWidth: 1)
         }
     }

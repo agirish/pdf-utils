@@ -371,7 +371,7 @@ struct MergeToolView: View {
                     // the badge is the whole story until its password is removed.
                     Label("Password-protected — can't merge", systemImage: "lock.fill")
                         .font(.subheadline)
-                        .foregroundStyle(.orange)
+                        .foregroundStyle(Color.fieldWarning)
                 } else {
                     pageCountLabel(for: value)
                     TextField("e.g. 1, 3-5 · all pages", text: entry.rangeText)
@@ -441,7 +441,7 @@ struct MergeToolView: View {
             if !plan.valid {
                 Label("Check the page range", systemImage: "exclamationmark.triangle.fill")
                     .font(.caption.weight(.medium))
-                    .foregroundStyle(.orange)
+                    .foregroundStyle(Color.fieldWarning)
             } else if plan.indices.count == plan.rawCount {
                 Text("\(plan.rawCount) page\(plan.rawCount == 1 ? "" : "s")")
                     .font(.caption)

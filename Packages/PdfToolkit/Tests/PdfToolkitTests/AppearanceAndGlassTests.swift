@@ -76,6 +76,29 @@ import Foundation
         #expect(LiquidGlass.defaultHue == .blue)
     }
 
+    // MARK: Surface-tier corner radii
+
+    @Test func surfaceTierRadiiArePinnedAndDistinct() {
+        // One named radius per surface tier so same-tier cards share a value instead of each
+        // re-spelling a literal. Pinned so a retune is a deliberate, reviewed edit.
+        #expect(LiquidGlass.tileRadius == 22)
+        #expect(LiquidGlass.cardRadius == 16)
+        #expect(LiquidGlass.rowRadius == 14)
+        #expect(LiquidGlass.innerCardRadius == 12)
+        #expect(LiquidGlass.chipRadius == 8)
+        // Strictly descending tiers: tile > card > row > innerCard > chip, and no two collide.
+        let tiers = [LiquidGlass.tileRadius, LiquidGlass.cardRadius, LiquidGlass.rowRadius,
+                     LiquidGlass.innerCardRadius, LiquidGlass.chipRadius]
+        #expect(tiers == tiers.sorted(by: >))
+        #expect(Set(tiers).count == tiers.count)
+    }
+
+    @Test func fieldWarningIsTheAmberWarningToken() {
+        // The single semantic token for a non-blocking "fix this input" field warning is amber — the
+        // convention is amber for a recoverable warning, red only for a hard error.
+        #expect(Color.fieldWarning == Color.orange)
+    }
+
     // MARK: Legacy migration
 
     /// A throwaway defaults domain so migration tests never touch the real app or each other.

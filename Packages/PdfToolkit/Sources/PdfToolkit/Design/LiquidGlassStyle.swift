@@ -217,6 +217,22 @@ public enum LiquidGlass {
     public static let cardCornerRadius: CGFloat = 14
     static let smallCornerRadius: CGFloat = 10
 
+    // Surface-tier corner radii. The app's surfaces fall into a handful of size tiers; naming each
+    // tier once — instead of re-spelling a literal per component — is what keeps same-tier cards
+    // sharing a radius rather than drifting apart one view at a time. Distinct from `cardCornerRadius`
+    // (14, the floating *overlay* cards — Settings, ⌘K, Help) and `smallCornerRadius` (10, glass bars),
+    // which the overlay/bar chrome still reads.
+    /// The dashboard tool tile — the largest surface.
+    public static let tileRadius: CGFloat = 22
+    /// A form card and the tool hero's icon plate.
+    public static let cardRadius: CGFloat = 16
+    /// A dashboard list row, a file drop zone, a Split group card.
+    public static let rowRadius: CGFloat = 14
+    /// An inner card, banner, stat/success tile, or the thumbnail-size box nested inside a card.
+    public static let innerCardRadius: CGFloat = 12
+    /// A chip, index badge, or page thumbnail.
+    public static let chipRadius: CGFloat = 8
+
     /// pdf-utils–scoped keys (do not collide with SyncCloud defaults on the same Mac).
     /// Retired: read only by `migrateLegacyAppearance`, which maps it onto `levelKey`.
     static let intensityKey = "pdfutils.liquidGlassIntensity"

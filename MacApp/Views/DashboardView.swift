@@ -570,8 +570,8 @@ private func dashboardAccentPlateGradient(_ accent: Color, dark: Bool) -> Linear
 private extension View {
     /// The identical glass surface the tile and the row wrap their content in: the whole shape is the
     /// hit target, the accent tint washes behind, then the window's glass material clips to the shape.
-    /// Only the corner radius differs between the two (22 vs 14); the hover/idle border, specular, and
-    /// shadow stay per-view because those genuinely diverge.
+    /// Only the corner radius differs between the two (tile vs row tier); the hover/idle border,
+    /// specular, and shadow stay per-view because those genuinely diverge.
     func dashboardTileGlass(cornerRadius: CGFloat, level: GlassLevel, hue: LiquidGlassHue, tint: Double) -> some View {
         let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
         return self
@@ -676,9 +676,9 @@ struct ToolTileView: View {
         // region on its own), the Tint slider washes it like the tool cards, then the window's glass
         // material clips to the rounded shape — Clear shows the desktop through, Frosted blurs, Solid
         // stays opaque. Shared with the row (only the radius differs).
-        .dashboardTileGlass(cornerRadius: 22, level: chrome.level, hue: chrome.hue, tint: chrome.tint)
+        .dashboardTileGlass(cornerRadius: LiquidGlass.tileRadius, level: chrome.level, hue: chrome.hue, tint: chrome.tint)
         .overlay {
-            RoundedRectangle(cornerRadius: 22, style: .continuous)
+            RoundedRectangle(cornerRadius: LiquidGlass.tileRadius, style: .continuous)
                 .strokeBorder(
                     hovered ? accent.opacity(0.6)
                             : (dark ? Color.white.opacity(0.22) : Color.primary.opacity(0.08)),
@@ -689,7 +689,7 @@ struct ToolTileView: View {
         // real glass. Skipped while hovered (the accent border takes over) and in light mode.
         .overlay {
             if dark && !hovered {
-                RoundedRectangle(cornerRadius: 22, style: .continuous)
+                RoundedRectangle(cornerRadius: LiquidGlass.tileRadius, style: .continuous)
                     .strokeBorder(
                         LinearGradient(colors: [.white.opacity(0.40), .clear],
                                        startPoint: .top, endPoint: .center),
@@ -778,9 +778,9 @@ struct ToolRowView: View {
         .padding(.vertical, 11)
         .frame(maxWidth: .infinity, alignment: .leading)
         // Whole row is the hit target (the glass fill isn't part of the NavigationLink's region alone).
-        .dashboardTileGlass(cornerRadius: 14, level: chrome.level, hue: chrome.hue, tint: chrome.tint)
+        .dashboardTileGlass(cornerRadius: LiquidGlass.rowRadius, level: chrome.level, hue: chrome.hue, tint: chrome.tint)
         .overlay {
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
+            RoundedRectangle(cornerRadius: LiquidGlass.rowRadius, style: .continuous)
                 .strokeBorder(
                     hovered ? accent.opacity(0.6)
                             : (dark ? Color.white.opacity(0.16) : Color.primary.opacity(0.07)),

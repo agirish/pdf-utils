@@ -89,7 +89,7 @@ struct EmptyFileDropZone: View {
         .padding(.vertical, 28)
         .padding(.horizontal, 16)
         .background {
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
+            RoundedRectangle(cornerRadius: LiquidGlass.rowRadius, style: .continuous)
                 .strokeBorder(
                     style: StrokeStyle(lineWidth: isTargeted ? 2 : 1.2, dash: [7, 5])
                 )
@@ -143,11 +143,11 @@ struct SelectedFileCard: View {
         .padding(.vertical, 10)
         .padding(.horizontal, 12)
         .background {
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
+            RoundedRectangle(cornerRadius: LiquidGlass.innerCardRadius, style: .continuous)
                 .fill(Color.primary.opacity(0.025))
         }
         .overlay {
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
+            RoundedRectangle(cornerRadius: LiquidGlass.innerCardRadius, style: .continuous)
                 .strokeBorder(Color.primary.opacity(0.06), lineWidth: 1)
         }
         .accessibilityElement(children: .combine)

@@ -49,12 +49,12 @@ extension View {
         modifier(FormCardStyle())
     }
 
-    /// Translucent bar behind a tool's primary action row. Mirrors `ToolScreenHeader`'s material top
-    /// bar so the action reads as glass chrome — letting the window's liquid-glass background (its
-    /// accent hue and tint) read through — instead of the opaque panel that used to hide it. Callers
-    /// keep their own `Divider` above the bar.
+    /// Translucent bar behind a tool's primary action row. Mirrors `ToolScreenHeader`'s glass top bar
+    /// so the action reads as glass chrome — letting the window's liquid-glass background (its accent
+    /// hue and tint) read through — instead of the opaque panel that used to hide it. Callers keep
+    /// their own `Divider` above the bar.
     func toolActionBar() -> some View {
-        self.background(.ultraThinMaterial)
+        modifier(ToolActionBarStyle())
     }
 
     /// The app's standard error alert: the error string under the app name with a single OK button,
@@ -82,7 +82,7 @@ private struct FormCardStyle: ViewModifier {
 
     func body(content: Content) -> some View {
         let dark = scheme == .dark
-        let shape = RoundedRectangle(cornerRadius: 16, style: .continuous)
+        let shape = RoundedRectangle(cornerRadius: LiquidGlass.cardRadius, style: .continuous)
         // Dark gets a top-lit specular hairline and a drop shadow so the card lifts off the ground;
         // light keeps the original quaternary hairline with no shadow (unchanged).
         let border: AnyShapeStyle = dark
@@ -92,9 +92,21 @@ private struct FormCardStyle: ViewModifier {
         content
             .contentSurface(hue: glass.hue, tint: glass.tint)
             .clipShape(shape)
-            .glassSurface(glass.level, cornerRadius: 16)
+            .glassSurface(glass.level, cornerRadius: LiquidGlass.cardRadius)
             .overlay { shape.strokeBorder(border, lineWidth: 1) }
             .shadow(color: .black.opacity(dark ? 0.48 : 0), radius: dark ? 16 : 0, y: dark ? 8 : 0)
+    }
+}
+
+/// Backs `toolActionBar()`. Reads the live Glass level so the action bar tracks Solid/Clear like every
+/// other surface — it used to be a hardcoded `.ultraThinMaterial`, which stayed translucent even at
+/// Solid (a seam against the now-opaque form cards) and read frostier than its neighbors at Clear. A
+/// full-bleed bar, so it takes a 0 corner radius; the caller keeps its own `Divider` above it.
+private struct ToolActionBarStyle: ViewModifier {
+    private let glass = GlassAppearance()
+
+    func body(content: Content) -> some View {
+        content.glassSurface(glass.level, cornerRadius: 0)
     }
 }
 
@@ -113,7 +125,7 @@ extension EnvironmentValues {
 }
 
 /// A numbered index badge for a list row — Merge's file order and Reorder's page order. One shared
-/// size (30×30, radius 8) so the two lists' badges match instead of drifting to 40 vs 30.
+/// size (30×30, the `chipRadius` tier) so the two lists' badges match instead of drifting to 40 vs 30.
 struct RowIndexBadge: View {
     let number: Int
     let accent: Color
@@ -122,7 +134,7 @@ struct RowIndexBadge: View {
 
     var body: some View {
         ZStack {
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
+            RoundedRectangle(cornerRadius: LiquidGlass.chipRadius, style: .continuous)
                 .fill(accent.opacity(0.14))
                 .frame(width: 30, height: 30)
             // The number is accent-as-text on a faint accent chip; route it through the

@@ -173,7 +173,7 @@ struct SplitGroupedPreviewColumn: View {
         .padding(14)
         .frame(maxWidth: 360, alignment: .leading)
         .background {
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
+            RoundedRectangle(cornerRadius: LiquidGlass.innerCardRadius, style: .continuous)
                 .strokeBorder(Color.primary.opacity(0.12), lineWidth: 1)
         }
         .accessibilityElement(children: .combine)
@@ -224,14 +224,14 @@ struct SplitGroupedPreviewColumn: View {
         }
         .padding(14)
         .background {
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
+            RoundedRectangle(cornerRadius: LiquidGlass.rowRadius, style: .continuous)
                 .fill(color.opacity(0.08))
         }
         .overlay {
             // When the user asks not to rely on color alone, give each consecutive group frame a
             // distinct line style (solid / dashed / dotted, cycling) so adjacent files are told apart
             // by their border, not just by hue — the "PDF N" chip already names them.
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
+            RoundedRectangle(cornerRadius: LiquidGlass.rowRadius, style: .continuous)
                 .strokeBorder(
                     color.opacity(0.55),
                     style: StrokeStyle(
@@ -317,10 +317,10 @@ private struct SplitGroupCell: View {
             CachedThumbnailCell(cacheKey: spec.cacheKey) { await render(spec) }
                 .frame(width: thumbnailSize)
                 .background(Color.white)
-                .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                .clipShape(RoundedRectangle(cornerRadius: LiquidGlass.chipRadius, style: .continuous))
                 .shadow(color: .black.opacity(0.1), radius: 4, y: 2)
                 .overlay {
-                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    RoundedRectangle(cornerRadius: LiquidGlass.chipRadius, style: .continuous)
                         .strokeBorder(groupColor.opacity(0.6), lineWidth: 1.5)
                 }
 

@@ -136,7 +136,7 @@ struct SinglePDFPreviewColumn: View {
                         .padding(14)
                         .frame(maxWidth: 360, alignment: .leading)
                         .background {
-                            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            RoundedRectangle(cornerRadius: LiquidGlass.innerCardRadius, style: .continuous)
                                 .strokeBorder(Color.primary.opacity(0.12), lineWidth: 1)
                         }
                         .accessibilityElement(children: .combine)
@@ -276,7 +276,7 @@ struct SinglePDFPreviewColumn: View {
             }
         }
         .frame(width: thumbnailSize)
-        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: LiquidGlass.chipRadius, style: .continuous))
     }
 
     /// Keyboard/non-drag fallback for reordering (drag is mouse-only). Offsets follow
@@ -327,11 +327,11 @@ struct SinglePDFPreviewColumn: View {
             CachedThumbnailCell(cacheKey: spec.cacheKey) { await render(spec) }
                 .frame(width: thumbnailSize)
                 .background(Color.white)
-                .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                .clipShape(RoundedRectangle(cornerRadius: LiquidGlass.chipRadius, style: .continuous))
                 .shadow(color: .black.opacity(0.1), radius: 4, y: 2)
                 .overlay {
                     if selectable && isSelected {
-                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        RoundedRectangle(cornerRadius: LiquidGlass.chipRadius, style: .continuous)
                             .strokeBorder(accent, lineWidth: 3)
                     }
                 }

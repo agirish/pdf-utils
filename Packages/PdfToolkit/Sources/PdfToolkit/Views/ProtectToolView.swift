@@ -203,7 +203,7 @@ struct ProtectToolView: View {
                 if !confirmPassword.isEmpty && !passwordsMatch {
                     Label("Passwords don't match yet.", systemImage: "exclamationmark.triangle")
                         .font(.subheadline.weight(.medium))
-                        .foregroundStyle(.orange)
+                        .foregroundStyle(Color.fieldWarning)
                 }
                 showPasswordToggle
                 Label(restrictEditing

@@ -8,6 +8,8 @@ struct OCRToolView: View {
     @State private var inputURL: URL?
     @State private var accurate = true
     @State private var skipPagesWithText = true
+    /// Chosen recognition language as a BCP-47 code; empty means Automatic (Vision auto-detects).
+    @State private var recognitionLanguage = ""
     @State private var busy = false
     @State private var progressPage = 0
     @State private var progressTotal = 0
@@ -32,6 +34,15 @@ struct OCRToolView: View {
     private var selectionPathKey: String {
         inputURL?.standardizedFileURL.path ?? ""
     }
+
+    /// (code, display name) for every language Vision recognizes on this Mac, sorted by display name.
+    /// Read once per process — the supported set is fixed for the OS build.
+    private static let languageChoices: [(code: String, name: String)] = {
+        let locale = Locale.current
+        return PDFToolkit.supportedOCRLanguages()
+            .map { (code: $0, name: locale.localizedString(forIdentifier: $0) ?? $0) }
+            .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+    }()
 
     var body: some View {
         HSplitView {
@@ -254,6 +265,23 @@ struct OCRToolView: View {
 
     private var recognitionSection: some View {
         VStack(alignment: .leading, spacing: 12) {
+            if !Self.languageChoices.isEmpty {
+                HStack {
+                    Text("Language")
+                        .font(.subheadline.weight(.semibold))
+                    Spacer(minLength: 8)
+                    Picker("Language", selection: $recognitionLanguage) {
+                        Text("Automatic").tag("")
+                        Divider()
+                        ForEach(Self.languageChoices, id: \.code) { choice in
+                            Text(choice.name).tag(choice.code)
+                        }
+                    }
+                    .labelsHidden()
+                    .fixedSize()
+                    .help("Recognize a specific language, or let Vision detect it automatically")
+                }
+            }
             HStack {
                 Text("Accuracy")
                     .font(.subheadline.weight(.semibold))
@@ -363,7 +391,11 @@ struct OCRToolView: View {
         }
 
         suggestedName = fileURL.deletingPathExtension().lastPathComponent + "-searchable.pdf"
-        let options = OCROptions(accurate: accurate, skipPagesWithText: skipPagesWithText)
+        let options = OCROptions(
+            accurate: accurate,
+            skipPagesWithText: skipPagesWithText,
+            recognitionLanguages: recognitionLanguage.isEmpty ? [] : [recognitionLanguage]
+        )
 
         do {
             let outcome: (data: Data, summary: OCRRunSummary) = try await PDFBackgroundWork.run { isCancelled in

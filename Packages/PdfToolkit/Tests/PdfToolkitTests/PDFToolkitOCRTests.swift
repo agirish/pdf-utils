@@ -37,6 +37,30 @@ import Testing
         #expect(text.contains("MARKERPAGE1"), "recognized text must extract from the output, got: \(text)")
     }
 
+    @Test func supportedLanguagesIncludeEnglish() {
+        // The tool populates its language menu from this; every Mac ships at least an English model.
+        let languages = PDFToolkit.supportedOCRLanguages()
+        #expect(!languages.isEmpty)
+        #expect(languages.contains { $0.hasPrefix("en") })
+    }
+
+    @Test func recognizesWithAnExplicitLanguage() throws {
+        // Naming a language (auto-detect off) must still recognize the page, not silently disable OCR.
+        let dir = FixtureDir()
+        let scanned = try writeScannedFixture(marker: "MARKERPAGE1", in: dir)
+        let out = dir.url("searchable.pdf")
+
+        let summary = try PDFToolkit.ocr(
+            inputURL: scanned,
+            outputURL: out,
+            options: OCROptions(accurate: true, skipPagesWithText: true, recognitionLanguages: ["en-US"])
+        )
+
+        #expect(summary.recognizedPages == 1)
+        let text = try PDFFixtures.pageTexts(at: out).joined(separator: " ").uppercased()
+        #expect(text.contains("MARKERPAGE1"), "recognized text must extract from the output, got: \(text)")
+    }
+
     @Test func textLayerLandsWhereThePrintedWordsAre() throws {
         let dir = FixtureDir()
         // The fixture draws its marker at x=72 with baseline at mid-page (y=396) in 24 pt type.

@@ -13,6 +13,10 @@ struct OCROptions: Sendable {
     /// Pages that already extract text are copied through untouched — running OCR over live vector
     /// text would stack a second, slightly-off text layer under every selection.
     var skipPagesWithText = true
+    /// BCP-47 languages to recognize, most-preferred first. Empty means auto-detect (the default) —
+    /// Vision picks per page. Naming a language guides recognition on documents Vision would otherwise
+    /// misread (e.g. a language that shares an alphabet with another it detects first).
+    var recognitionLanguages: [String] = []
 }
 
 /// What an OCR run did, for the caller's messaging.
@@ -94,7 +98,7 @@ extension PDFToolkit {
                     guard let bitmap = renderPageBitmap(dp.page, maxPixelDimension: renderSize) else {
                         throw PDFOperationError.ocrFailed
                     }
-                    lines = try recognizeText(in: bitmap, accurate: options.accurate)
+                    lines = try recognizeText(in: bitmap, accurate: options.accurate, languages: options.recognitionLanguages)
                     summary.recognizedPages += 1
                 } else {
                     summary.skippedPages += 1
@@ -113,14 +117,33 @@ extension PDFToolkit {
         return (pdfData as Data, summary)
     }
 
+    /// The BCP-47 languages Vision can recognize on this Mac, for the accurate recognizer (a superset
+    /// of Fast's on every OS to date), most-preferred first as Vision reports them. Empty if the query
+    /// fails. Read once by the tool to populate its language menu.
+    static func supportedOCRLanguages() -> [String] {
+        let request = VNRecognizeTextRequest()
+        request.recognitionLevel = .accurate
+        // The instance query reports the list for this request's own level and revision — exactly
+        // what recognition will use — so no revision constant is hard-coded.
+        return (try? request.supportedRecognitionLanguages()) ?? []
+    }
+
     // MARK: Recognition
 
     /// Runs Vision over one page bitmap and returns per-line text with normalized rectangles.
-    private static func recognizeText(in image: CGImage, accurate: Bool) throws -> [RecognizedLine] {
+    /// An empty `languages` list leaves Vision to auto-detect per page; a non-empty one pins the
+    /// recognition languages (auto-detect off) so a document Vision would misread is read as chosen.
+    private static func recognizeText(in image: CGImage, accurate: Bool, languages: [String]) throws -> [RecognizedLine] {
         let request = VNRecognizeTextRequest()
         request.recognitionLevel = accurate ? .accurate : .fast
         request.usesLanguageCorrection = accurate
-        request.automaticallyDetectsLanguage = true
+        if languages.isEmpty {
+            request.automaticallyDetectsLanguage = true
+        } else {
+            // Vision ignores `recognitionLanguages` while auto-detect is on, so turn it off here.
+            request.automaticallyDetectsLanguage = false
+            request.recognitionLanguages = languages
+        }
         let handler = VNImageRequestHandler(cgImage: image, options: [:])
         do {
             try handler.perform([request])

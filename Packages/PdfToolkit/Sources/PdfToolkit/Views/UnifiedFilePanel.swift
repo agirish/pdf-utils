@@ -32,6 +32,17 @@ struct UnifiedFilePanel<Config: View>: View {
     var fallbackSuffix: String
     /// Preview-column subtitle for the one-file case.
     var previewSubtitle: String
+    /// Optional page-selection layer for the one-file preview, forwarded straight to
+    /// ``SinglePDFPreviewColumn`` — Rotate lights up the pages its range will turn and lets you click
+    /// thumbnails to build that range. All default nil, so every tool that doesn't opt in renders a
+    /// plain, non-interactive preview exactly as before.
+    var selectedPages: Set<Int>? = nil
+    var onTogglePage: ((Int) -> Void)? = nil
+    var selectionPrompt: String? = nil
+    /// Called whenever the one-file page count resolves (0 when the file is cleared or fails to load),
+    /// so a host that maps a text range onto the pages — Rotate — can resolve `selectedPages` against
+    /// the true count without reaching into this panel's private thumbnail state.
+    var onPageCountChange: ((Int) -> Void)? = nil
     /// Body text of the "Locked PDF" placeholder shown when the one loaded file is password-locked
     /// (the thumbnail loader refuses locked documents — their pages render as blanks). The default
     /// points at the tool that can actually fix it; Password Protect overrides with its own copy,
@@ -397,6 +408,9 @@ struct UnifiedFilePanel<Config: View>: View {
                     emptyTitle: "No PDF selected",
                     emptySubtitle: "Drop a PDF here or choose one to see its pages.",
                     emptySystemImage: tool.symbolName,
+                    selectedPages: selectedPages,
+                    onTogglePage: onTogglePage,
+                    selectionPrompt: selectionPrompt,
                     render: { spec in
                         guard let url = firstURL else { return nil }
                         return (try? await PDFPageThumbnailLoader.loadPage(from: url, pageIndex: spec.id - 1))?.image
@@ -570,6 +584,7 @@ struct UnifiedFilePanel<Config: View>: View {
             pageSpecs = []
             isGeneratingPreviews = false
             previewLocked = false
+            onPageCountChange?(0)
             return
         }
         pageSpecs = []
@@ -586,12 +601,14 @@ struct UnifiedFilePanel<Config: View>: View {
             guard !Task.isCancelled else { return }
             pageSpecs = PreviewPageSpec.specs(forPDFAt: url, pageCount: count)
             isGeneratingPreviews = false
+            onPageCountChange?(count)
         } catch is CancellationError {
             // Superseded mid-load; the newer load owns the state.
         } catch {
             guard !Task.isCancelled else { return }
             pageSpecs = []
             isGeneratingPreviews = false
+            onPageCountChange?(0)
             if case PDFOperationError.encryptedInput = error {
                 previewLocked = true
             }

@@ -4,9 +4,13 @@ import SwiftUI
 import UniformTypeIdentifiers
 
 struct RotateToolView: View {
+    @Environment(\.toolAccent) private var accent
     @State private var scope: PageScope = .all
     @State private var rangeText = ""
     @State private var quarterTurns = 1
+    /// The one loaded file's page count, reported by ``UnifiedFilePanel`` (0 when none/many). Lets the
+    /// range map onto real pages for the preview highlight without reaching into the panel's state.
+    @State private var pageCount = 0
     @State private var busy = false
     @State private var alertMessage: String?
     @State private var showExporter = false
@@ -36,6 +40,10 @@ struct RotateToolView: View {
             makeOperation: { .rotateConfig(quarterTurns: quarterTurns) },
             fallbackSuffix: "rotated",
             previewSubtitle: "Thumbnails show every page; only the pages you choose below are rotated in the new PDF.",
+            selectedPages: rangeSelection,
+            onTogglePage: rangeTogglePage,
+            selectionPrompt: rangeSelectionPrompt,
+            onPageCountChange: { pageCount = $0 },
             runSingle: { url in await runRotate(url) }
         ) {
             rotateConfig
@@ -93,10 +101,64 @@ struct RotateToolView: View {
             if scope == .range {
                 TextField("e.g. 1, 3-5, 8", text: $rangeText)
                     .textFieldStyle(.roundedBorder)
+                rangeNote
             }
         }
         .padding(16)
         .formCard()
+    }
+
+    /// Live "N pages will turn" hint / inline error for the range field — the same parse the export
+    /// runs, so it can't promise a rotation Save then rejects. The preview highlight already reflects a
+    /// good range visually; this names a bad one instead of leaving the pages simply un-highlighted.
+    @ViewBuilder
+    private var rangeNote: some View {
+        switch PageRangeField.evaluate(rangeText, pageCount: pageCount, preserveOrder: false) {
+        case .empty, .incomplete:
+            EmptyView()
+        case .pages(let indices):
+            RangeFieldNote(
+                text: "Rotates \(indices.count) page\(indices.count == 1 ? "" : "s").",
+                systemImage: "rotate.right",
+                accent: accent
+            )
+        case .invalid(let message):
+            RangeFieldNote(text: message, systemImage: "exclamationmark.triangle", isError: true, accent: accent)
+        }
+    }
+
+    // MARK: - Visual selection (single file, range scope)
+
+    /// The pages the current range covers, for the preview highlight — offered only when a page range
+    /// is actually in play (one file, "Page range" chosen). "All pages" needs no per-page highlight,
+    /// and a multi-file run has no single preview, so both render the plain thumbnails.
+    private var rangeSelectionActive: Bool {
+        scope == .range && runner.items.count == 1 && pageCount > 0
+    }
+
+    private var rangeSelection: Set<Int>? {
+        rangeSelectionActive ? VisualPageSelection.pages(from: rangeText, pageCount: pageCount) : nil
+    }
+
+    private var rangeTogglePage: ((Int) -> Void)? {
+        rangeSelectionActive ? { togglePage($0) } : nil
+    }
+
+    private var rangeSelectionPrompt: String? {
+        rangeSelectionActive ? "Click pages to choose what turns, or type them on the left." : nil
+    }
+
+    /// Toggles one 1-based page in/out of the rotate range and writes it back to the field, which stays
+    /// authoritative so a click and a keystroke can't disagree (Extract's pattern). The chosen pages
+    /// then rotate by the direction picked below.
+    private func togglePage(_ page: Int) {
+        var pages = VisualPageSelection.pages(from: rangeText, pageCount: pageCount)
+        if pages.contains(page) {
+            pages.remove(page)
+        } else {
+            pages.insert(page)
+        }
+        rangeText = VisualPageSelection.rangeString(from: pages)
     }
 
     private var rotationSection: some View {

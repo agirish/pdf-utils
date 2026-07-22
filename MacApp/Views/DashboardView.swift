@@ -535,6 +535,48 @@ private struct DragSessionEndDelegate: DropDelegate {
     func performDrop(info: DropInfo) -> Bool { end(); return true }
 }
 
+/// The glass + accent settings the dashboard tile and row both read. They sit outside a tool screen's
+/// `\.toolAccent`, so they resolve the accent directly here. Wraps the shared `GlassAppearance` reader
+/// and adds the accent-style preset that turns a tool + hue into that tool's dashboard accent — so the
+/// tile and the row can't drift apart on how they read the appearance.
+private struct DashboardTileChrome: DynamicProperty {
+    private let glass = GlassAppearance()
+    @AppStorage(LiquidGlass.accentStyleKey) private var accentStyleRaw: String = AccentStyle.multicolor.rawValue
+
+    var level: GlassLevel { glass.level }
+    var hue: LiquidGlassHue { glass.hue }
+    var tint: Double { glass.tint }
+    func accent(for tool: Tool) -> Color {
+        (AccentStyle(rawValue: accentStyleRaw) ?? .multicolor).accent(for: tool, hue: glass.hue)
+    }
+}
+
+/// The accent-tinted diagonal gradient behind a dashboard icon plate — brighter in dark so the plate
+/// reads as lit glass, softer in light. Shared by the tile's 92-pt header plate and the row's 40-pt one.
+private func dashboardAccentPlateGradient(_ accent: Color, dark: Bool) -> LinearGradient {
+    LinearGradient(
+        colors: dark ? [accent.opacity(0.64), accent.opacity(0.27)]
+                     : [accent.opacity(0.30), accent.opacity(0.12)],
+        startPoint: .topLeading,
+        endPoint: .bottomTrailing
+    )
+}
+
+private extension View {
+    /// The identical glass surface the tile and the row wrap their content in: the whole shape is the
+    /// hit target, the accent tint washes behind, then the window's glass material clips to the shape.
+    /// Only the corner radius differs between the two (22 vs 14); the hover/idle border, specular, and
+    /// shadow stay per-view because those genuinely diverge.
+    func dashboardTileGlass(cornerRadius: CGFloat, level: GlassLevel, hue: LiquidGlassHue, tint: Double) -> some View {
+        let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+        return self
+            .contentShape(shape)
+            .contentSurface(hue: hue, tint: tint)
+            .clipShape(shape)
+            .glassSurface(level, cornerRadius: cornerRadius)
+    }
+}
+
 struct ToolTileView: View {
     let tool: Tool
     /// Cards mode: each tile is an elevated floating card. Unified: tiles read as one flat surface.
@@ -547,17 +589,10 @@ struct ToolTileView: View {
     @Environment(\.colorScheme) private var scheme
     private var dark: Bool { scheme == .dark }
 
-    @AppStorage(LiquidGlass.levelKey) private var glassLevelRaw: String = LiquidGlass.defaultLevel.rawValue
-    @AppStorage(LiquidGlass.hueKey) private var glassHueRaw: String = LiquidGlass.defaultHue.rawValue
-    @AppStorage(LiquidGlass.tintKey) private var glassTint: Double = LiquidGlass.defaultTint
-    @AppStorage(LiquidGlass.accentStyleKey) private var accentStyleRaw: String = AccentStyle.multicolor.rawValue
-    private var glassLevel: GlassLevel { GlassLevel(rawValue: glassLevelRaw) ?? LiquidGlass.defaultLevel }
-    private var glassHue: LiquidGlassHue { LiquidGlassHue(rawValue: glassHueRaw) ?? LiquidGlass.defaultHue }
+    private let chrome = DashboardTileChrome()
     /// The tile's effective accent under the chosen accent-style preset (the dashboard sits outside the
     /// tool screen's `\.toolAccent`, so it resolves here directly).
-    private var accent: Color {
-        (AccentStyle(rawValue: accentStyleRaw) ?? .multicolor).accent(for: tool, hue: glassHue)
-    }
+    private var accent: Color { chrome.accent(for: tool) }
 
     // Black shadows are near-invisible on a dark ground, so dark carries a deeper shadow — with a
     // non-zero floor even when idle/unified — to lift the tile. Light keeps the original values.
@@ -578,15 +613,7 @@ struct ToolTileView: View {
         VStack(alignment: .leading, spacing: 14) {
             ZStack {
                 RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .fill(
-                        LinearGradient(
-                            colors: dark
-                                ? [accent.opacity(0.64), accent.opacity(0.27)]
-                                : [accent.opacity(0.30), accent.opacity(0.12)],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        )
-                    )
+                    .fill(dashboardAccentPlateGradient(accent, dark: dark))
                     .frame(height: 92)
                     .overlay {
                         RoundedRectangle(cornerRadius: 16, style: .continuous)
@@ -636,18 +663,11 @@ struct ToolTileView: View {
         }
         .padding(18)
         .frame(maxWidth: .infinity, minHeight: 200, alignment: .topLeading)
-        // Make the whole tile the tap target, not just the icon/text: the glass background isn't part
-        // of the enclosing NavigationLink's hit region on its own, so clicks in the empty areas would
-        // otherwise miss.
-        .contentShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
-        // The accent tint wash, so the Tint slider washes the dashboard tiles the same way it washes
-        // the Settings card and tool control cards (contentSurface). Sits behind the tile content and
-        // under the glass — apply before clip/glassSurface, exactly like FormCardStyle.
-        .contentSurface(hue: glassHue, tint: glassTint)
-        // Same glass surface as the window background, so Clear shows the desktop through each tile
-        // too (glassEffect(.clear) on macOS 26), Frosted blurs it, Solid stays opaque.
-        .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
-        .glassSurface(glassLevel, cornerRadius: 22)
+        // Whole tile is the tap target (the glass background isn't part of the NavigationLink's hit
+        // region on its own), the Tint slider washes it like the tool cards, then the window's glass
+        // material clips to the rounded shape — Clear shows the desktop through, Frosted blurs, Solid
+        // stays opaque. Shared with the row (only the radius differs).
+        .dashboardTileGlass(cornerRadius: 22, level: chrome.level, hue: chrome.hue, tint: chrome.tint)
         .overlay {
             RoundedRectangle(cornerRadius: 22, style: .continuous)
                 .strokeBorder(
@@ -719,15 +739,8 @@ struct ToolRowView: View {
     @Environment(\.colorScheme) private var scheme
     private var dark: Bool { scheme == .dark }
 
-    @AppStorage(LiquidGlass.levelKey) private var glassLevelRaw: String = LiquidGlass.defaultLevel.rawValue
-    @AppStorage(LiquidGlass.hueKey) private var glassHueRaw: String = LiquidGlass.defaultHue.rawValue
-    @AppStorage(LiquidGlass.tintKey) private var glassTint: Double = LiquidGlass.defaultTint
-    @AppStorage(LiquidGlass.accentStyleKey) private var accentStyleRaw: String = AccentStyle.multicolor.rawValue
-    private var glassLevel: GlassLevel { GlassLevel(rawValue: glassLevelRaw) ?? LiquidGlass.defaultLevel }
-    private var glassHue: LiquidGlassHue { LiquidGlassHue(rawValue: glassHueRaw) ?? LiquidGlass.defaultHue }
-    private var accent: Color {
-        (AccentStyle(rawValue: accentStyleRaw) ?? .multicolor).accent(for: tool, hue: glassHue)
-    }
+    private let chrome = DashboardTileChrome()
+    private var accent: Color { chrome.accent(for: tool) }
 
     private var shadowOpacity: Double {
         if dark { return hovered ? 0.40 : (floating ? 0.28 : 0.16) }
@@ -756,10 +769,7 @@ struct ToolRowView: View {
         .padding(.vertical, 11)
         .frame(maxWidth: .infinity, alignment: .leading)
         // Whole row is the hit target (the glass fill isn't part of the NavigationLink's region alone).
-        .contentShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-        .contentSurface(hue: glassHue, tint: glassTint)
-        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-        .glassSurface(glassLevel, cornerRadius: 14)
+        .dashboardTileGlass(cornerRadius: 14, level: chrome.level, hue: chrome.hue, tint: chrome.tint)
         .overlay {
             RoundedRectangle(cornerRadius: 14, style: .continuous)
                 .strokeBorder(
@@ -780,15 +790,7 @@ struct ToolRowView: View {
     private var iconPlate: some View {
         ZStack {
             RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .fill(
-                    LinearGradient(
-                        colors: dark
-                            ? [accent.opacity(0.64), accent.opacity(0.27)]
-                            : [accent.opacity(0.30), accent.opacity(0.12)],
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
-                    )
-                )
+                .fill(dashboardAccentPlateGradient(accent, dark: dark))
                 .frame(width: 40, height: 40)
                 .overlay {
                     RoundedRectangle(cornerRadius: 10, style: .continuous)

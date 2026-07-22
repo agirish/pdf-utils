@@ -615,23 +615,27 @@ struct AdvancedSettingsTab: View {
                 Text("Clears the document's author, title, and dates from every saved PDF. Everything already runs on your Mac; this keeps that info out of files you share.")
             }
 
+            // One "Reset" section holding both reset actions, each row carrying its own inline
+            // description so neither reads as the section's subject (a per-button "Dashboard order"
+            // header had made that control look like the whole section).
             Section {
-                Button("Reset order") { resetDashboardOrder() }
-                    .disabled(!hasCustomDashboardOrder)
-            } header: {
-                Text("Dashboard order")
-            } footer: {
-                Text(hasCustomDashboardOrder
-                     ? "Restores the default order of the dashboard sections and the tools within them. Rearrange them by dragging a section header or a tile on the dashboard; pinned tools aren’t affected."
-                     : "Drag a section header or a tile on the dashboard to rearrange it. Reset order restores the default arrangement; pinned tools aren’t affected.")
-            }
+                ResetRow(
+                    title: "Reset order",
+                    description: hasCustomDashboardOrder
+                        ? "Restores the default order of the dashboard sections and the tools within them. Rearrange them by dragging a section header or a tile on the dashboard; pinned tools aren’t affected."
+                        : "Drag a section header or a tile on the dashboard to rearrange it. Reset order restores the default arrangement; pinned tools aren’t affected.",
+                    isDisabled: !hasCustomDashboardOrder,
+                    action: resetDashboardOrder
+                )
 
-            Section {
-                Button("Reset all settings", role: .destructive) {
-                    resetAllSettings()
-                }
-            } footer: {
-                Text("Restores every setting — Files, Appearance, and Advanced — to its default.")
+                ResetRow(
+                    title: "Reset all settings",
+                    description: "Restores every setting — Files, Appearance, and Advanced — to its default.",
+                    role: .destructive,
+                    action: resetAllSettings
+                )
+            } header: {
+                Text("Reset")
             }
 
             Section("About") {
@@ -695,5 +699,28 @@ struct AdvancedSettingsTab: View {
         defaults.set(LiquidGlass.defaultLevel.rawValue, forKey: LiquidGlass.levelKey)
         ActivityLog.shared.minimumLevel = ActivityLog.defaultMinimumLevel
         AppAppearance.applyPersisted()
+    }
+}
+
+/// One reset control in the Advanced tab's "Reset" section: a button with its own description
+/// beneath it, so several reset actions can share a single section without any one of them (via a
+/// per-button header) reading as the section's subject.
+private struct ResetRow: View {
+    let title: String
+    let description: String
+    var isDisabled: Bool = false
+    var role: ButtonRole? = nil
+    let action: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Button(title, role: role, action: action)
+                .disabled(isDisabled)
+            Text(description)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
     }
 }

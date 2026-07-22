@@ -20,6 +20,11 @@ struct ExtractToolView: View {
     @State private var isGeneratingPreviews = false
     @State private var thumbnailSize: CGFloat = 120
 
+    /// The inline confirmation shown after a successful save, and the summary stashed while the save
+    /// dialog is open (its URL is filled in from the dialog's success callback).
+    @State private var saveSummary: ToolSaveSummary?
+    @State private var pendingSaveSummary: ToolSaveSummary?
+
     private var selectionPathKey: String {
         inputURL?.standardizedFileURL.path ?? ""
     }
@@ -70,11 +75,16 @@ struct ExtractToolView: View {
             switch result {
             case .success(let url):
                 PDFExportCoordinator.didExport(to: url, toolTitle: Tool.extract.title, bytes: savedBytes)
+                if var summary = pendingSaveSummary {
+                    summary.url = url
+                    saveSummary = summary
+                }
             case .failure(let err):
                 guard !err.isUserCancelled else { break }
                 alertMessage = err.localizedDescription
                 ActivityLog.shared.error("\(Tool.extract.title) failed: \(err.localizedDescription)")
             }
+            pendingSaveSummary = nil
         }
         .toolErrorAlert($alertMessage)
         .task(id: selectionPathKey) {
@@ -87,43 +97,49 @@ struct ExtractToolView: View {
     private var sidebarColumn: some View {
         VStack(spacing: 0) {
             ScrollView {
-                VStack(alignment: .leading, spacing: 14) {
-                    FileSidebarHeader(
-                        accent: accent,
-                        icon: "doc.on.clipboard",
-                        subtitle: sidebarSubtitle,
-                        hasFile: inputURL != nil,
-                        onClear: { inputURL = nil },
-                        onAdd: { showImporter = true }
-                    )
+                VStack(alignment: .leading, spacing: 12) {
+                    VStack(alignment: .leading, spacing: 14) {
+                        FileSidebarHeader(
+                            accent: accent,
+                            icon: "doc.on.clipboard",
+                            subtitle: sidebarSubtitle,
+                            hasFile: inputURL != nil,
+                            onClear: { inputURL = nil },
+                            onAdd: { showImporter = true }
+                        )
 
-                    Group {
-                        if inputURL == nil {
-                            EmptyFileDropZone(
-                                accent: accent,
-                                icon: "doc.on.clipboard",
-                                description: "Preview pages on the right, then type which pages to copy into a new PDF.",
-                                isTargeted: isDropTargeted,
-                                onChoose: { showImporter = true }
-                            )
-                        } else if let url = inputURL {
-                            SelectedFileCard(
-                                accent: accent,
-                                url: url,
-                                isLoadingPreview: isGeneratingPreviews,
-                                pageCount: pageSpecs.count
-                            )
+                        Group {
+                            if inputURL == nil {
+                                EmptyFileDropZone(
+                                    accent: accent,
+                                    icon: "doc.on.clipboard",
+                                    description: "Preview pages on the right, then type which pages to copy into a new PDF.",
+                                    isTargeted: isDropTargeted,
+                                    onChoose: { showImporter = true }
+                                )
+                            } else if let url = inputURL {
+                                SelectedFileCard(
+                                    accent: accent,
+                                    url: url,
+                                    isLoadingPreview: isGeneratingPreviews,
+                                    pageCount: pageSpecs.count
+                                )
+                            }
                         }
-                    }
-                    .onDrop(of: [.pdf, .fileURL], isTargeted: $isDropTargeted) { providers in
-                        consumeDroppedProviders(providers)
-                        return true
-                    }
+                        .onDrop(of: [.pdf, .fileURL], isTargeted: $isDropTargeted) { providers in
+                            consumeDroppedProviders(providers)
+                            return true
+                        }
 
-                    pagesSection
+                        pagesSection
+                    }
+                    .padding(18)
+                    .formCard()
+
+                    if let saveSummary {
+                        ToolSaveBanner(accent: accent, summary: saveSummary)
+                    }
                 }
-                .padding(18)
-                .formCard()
                 .padding(12)
             }
 
@@ -194,6 +210,8 @@ struct ExtractToolView: View {
     // MARK: - Thumbnails
 
     private func loadThumbnails() async {
+        // A different (or removed) file: the last run's confirmation no longer describes what's loaded.
+        saveSummary = nil
         guard let url = inputURL else {
             pageSpecs = []
             isGeneratingPreviews = false
@@ -264,6 +282,7 @@ struct ExtractToolView: View {
         }
 
         busy = true
+        saveSummary = nil
         AppStateManager.shared.beginOperation(Tool.extract.title)
         defer {
             busy = false
@@ -274,8 +293,8 @@ struct ExtractToolView: View {
         let rangeSnapshot = rangeText
 
         do {
-            let data = try await PDFBackgroundWork.run {
-                try fileURL.withSecurityScopedAccess {
+            let (data, extractedCount) = try await PDFBackgroundWork.run { () -> (Data, Int) in
+                try fileURL.withSecurityScopedAccess { () -> (Data, Int) in
                     guard let doc = PDFDocument(url: fileURL) else {
                         throw PDFOperationError.couldNotOpen(fileURL)
                     }
@@ -284,9 +303,15 @@ struct ExtractToolView: View {
                         throw PDFOperationError.emptyPDF
                     }
                     let indices = try PageRangeParser.parse(rangeSnapshot, pageCount: count, preserveOrder: true)
-                    return try PDFToolkit.extractData(inputURL: fileURL, pageIndices: indices)
+                    let out = try PDFToolkit.extractData(inputURL: fileURL, pageIndices: indices)
+                    return (out, indices.count)
                 }
             }
+            let summary = ToolSaveSummary(
+                title: "Extracted \(extractedCount) page\(extractedCount == 1 ? "" : "s")",
+                detail: "Saved a new PDF with just those pages.",
+                url: nil
+            )
             switch try await PDFExportCoordinator.route(
                 data: data,
                 source: fileURL,
@@ -294,11 +319,12 @@ struct ExtractToolView: View {
                 defaultStem: "extracted",
                 suffixWord: "extracted"
             ) {
-            case .savedBeside:
-                break
+            case .savedBeside(let url):
+                saveSummary = ToolSaveSummary(title: summary.title, detail: summary.detail, url: url)
             case .present(let document, let name):
                 exportDoc = document
                 suggestedName = name
+                pendingSaveSummary = summary
                 showExporter = true
             }
         } catch {

@@ -12,11 +12,22 @@ struct DeletePagesToolView: View {
     @State private var showImporter = false
     @State private var showExporter = false
     @State private var exportDoc: PDFFileDocument?
-    @State private var suggestedName = "edited.pdf"
+    @State private var suggestedName = "pages-removed.pdf"
     @State private var isDropTargeted = false
     @State private var pageSpecs: [PreviewPageSpec] = []
     @State private var isGeneratingPreviews = false
     @State private var thumbnailSize: CGFloat = 120
+
+    /// The inline confirmation shown after a successful save, and the summary stashed while the save
+    /// dialog is open (its URL is filled in from the dialog's success callback).
+    @State private var saveSummary: ToolSaveSummary?
+    @State private var pendingSaveSummary: ToolSaveSummary?
+
+    /// The action-matched output suffix (`file-pages-removed.pdf`), consistent with Rotate's
+    /// `-rotated` and Extract's `-extracted`. The old `-edited` was vague about what changed. Pinned as
+    /// a named constant so the whole tool — default name, save-beside name, and dialog stem — stays in
+    /// step and a test can guard the value.
+    static let outputSuffix = "pages-removed"
 
     private var selectionPathKey: String {
         inputURL?.standardizedFileURL.path ?? ""
@@ -82,11 +93,16 @@ struct DeletePagesToolView: View {
             switch result {
             case .success(let url):
                 PDFExportCoordinator.didExport(to: url, toolTitle: Tool.deletePages.title, bytes: savedBytes)
+                if var summary = pendingSaveSummary {
+                    summary.url = url
+                    saveSummary = summary
+                }
             case .failure(let err):
                 guard !err.isUserCancelled else { break }
                 alertMessage = err.localizedDescription
                 ActivityLog.shared.error("\(Tool.deletePages.title) failed: \(err.localizedDescription)")
             }
+            pendingSaveSummary = nil
         }
         .toolErrorAlert($alertMessage)
         .task(id: selectionPathKey) {
@@ -99,43 +115,49 @@ struct DeletePagesToolView: View {
     private var sidebarColumn: some View {
         VStack(spacing: 0) {
             ScrollView {
-                VStack(alignment: .leading, spacing: 14) {
-                    FileSidebarHeader(
-                        accent: accent,
-                        icon: Tool.deletePages.symbolName,
-                        subtitle: sidebarSubtitle,
-                        hasFile: inputURL != nil,
-                        onClear: { inputURL = nil },
-                        onAdd: { showImporter = true }
-                    )
+                VStack(alignment: .leading, spacing: 12) {
+                    VStack(alignment: .leading, spacing: 14) {
+                        FileSidebarHeader(
+                            accent: accent,
+                            icon: Tool.deletePages.symbolName,
+                            subtitle: sidebarSubtitle,
+                            hasFile: inputURL != nil,
+                            onClear: { inputURL = nil },
+                            onAdd: { showImporter = true }
+                        )
 
-                    Group {
-                        if inputURL == nil {
-                            EmptyFileDropZone(
-                                accent: accent,
-                                icon: Tool.deletePages.symbolName,
-                                description: "See every page on the right, then enter which page numbers to remove.",
-                                isTargeted: isDropTargeted,
-                                onChoose: { showImporter = true }
-                            )
-                        } else if let url = inputURL {
-                            SelectedFileCard(
-                                accent: accent,
-                                url: url,
-                                isLoadingPreview: isGeneratingPreviews,
-                                pageCount: pageSpecs.count
-                            )
+                        Group {
+                            if inputURL == nil {
+                                EmptyFileDropZone(
+                                    accent: accent,
+                                    icon: Tool.deletePages.symbolName,
+                                    description: "See every page on the right, then enter which page numbers to remove.",
+                                    isTargeted: isDropTargeted,
+                                    onChoose: { showImporter = true }
+                                )
+                            } else if let url = inputURL {
+                                SelectedFileCard(
+                                    accent: accent,
+                                    url: url,
+                                    isLoadingPreview: isGeneratingPreviews,
+                                    pageCount: pageSpecs.count
+                                )
+                            }
                         }
-                    }
-                    .onDrop(of: [.pdf, .fileURL], isTargeted: $isDropTargeted) { providers in
-                        consumeDroppedProviders(providers)
-                        return true
-                    }
+                        .onDrop(of: [.pdf, .fileURL], isTargeted: $isDropTargeted) { providers in
+                            consumeDroppedProviders(providers)
+                            return true
+                        }
 
-                    pagesSection
+                        pagesSection
+                    }
+                    .padding(18)
+                    .formCard()
+
+                    if let saveSummary {
+                        ToolSaveBanner(accent: accent, summary: saveSummary)
+                    }
                 }
-                .padding(18)
-                .formCard()
                 .padding(12)
             }
 
@@ -207,6 +229,8 @@ struct DeletePagesToolView: View {
     // MARK: - Thumbnails
 
     private func loadThumbnails() async {
+        // A different (or removed) file: the last run's confirmation no longer describes what's loaded.
+        saveSummary = nil
         guard let url = inputURL else {
             pageSpecs = []
             isGeneratingPreviews = false
@@ -276,19 +300,20 @@ struct DeletePagesToolView: View {
         }
 
         busy = true
+        saveSummary = nil
         AppStateManager.shared.beginOperation(Tool.deletePages.title)
         defer {
             busy = false
             AppStateManager.shared.endOperation(Tool.deletePages.title)
         }
 
-        suggestedName = fileURL.deletingPathExtension().lastPathComponent + "-edited.pdf"
+        suggestedName = fileURL.deletingPathExtension().lastPathComponent + "-\(Self.outputSuffix).pdf"
 
         let pagesSpec = rangeText
 
         do {
-            let data = try await PDFBackgroundWork.run {
-                try fileURL.withSecurityScopedAccess {
+            let (data, removedCount) = try await PDFBackgroundWork.run { () -> (Data, Int) in
+                try fileURL.withSecurityScopedAccess { () -> (Data, Int) in
                     guard let doc = PDFDocument(url: fileURL) else {
                         throw PDFOperationError.couldNotOpen(fileURL)
                     }
@@ -297,21 +322,28 @@ struct DeletePagesToolView: View {
                         throw PDFOperationError.emptyPDF
                     }
                     let indices = try PageRangeParser.parse(pagesSpec, pageCount: count, emptyMeansAllPages: false)
-                    return try PDFToolkit.deletePagesData(inputURL: fileURL, pageIndices: indices)
+                    let out = try PDFToolkit.deletePagesData(inputURL: fileURL, pageIndices: indices)
+                    return (out, indices.count)
                 }
             }
+            let summary = ToolSaveSummary(
+                title: "Removed \(removedCount) page\(removedCount == 1 ? "" : "s")",
+                detail: "Saved a copy without those pages; the original is untouched.",
+                url: nil
+            )
             switch try await PDFExportCoordinator.route(
                 data: data,
                 source: fileURL,
                 toolTitle: Tool.deletePages.title,
-                defaultStem: "edited",
-                suffixWord: "edited"
+                defaultStem: Self.outputSuffix,
+                suffixWord: Self.outputSuffix
             ) {
-            case .savedBeside:
-                break
+            case .savedBeside(let url):
+                saveSummary = ToolSaveSummary(title: summary.title, detail: summary.detail, url: url)
             case .present(let document, let name):
                 exportDoc = document
                 suggestedName = name
+                pendingSaveSummary = summary
                 showExporter = true
             }
         } catch {

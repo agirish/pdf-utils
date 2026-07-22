@@ -31,6 +31,14 @@ struct OCRToolView: View {
     @State private var isGeneratingPreviews = false
     @State private var thumbnailSize: CGFloat = 120
 
+    /// The inline confirmation shown after a successful save, and the summary stashed while the save
+    /// dialog is open (its URL is filled in from the dialog's success callback).
+    @State private var saveSummary: ToolSaveSummary?
+    @State private var pendingSaveSummary: ToolSaveSummary?
+    /// A neutral, non-error outcome: every page already had selectable text, so nothing needed
+    /// recognition and no file was saved. Shown as an informational banner, never the error alert.
+    @State private var infoMessage: String?
+
     private var selectionPathKey: String {
         inputURL?.standardizedFileURL.path ?? ""
     }
@@ -96,11 +104,16 @@ struct OCRToolView: View {
             switch result {
             case .success(let url):
                 PDFExportCoordinator.didExport(to: url, toolTitle: Tool.ocr.title, bytes: savedBytes)
+                if var summary = pendingSaveSummary {
+                    summary.url = url
+                    saveSummary = summary
+                }
             case .failure(let err):
                 guard !err.isUserCancelled else { break }
                 alertMessage = err.localizedDescription
                 ActivityLog.shared.error("\(Tool.ocr.title) failed: \(err.localizedDescription)")
             }
+            pendingSaveSummary = nil
         }
         .toolErrorAlert($alertMessage)
         .onChange(of: accurate) { _, nowAccurate in
@@ -164,6 +177,12 @@ struct OCRToolView: View {
                     }
                     .padding(18)
                     .formCard()
+
+                    if let saveSummary {
+                        ToolSaveBanner(accent: accent, summary: saveSummary)
+                    } else if let infoMessage {
+                        ToolInfoBanner(accent: accent, title: "Already searchable", message: infoMessage)
+                    }
 
                     if inputURL != nil {
                         recognitionSection
@@ -251,6 +270,9 @@ struct OCRToolView: View {
     // MARK: - Thumbnails
 
     private func loadThumbnails() async {
+        // A different (or removed) file: the last run's confirmation/notice no longer describes it.
+        saveSummary = nil
+        infoMessage = nil
         guard let url = inputURL else {
             pageSpecs = []
             isGeneratingPreviews = false
@@ -296,6 +318,8 @@ struct OCRToolView: View {
         }
 
         busy = true
+        saveSummary = nil
+        infoMessage = nil
         progressPage = 0
         progressTotal = 0
         progressGeneration += 1
@@ -338,13 +362,21 @@ struct OCRToolView: View {
                 }
             }
             // All pages skipped means the output would be a pointless rebuilt copy — say so and
-            // save nothing instead of shipping a file that changed no behavior.
+            // save nothing instead of shipping a file that changed no behavior. This is a normal,
+            // expected outcome (the file was already searchable), NOT a failure, so it goes to the
+            // neutral info banner rather than the app-name error alert.
             if outcome.summary.recognizedPages == 0 {
                 let pages = outcome.summary.skippedPages
-                alertMessage = "All \(pages) page\(pages == 1 ? " already has" : "s already have") selectable text, so nothing needed recognition and no file was saved. Turn off “Skip pages that already have text” to recognize them anyway."
+                infoMessage = "All \(pages) page\(pages == 1 ? " already has" : "s already have") selectable text, so nothing needed recognition and no file was saved. Turn off “Skip pages that already have text” to recognize them anyway."
                 return
             }
             let data = outcome.data
+            let recognized = outcome.summary.recognizedPages
+            let summary = ToolSaveSummary(
+                title: "Recognized text on \(recognized) page\(recognized == 1 ? "" : "s")",
+                detail: "Saved a searchable copy — select, copy, and ⌘F now work.",
+                url: nil
+            )
             switch try await PDFExportCoordinator.route(
                 data: data,
                 source: fileURL,
@@ -352,11 +384,12 @@ struct OCRToolView: View {
                 defaultStem: "searchable",
                 suffixWord: "searchable"
             ) {
-            case .savedBeside:
-                break
+            case .savedBeside(let url):
+                saveSummary = ToolSaveSummary(title: summary.title, detail: summary.detail, url: url)
             case .present(let document, let name):
                 exportDoc = document
                 suggestedName = name
+                pendingSaveSummary = summary
                 showExporter = true
             }
         } catch is CancellationError {

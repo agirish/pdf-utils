@@ -104,6 +104,11 @@ struct ReorderToolView: View {
     /// preview cell's cache key shares.
     @State private var fileKeyBase = ""
 
+    /// The inline confirmation shown after a successful save, and the summary stashed while the save
+    /// dialog is open (its URL is filled in from the dialog's success callback).
+    @State private var saveSummary: ToolSaveSummary?
+    @State private var pendingSaveSummary: ToolSaveSummary?
+
     private var selectionPathKey: String {
         inputURL?.standardizedFileURL.path ?? ""
     }
@@ -178,11 +183,16 @@ struct ReorderToolView: View {
             switch result {
             case .success(let url):
                 PDFExportCoordinator.didExport(to: url, toolTitle: Tool.reorder.title, bytes: savedBytes)
+                if var summary = pendingSaveSummary {
+                    summary.url = url
+                    saveSummary = summary
+                }
             case .failure(let err):
                 guard !err.isUserCancelled else { break }
                 alertMessage = err.localizedDescription
                 ActivityLog.shared.error("\(Tool.reorder.title) failed: \(err.localizedDescription)")
             }
+            pendingSaveSummary = nil
         }
         .toolErrorAlert($alertMessage)
         .task(id: selectionPathKey) {
@@ -194,23 +204,29 @@ struct ReorderToolView: View {
 
     private var sidebarColumn: some View {
         VStack(spacing: 0) {
-            VStack(alignment: .leading, spacing: 14) {
-                headerRow
+            VStack(alignment: .leading, spacing: 12) {
+                VStack(alignment: .leading, spacing: 14) {
+                    headerRow
 
-                Group {
-                    if inputURL == nil {
-                        emptyDropZone
-                    } else if let url = inputURL {
-                        loadedControls(url: url)
+                    Group {
+                        if inputURL == nil {
+                            emptyDropZone
+                        } else if let url = inputURL {
+                            loadedControls(url: url)
+                        }
+                    }
+                    .onDrop(of: [.pdf, .fileURL], isTargeted: $isDropTargeted) { providers in
+                        consumeDroppedProviders(providers)
+                        return true
                     }
                 }
-                .onDrop(of: [.pdf, .fileURL], isTargeted: $isDropTargeted) { providers in
-                    consumeDroppedProviders(providers)
-                    return true
+                .padding(18)
+                .formCard()
+
+                if let saveSummary {
+                    ToolSaveBanner(accent: accent, summary: saveSummary)
                 }
             }
-            .padding(18)
-            .formCard()
             .padding(12)
 
             Spacer(minLength: 0)
@@ -531,6 +547,8 @@ struct ReorderToolView: View {
     // MARK: - Thumbnails
 
     private func loadThumbnails() async {
+        // A different (or removed) file: the last run's confirmation no longer describes what's loaded.
+        saveSummary = nil
         guard let url = inputURL else {
             working = ReorderWorkingSet()
             isGeneratingPreviews = false
@@ -584,6 +602,7 @@ struct ReorderToolView: View {
         }
 
         busy = true
+        saveSummary = nil
         AppStateManager.shared.beginOperation(Tool.reorder.title)
         defer {
             busy = false
@@ -599,6 +618,11 @@ struct ReorderToolView: View {
                     try PDFToolkit.reorderData(inputURL: fileURL, order: order)
                 }
             }
+            let summary = ToolSaveSummary(
+                title: "Reordered \(order.count) page\(order.count == 1 ? "" : "s")",
+                detail: "Saved a copy in the new page order.",
+                url: nil
+            )
             switch try await PDFExportCoordinator.route(
                 data: data,
                 source: fileURL,
@@ -606,11 +630,12 @@ struct ReorderToolView: View {
                 defaultStem: "reordered",
                 suffixWord: "reordered"
             ) {
-            case .savedBeside:
-                break
+            case .savedBeside(let url):
+                saveSummary = ToolSaveSummary(title: summary.title, detail: summary.detail, url: url)
             case .present(let document, let name):
                 exportDoc = document
                 suggestedName = name
+                pendingSaveSummary = summary
                 showExporter = true
             }
         } catch {

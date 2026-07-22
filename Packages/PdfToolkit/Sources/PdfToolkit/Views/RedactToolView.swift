@@ -27,6 +27,13 @@ struct RedactToolView: View {
     @State private var suggestedName = "redacted.pdf"
     @State private var isDropTargeted = false
 
+    /// The inline confirmation shown after a successful save, and the summary stashed while the save
+    /// dialog is open (its URL is filled in from the dialog's success callback). Redact's is the
+    /// security-critical one: a burn that confirms nothing left the user unsure whether the sensitive
+    /// content was actually removed.
+    @State private var saveSummary: ToolSaveSummary?
+    @State private var pendingSaveSummary: ToolSaveSummary?
+
     // MARK: Find & redact
     @State private var searchText = ""
     @State private var searching = false
@@ -88,11 +95,16 @@ struct RedactToolView: View {
             switch result {
             case .success(let url):
                 PDFExportCoordinator.didExport(to: url, toolTitle: Tool.redact.title, bytes: savedBytes)
+                if var summary = pendingSaveSummary {
+                    summary.url = url
+                    saveSummary = summary
+                }
             case .failure(let err):
                 guard !err.isUserCancelled else { break }
                 alertMessage = err.localizedDescription
                 ActivityLog.shared.error("\(Tool.redact.title) failed: \(err.localizedDescription)")
             }
+            pendingSaveSummary = nil
         }
         .toolErrorAlert($alertMessage)
         .task(id: selectionPathKey) {
@@ -131,33 +143,39 @@ struct RedactToolView: View {
     private var sidebarColumn: some View {
         VStack(spacing: 0) {
             ScrollView {
-                VStack(alignment: .leading, spacing: 14) {
-                    headerRow
+                VStack(alignment: .leading, spacing: 12) {
+                    VStack(alignment: .leading, spacing: 14) {
+                        headerRow
 
-                    Group {
-                        if inputURL == nil {
-                            emptyDropZone
-                        } else if let url = inputURL {
-                            selectedFileCard(url: url)
+                        Group {
+                            if inputURL == nil {
+                                emptyDropZone
+                            } else if let url = inputURL {
+                                selectedFileCard(url: url)
+                            }
+                        }
+                        .onDrop(of: [.pdf, .fileURL], isTargeted: $isDropTargeted) { providers in
+                            consumeDroppedProviders(providers)
+                            return true
+                        }
+
+                        if pdfDocument != nil {
+                            findRedactSection
+                        }
+
+                        securitySection
+
+                        if !marks.isEmpty {
+                            marksSection
                         }
                     }
-                    .onDrop(of: [.pdf, .fileURL], isTargeted: $isDropTargeted) { providers in
-                        consumeDroppedProviders(providers)
-                        return true
-                    }
+                    .padding(18)
+                    .formCard()
 
-                    if pdfDocument != nil {
-                        findRedactSection
-                    }
-
-                    securitySection
-
-                    if !marks.isEmpty {
-                        marksSection
+                    if let saveSummary {
+                        ToolSaveBanner(accent: accent, summary: saveSummary)
                     }
                 }
-                .padding(18)
-                .formCard()
                 .padding(12)
             }
 
@@ -619,6 +637,8 @@ struct RedactToolView: View {
     // MARK: - Data
 
     private func reloadDocumentForSelection() async {
+        // A different (or removed) file: the last run's confirmation no longer describes what's loaded.
+        saveSummary = nil
         searchTask?.cancel()
         marks = []
         selectedMarkID = nil
@@ -772,6 +792,13 @@ struct RedactToolView: View {
             && abs(a.width - b.width) < tol && abs(a.height - b.height) < tol
     }
 
+    /// The redaction receipt's numbers: how many regions burn, and how many distinct pages they touch
+    /// (a page redacted twice counts once). Pure over the marks snapshot so the save confirmation can
+    /// state exactly what was removed, and so it's unit-tested away from the canvas.
+    static func redactionCounts(for marks: [RedactionMark]) -> (regions: Int, pages: Int) {
+        (marks.count, Set(marks.map(\.pageIndex)).count)
+    }
+
     @MainActor
     private func runRedact() async {
         guard let fileURL = inputURL else {
@@ -784,6 +811,7 @@ struct RedactToolView: View {
         }
 
         busy = true
+        saveSummary = nil
         AppStateManager.shared.beginOperation(Tool.redact.title)
         defer {
             busy = false
@@ -796,6 +824,14 @@ struct RedactToolView: View {
         let options = PDFRedactionExportOptions(
             stripAnnotationsFromUnredactedPages: strip,
             maxPixelDimension: CGFloat(min(max(rasterLongEdge, 2400), 7200))
+        )
+        // Snapshot the receipt numbers from the same marks the burn runs on, so the confirmation is
+        // exact: N regions, across the M distinct pages they touch.
+        let counts = Self.redactionCounts(for: marksSnapshot)
+        let summary = ToolSaveSummary(
+            title: "\(counts.regions) region\(counts.regions == 1 ? "" : "s") redacted across \(counts.pages) page\(counts.pages == 1 ? "" : "s")",
+            detail: "The marked content was permanently removed from the saved copy.",
+            url: nil
         )
 
         do {
@@ -815,11 +851,12 @@ struct RedactToolView: View {
                 defaultStem: "redacted",
                 suffixWord: "redacted"
             ) {
-            case .savedBeside:
-                break
+            case .savedBeside(let url):
+                saveSummary = ToolSaveSummary(title: summary.title, detail: summary.detail, url: url)
             case .present(let document, let name):
                 exportDoc = document
                 suggestedName = name
+                pendingSaveSummary = summary
                 showExporter = true
             }
         } catch {

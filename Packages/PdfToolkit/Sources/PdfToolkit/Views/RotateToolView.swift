@@ -17,6 +17,11 @@ struct RotateToolView: View {
     @State private var exportDoc: PDFFileDocument?
     @State private var suggestedName = "rotated.pdf"
 
+    /// The inline confirmation shown after a successful save, and the summary stashed while the save
+    /// dialog is open (its URL is filled in from the dialog's success callback).
+    @State private var saveSummary: ToolSaveSummary?
+    @State private var pendingSaveSummary: ToolSaveSummary?
+
     @StateObject private var runner = BatchRunner()
 
     enum PageScope: String, CaseIterable, Identifiable {
@@ -53,6 +58,13 @@ struct RotateToolView: View {
             // Extract/Delete clearing on file switch): "1, 3-5" meant the old file's pages, and
             // against the new one it either errors or silently rotates the wrong set.
             rangeText = ""
+            // The last run's confirmation no longer describes what's loaded.
+            saveSummary = nil
+        }
+        .onChange(of: runner.items.count) { _, _ in
+            // Adding a second file (which leaves the first URL unchanged) turns this into a batch;
+            // the single-file receipt no longer applies.
+            saveSummary = nil
         }
         .fileExporter(
             isPresented: $showExporter,
@@ -65,11 +77,16 @@ struct RotateToolView: View {
             switch result {
             case .success(let url):
                 PDFExportCoordinator.didExport(to: url, toolTitle: Tool.rotate.title, bytes: savedBytes)
+                if var summary = pendingSaveSummary {
+                    summary.url = url
+                    saveSummary = summary
+                }
             case .failure(let err):
                 guard !err.isUserCancelled else { break }
                 alertMessage = err.localizedDescription
                 ActivityLog.shared.error("\(Tool.rotate.title) failed: \(err.localizedDescription)")
             }
+            pendingSaveSummary = nil
         }
         .toolErrorAlert($alertMessage)
     }
@@ -91,6 +108,10 @@ struct RotateToolView: View {
 
     @ViewBuilder
     private var rotateConfig: some View {
+        // The banner is a single-file receipt; don't let it linger once the queue is a batch.
+        if let saveSummary, runner.items.count <= 1 {
+            ToolSaveBanner(accent: accent, summary: saveSummary)
+        }
         if runner.items.count >= 2 {
             rotationSection
             allPagesNoteCard
@@ -213,6 +234,7 @@ struct RotateToolView: View {
     @MainActor
     private func runRotate(_ fileURL: URL) async {
         busy = true
+        saveSummary = nil
         AppStateManager.shared.beginOperation(Tool.rotate.title)
         defer {
             busy = false
@@ -225,8 +247,8 @@ struct RotateToolView: View {
         let quarterTurnsSnapshot = quarterTurns
 
         do {
-            let data = try await PDFBackgroundWork.run {
-                try fileURL.withSecurityScopedAccess {
+            let (data, rotatedCount) = try await PDFBackgroundWork.run { () -> (Data, Int) in
+                try fileURL.withSecurityScopedAccess { () -> (Data, Int) in
                     guard let doc = PDFDocument(url: fileURL) else {
                         throw PDFOperationError.couldNotOpen(fileURL)
                     }
@@ -247,13 +269,19 @@ struct RotateToolView: View {
                             emptyMeansAllPages: false
                         )
                     }
-                    return try PDFToolkit.rotateData(
+                    let out = try PDFToolkit.rotateData(
                         inputURL: fileURL,
                         pageIndices: indices,
                         quarterTurns: quarterTurnsSnapshot
                     )
+                    return (out, indices.count)
                 }
             }
+            let summary = ToolSaveSummary(
+                title: "Rotated \(rotatedCount) page\(rotatedCount == 1 ? "" : "s")",
+                detail: "Saved a rotated copy — your original file is untouched.",
+                url: nil
+            )
             switch try await PDFExportCoordinator.route(
                 data: data,
                 source: fileURL,
@@ -261,11 +289,12 @@ struct RotateToolView: View {
                 defaultStem: "rotated",
                 suffixWord: "rotated"
             ) {
-            case .savedBeside:
-                break
+            case .savedBeside(let url):
+                saveSummary = ToolSaveSummary(title: summary.title, detail: summary.detail, url: url)
             case .present(let document, let name):
                 exportDoc = document
                 suggestedName = name
+                pendingSaveSummary = summary
                 showExporter = true
             }
         } catch {

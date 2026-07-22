@@ -42,6 +42,10 @@ struct CropToolView: View {
     @State private var pageSpecs: [PreviewPageSpec] = []
     @State private var isGeneratingPreviews = false
     @State private var thumbnailSize: CGFloat = 120
+    /// The inline confirmation shown after a successful save, and the summary stashed while the save
+    /// dialog is open (its URL is filled in from the dialog's success callback).
+    @State private var saveSummary: ToolSaveSummary?
+    @State private var pendingSaveSummary: ToolSaveSummary?
     // Drag-to-crop: a full document loaded on demand (only this mode needs an interactive PDFView),
     // the page the marquee is drawn on, and the fit-to-view zoom.
     @State private var pdfDocument: PDFDocument?
@@ -107,11 +111,16 @@ struct CropToolView: View {
             switch result {
             case .success(let url):
                 PDFExportCoordinator.didExport(to: url, toolTitle: Tool.crop.title, bytes: savedBytes)
+                if var summary = pendingSaveSummary {
+                    summary.url = url
+                    saveSummary = summary
+                }
             case .failure(let err):
                 guard !err.isUserCancelled else { break }
                 alertMessage = err.localizedDescription
                 ActivityLog.shared.error("\(Tool.crop.title) failed: \(err.localizedDescription)")
             }
+            pendingSaveSummary = nil
         }
         .toolErrorAlert($alertMessage)
         .task(id: selectionPathKey) {
@@ -319,6 +328,10 @@ struct CropToolView: View {
                     .padding(18)
                     .formCard()
 
+                    if let saveSummary {
+                        ToolSaveBanner(accent: accent, summary: saveSummary)
+                    }
+
                     if inputURL != nil {
                         cropSection
                     }
@@ -467,6 +480,8 @@ struct CropToolView: View {
     // MARK: - Thumbnails
 
     private func loadThumbnails() async {
+        // A different (or removed) file: the last run's confirmation no longer describes what's loaded.
+        saveSummary = nil
         guard let url = inputURL else {
             pageSpecs = []
             isGeneratingPreviews = false
@@ -535,6 +550,7 @@ struct CropToolView: View {
         }
 
         busy = true
+        saveSummary = nil
         AppStateManager.shared.beginOperation(Tool.crop.title)
         defer {
             busy = false
@@ -549,6 +565,17 @@ struct CropToolView: View {
         let dragAllPagesSnapshot = dragAllPages
         // For "this page only" in drag mode, clamp the viewed page to the document's real range.
         let dragPageSnapshot = min(max(dragPageIndex, 0), max(0, (pdfDocument?.pageCount ?? 1) - 1))
+
+        // How many pages the crop touches, for the save confirmation: Auto and Custom trim every page;
+        // Drag trims all pages or just the viewed one. `pdfDocument` is loaded in drag mode; the
+        // thumbnail count covers the other two.
+        let totalPages = pdfDocument?.pageCount ?? pageSpecs.count
+        let croppedCount: Int = {
+            switch selectedMode {
+            case .auto, .custom: return totalPages
+            case .drag: return dragAllPagesSnapshot ? totalPages : 1
+            }
+        }()
 
         do {
             let data = try await PDFBackgroundWork.run {
@@ -568,6 +595,15 @@ struct CropToolView: View {
                     }
                 }
             }
+            let summary = croppedCount > 0
+                ? ToolSaveSummary(
+                    title: "Cropped \(croppedCount) page\(croppedCount == 1 ? "" : "s")",
+                    detail: "Saved a copy with the new page bounds.",
+                    url: nil)
+                : ToolSaveSummary(
+                    title: "Cropped & saved",
+                    detail: "Saved a copy with the new page bounds.",
+                    url: nil)
             switch try await PDFExportCoordinator.route(
                 data: data,
                 source: fileURL,
@@ -575,11 +611,12 @@ struct CropToolView: View {
                 defaultStem: "cropped",
                 suffixWord: "cropped"
             ) {
-            case .savedBeside:
-                break
+            case .savedBeside(let url):
+                saveSummary = ToolSaveSummary(title: summary.title, detail: summary.detail, url: url)
             case .present(let document, let name):
                 exportDoc = document
                 suggestedName = name
+                pendingSaveSummary = summary
                 showExporter = true
             }
         } catch {

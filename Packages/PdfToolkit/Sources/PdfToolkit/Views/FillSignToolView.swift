@@ -40,6 +40,11 @@ struct FillSignToolView: View {
     @State private var suggestedName = "filled.pdf"
     @State private var isDropTargeted = false
 
+    /// The inline confirmation shown after a successful save, and the summary stashed while the save
+    /// dialog is open (its URL is filled in from the dialog's success callback).
+    @State private var saveSummary: ToolSaveSummary?
+    @State private var pendingSaveSummary: ToolSaveSummary?
+
     @FocusState private var textFieldFocused: Bool
 
     @Environment(\.toolAccent) private var accent
@@ -93,11 +98,16 @@ struct FillSignToolView: View {
             switch result {
             case .success(let url):
                 PDFExportCoordinator.didExport(to: url, toolTitle: Tool.fillSign.title, bytes: savedBytes)
+                if var summary = pendingSaveSummary {
+                    summary.url = url
+                    saveSummary = summary
+                }
             case .failure(let err):
                 guard !err.isUserCancelled else { break }
                 alertMessage = err.localizedDescription
                 ActivityLog.shared.error("\(Tool.fillSign.title) failed: \(err.localizedDescription)")
             }
+            pendingSaveSummary = nil
         }
         .toolErrorAlert($alertMessage)
         .task(id: selectionPathKey) {
@@ -132,34 +142,40 @@ struct FillSignToolView: View {
     private var sidebarColumn: some View {
         VStack(spacing: 0) {
             ScrollView {
-                VStack(alignment: .leading, spacing: 14) {
-                    headerRow
+                VStack(alignment: .leading, spacing: 12) {
+                    VStack(alignment: .leading, spacing: 14) {
+                        headerRow
 
-                    Group {
-                        if inputURL == nil {
-                            emptyDropZone
-                        } else if let url = inputURL {
-                            selectedFileCard(url: url)
+                        Group {
+                            if inputURL == nil {
+                                emptyDropZone
+                            } else if let url = inputURL {
+                                selectedFileCard(url: url)
+                            }
+                        }
+                        .onDrop(of: [.pdf, .fileURL], isTargeted: $isDropTargeted) { providers in
+                            consumeDroppedProviders(providers)
+                            return true
+                        }
+
+                        if pdfDocument != nil {
+                            addContentSection
+                            signatureSection
+                            if let id = selectedID, items.contains(where: { $0.id == id }) {
+                                selectedItemInspector(id: id)
+                            }
+                            if !items.isEmpty {
+                                itemsSection
+                            }
                         }
                     }
-                    .onDrop(of: [.pdf, .fileURL], isTargeted: $isDropTargeted) { providers in
-                        consumeDroppedProviders(providers)
-                        return true
-                    }
+                    .padding(18)
+                    .formCard()
 
-                    if pdfDocument != nil {
-                        addContentSection
-                        signatureSection
-                        if let id = selectedID, items.contains(where: { $0.id == id }) {
-                            selectedItemInspector(id: id)
-                        }
-                        if !items.isEmpty {
-                            itemsSection
-                        }
+                    if let saveSummary {
+                        ToolSaveBanner(accent: accent, summary: saveSummary)
                     }
                 }
-                .padding(18)
-                .formCard()
                 .padding(12)
             }
 
@@ -729,6 +745,8 @@ struct FillSignToolView: View {
     // MARK: - Data
 
     private func reloadDocumentForSelection() async {
+        // A different (or removed) file: the last run's confirmation no longer describes what's loaded.
+        saveSummary = nil
         items = []
         selectedID = nil
         undo.reset([])
@@ -794,6 +812,7 @@ struct FillSignToolView: View {
         }
 
         busy = true
+        saveSummary = nil
         AppStateManager.shared.beginOperation(Tool.fillSign.title)
         defer {
             busy = false
@@ -802,6 +821,7 @@ struct FillSignToolView: View {
 
         suggestedName = fileURL.deletingPathExtension().lastPathComponent + "-filled.pdf"
         let itemsSnapshot = inked
+        let additionCount = itemsSnapshot.count
 
         do {
             let data = try await PDFBackgroundWork.run {
@@ -809,6 +829,11 @@ struct FillSignToolView: View {
                     try PDFToolkit.fillAndSignData(inputURL: fileURL, items: itemsSnapshot)
                 }
             }
+            let summary = ToolSaveSummary(
+                title: "Saved with \(additionCount) addition\(additionCount == 1 ? "" : "s")",
+                detail: "Your text and signatures are now part of the PDF.",
+                url: nil
+            )
             switch try await PDFExportCoordinator.route(
                 data: data,
                 source: fileURL,
@@ -816,11 +841,12 @@ struct FillSignToolView: View {
                 defaultStem: "filled",
                 suffixWord: "filled"
             ) {
-            case .savedBeside:
-                break
+            case .savedBeside(let url):
+                saveSummary = ToolSaveSummary(title: summary.title, detail: summary.detail, url: url)
             case .present(let document, let name):
                 exportDoc = document
                 suggestedName = name
+                pendingSaveSummary = summary
                 showExporter = true
             }
         } catch {

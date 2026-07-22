@@ -32,6 +32,11 @@ struct ImagesToPDFToolView: View {
     @State private var isGeneratingPreviews = false
     @State private var thumbnailSize: CGFloat = 120
 
+    /// The inline confirmation shown after a successful save, and the summary stashed while the save
+    /// dialog is open (its URL is filled in from the dialog's success callback).
+    @State private var saveSummary: ToolSaveSummary?
+    @State private var pendingSaveSummary: ToolSaveSummary?
+
     /// Reload key: the ordered paths, so add/remove/reorder all refresh the preview.
     private var itemsKey: String {
         items.map(\.url.path).joined(separator: "|")
@@ -84,11 +89,16 @@ struct ImagesToPDFToolView: View {
             switch result {
             case .success(let url):
                 PDFExportCoordinator.didExport(to: url, toolTitle: Tool.imagesToPdf.title, bytes: savedBytes)
+                if var summary = pendingSaveSummary {
+                    summary.url = url
+                    saveSummary = summary
+                }
             case .failure(let err):
                 guard !err.isUserCancelled else { break }
                 alertMessage = err.localizedDescription
                 ActivityLog.shared.error("\(Tool.imagesToPdf.title) failed: \(err.localizedDescription)")
             }
+            pendingSaveSummary = nil
         }
         .toolErrorAlert($alertMessage)
         .task(id: itemsKey) {
@@ -119,6 +129,10 @@ struct ImagesToPDFToolView: View {
                     }
                     .padding(18)
                     .formCard()
+
+                    if let saveSummary {
+                        ToolSaveBanner(accent: accent, summary: saveSummary)
+                    }
 
                     if !items.isEmpty {
                         layoutSection
@@ -307,6 +321,8 @@ struct ImagesToPDFToolView: View {
     // MARK: - Preview
 
     private func loadThumbnails() async {
+        // The queue changed (add/remove/reorder): the last run's confirmation no longer describes it.
+        saveSummary = nil
         guard !items.isEmpty else {
             pageSpecs = []
             previewURLsByKey = [:]
@@ -359,6 +375,7 @@ struct ImagesToPDFToolView: View {
         }
 
         busy = true
+        saveSummary = nil
         AppStateManager.shared.beginOperation(Tool.imagesToPdf.title)
         defer {
             busy = false
@@ -366,6 +383,7 @@ struct ImagesToPDFToolView: View {
         }
 
         let urls = items.map(\.url)
+        let imageCount = urls.count
         let options = ImagesToPDFOptions(pageSize: pageSize, fillsPage: fillsPage)
         suggestedName = (urls.first?.deletingPathExtension().lastPathComponent ?? "images") + ".pdf"
 
@@ -375,6 +393,11 @@ struct ImagesToPDFToolView: View {
                     try PDFToolkit.imagesToPDFData(inputURLs: urls, options: options)
                 }
             }
+            let summary = ToolSaveSummary(
+                title: "\(imageCount) image\(imageCount == 1 ? "" : "s") → PDF",
+                detail: "Saved a new PDF, one page per image, in list order.",
+                url: nil
+            )
             switch try await PDFExportCoordinator.route(
                 data: data,
                 source: urls.first,
@@ -382,11 +405,12 @@ struct ImagesToPDFToolView: View {
                 defaultStem: "images",
                 suffixWord: ""
             ) {
-            case .savedBeside:
-                break
+            case .savedBeside(let url):
+                saveSummary = ToolSaveSummary(title: summary.title, detail: summary.detail, url: url)
             case .present(let document, let name):
                 exportDoc = document
                 suggestedName = name
+                pendingSaveSummary = summary
                 showExporter = true
             }
         } catch {

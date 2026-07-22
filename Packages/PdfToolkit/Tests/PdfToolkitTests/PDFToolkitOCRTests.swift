@@ -44,6 +44,18 @@ import Testing
         #expect(languages.contains { $0.hasPrefix("en") })
     }
 
+    @Test func fastLanguagesAreAStrictSubsetOfAccurate() {
+        // The tool must gate its language menu by level: Fast recognizes far fewer languages than
+        // Accurate, and offering a Fast-unsupported language makes recognition silently return nothing.
+        // The subset property is what guarantees the level-gated menu never offers an unusable language.
+        let accurate = Set(PDFToolkit.supportedOCRLanguages(accurate: true))
+        let fast = Set(PDFToolkit.supportedOCRLanguages(accurate: false))
+        #expect(!fast.isEmpty)
+        #expect(fast.isSubset(of: accurate))
+        #expect(fast.count < accurate.count)
+        #expect(fast.contains { $0.hasPrefix("en") }) // English recognizes at both levels
+    }
+
     @Test func recognizesWithAnExplicitLanguage() throws {
         // Naming a language (auto-detect off) must still recognize the page, not silently disable OCR.
         let dir = FixtureDir()

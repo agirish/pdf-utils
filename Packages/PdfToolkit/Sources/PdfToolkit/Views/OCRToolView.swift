@@ -35,14 +35,23 @@ struct OCRToolView: View {
         inputURL?.standardizedFileURL.path ?? ""
     }
 
-    /// (code, display name) for every language Vision recognizes on this Mac, sorted by display name.
-    /// Read once per process — the supported set is fixed for the OS build.
-    private static let languageChoices: [(code: String, name: String)] = {
+    /// (code, display name) for the languages Vision recognizes on this Mac at each accuracy level,
+    /// sorted by display name. Computed once per process — the supported sets are fixed for the OS
+    /// build. Two lists because Fast supports far fewer languages than Accurate, and offering a
+    /// language the running level can't recognize makes recognition silently return nothing.
+    private static func languageChoices(accurate: Bool) -> [(code: String, name: String)] {
         let locale = Locale.current
-        return PDFToolkit.supportedOCRLanguages()
+        return PDFToolkit.supportedOCRLanguages(accurate: accurate)
             .map { (code: $0, name: locale.localizedString(forIdentifier: $0) ?? $0) }
             .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
-    }()
+    }
+    private static let accurateLanguageChoices = languageChoices(accurate: true)
+    private static let fastLanguageChoices = languageChoices(accurate: false)
+
+    /// The choices for the currently-selected accuracy level.
+    private var languageChoices: [(code: String, name: String)] {
+        accurate ? Self.accurateLanguageChoices : Self.fastLanguageChoices
+    }
 
     var body: some View {
         HSplitView {
@@ -94,6 +103,14 @@ struct OCRToolView: View {
             }
         }
         .toolErrorAlert($alertMessage)
+        .onChange(of: accurate) { _, nowAccurate in
+            // Switching to Fast (which recognizes far fewer languages) must drop a now-unsupported
+            // pick back to Automatic — otherwise recognition would silently return nothing for it.
+            let available = nowAccurate ? Self.accurateLanguageChoices : Self.fastLanguageChoices
+            if !recognitionLanguage.isEmpty, !available.contains(where: { $0.code == recognitionLanguage }) {
+                recognitionLanguage = ""
+            }
+        }
         .task(id: selectionPathKey) {
             await loadThumbnails()
         }
@@ -265,7 +282,7 @@ struct OCRToolView: View {
 
     private var recognitionSection: some View {
         VStack(alignment: .leading, spacing: 12) {
-            if !Self.languageChoices.isEmpty {
+            if !languageChoices.isEmpty {
                 HStack {
                     Text("Language")
                         .font(.subheadline.weight(.semibold))
@@ -273,7 +290,7 @@ struct OCRToolView: View {
                     Picker("Language", selection: $recognitionLanguage) {
                         Text("Automatic").tag("")
                         Divider()
-                        ForEach(Self.languageChoices, id: \.code) { choice in
+                        ForEach(languageChoices, id: \.code) { choice in
                             Text(choice.name).tag(choice.code)
                         }
                     }

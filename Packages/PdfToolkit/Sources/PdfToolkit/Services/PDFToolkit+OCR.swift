@@ -117,12 +117,14 @@ extension PDFToolkit {
         return (pdfData as Data, summary)
     }
 
-    /// The BCP-47 languages Vision can recognize on this Mac, for the accurate recognizer (a superset
-    /// of Fast's on every OS to date), most-preferred first as Vision reports them. Empty if the query
-    /// fails. Read once by the tool to populate its language menu.
-    static func supportedOCRLanguages() -> [String] {
+    /// The BCP-47 languages Vision can recognize on this Mac at the given accuracy level, most-preferred
+    /// first as Vision reports them. Empty if the query fails. The tool populates its language menu from
+    /// this **per level**: Fast supports far fewer languages than Accurate (e.g. no CJK/Cyrillic), and a
+    /// language outside the running level's set is silently ignored (zero results) — so the menu must
+    /// match the chosen level, not always Accurate.
+    static func supportedOCRLanguages(accurate: Bool = true) -> [String] {
         let request = VNRecognizeTextRequest()
-        request.recognitionLevel = .accurate
+        request.recognitionLevel = accurate ? .accurate : .fast
         // The instance query reports the list for this request's own level and revision — exactly
         // what recognition will use — so no revision constant is hard-coded.
         return (try? request.supportedRecognitionLanguages()) ?? []

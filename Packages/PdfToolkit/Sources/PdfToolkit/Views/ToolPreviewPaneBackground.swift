@@ -7,7 +7,7 @@ struct ToolPreviewPaneBackground: View {
     private var mergeRaw: String = MergePreviewBackgroundStyle.matchMain.rawValue
 
     @AppStorage(LiquidGlass.levelKey)
-    private var glassLevelRaw: String = GlassLevel.frosted.rawValue
+    private var glassLevelRaw: String = LiquidGlass.defaultLevel.rawValue
 
     @AppStorage(LiquidGlass.hueKey)
     private var glassHueRaw: String = LiquidGlass.defaultHue.rawValue
@@ -17,7 +17,7 @@ struct ToolPreviewPaneBackground: View {
     }
 
     private var glassLevel: GlassLevel {
-        GlassLevel(rawValue: glassLevelRaw) ?? .frosted
+        GlassLevel(rawValue: glassLevelRaw) ?? LiquidGlass.defaultLevel
     }
 
     private var glassHue: LiquidGlassHue {

@@ -10,13 +10,13 @@ struct RootView: View {
     @AppStorage(LiquidGlass.appearanceModeKey)
     private var appearanceModeRaw: String = AppearanceMode.system.rawValue
     @AppStorage(LiquidGlass.levelKey)
-    private var glassLevelRaw: String = GlassLevel.frosted.rawValue
+    private var glassLevelRaw: String = LiquidGlass.defaultLevel.rawValue
     @AppStorage(LiquidGlass.hueKey)
     private var glassHueRaw: String = LiquidGlass.defaultHue.rawValue
     @AppStorage(LiquidGlass.tintKey)
-    private var glassTint: Double = 0
+    private var glassTint: Double = LiquidGlass.defaultTint
 
-    private var glassLevel: GlassLevel { GlassLevel(rawValue: glassLevelRaw) ?? .frosted }
+    private var glassLevel: GlassLevel { GlassLevel(rawValue: glassLevelRaw) ?? LiquidGlass.defaultLevel }
     private var glassHue: LiquidGlassHue { LiquidGlassHue(rawValue: glassHueRaw) ?? LiquidGlass.defaultHue }
 
     /// The tool navigation path, owned here (not implicit) so launch can open straight to the last-used

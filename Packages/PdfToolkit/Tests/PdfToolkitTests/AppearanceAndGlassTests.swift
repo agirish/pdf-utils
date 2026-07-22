@@ -65,6 +65,17 @@ import Foundation
         }
     }
 
+    // MARK: Stored-appearance defaults
+
+    @Test func glassDefaultsArePinned() {
+        // The single source every `@AppStorage` seed and resolve-fallback reads for glass. Pinned so a
+        // change is a deliberate, reviewed edit — and so the seed and the fallback can never drift apart
+        // (the whole reason these became named constants).
+        #expect(LiquidGlass.defaultLevel == .frosted)
+        #expect(LiquidGlass.defaultTint == 0)
+        #expect(LiquidGlass.defaultHue == .blue)
+    }
+
     // MARK: Legacy migration
 
     /// A throwaway defaults domain so migration tests never touch the real app or each other.

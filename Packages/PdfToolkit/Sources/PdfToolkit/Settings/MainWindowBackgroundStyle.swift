@@ -26,13 +26,13 @@ public struct DashboardBackground: View {
     public init() {}
 
     @AppStorage(LiquidGlass.levelKey)
-    private var glassLevelRaw: String = GlassLevel.frosted.rawValue
+    private var glassLevelRaw: String = LiquidGlass.defaultLevel.rawValue
 
     @AppStorage(LiquidGlass.hueKey)
     private var glassHueRaw: String = LiquidGlass.defaultHue.rawValue
 
     private var glassLevel: GlassLevel {
-        GlassLevel(rawValue: glassLevelRaw) ?? .frosted
+        GlassLevel(rawValue: glassLevelRaw) ?? LiquidGlass.defaultLevel
     }
 
     private var glassHue: LiquidGlassHue {

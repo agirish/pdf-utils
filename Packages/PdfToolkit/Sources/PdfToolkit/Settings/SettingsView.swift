@@ -260,11 +260,11 @@ struct FilesSettingsTab: View {
 
 struct AppearanceSettingsTab: View {
     @AppStorage(LiquidGlass.appearanceModeKey) private var appearanceModeRaw: String = AppearanceMode.system.rawValue
-    @AppStorage(LiquidGlass.levelKey) private var glassLevelRaw: String = GlassLevel.frosted.rawValue
+    @AppStorage(LiquidGlass.levelKey) private var glassLevelRaw: String = LiquidGlass.defaultLevel.rawValue
     @AppStorage(LiquidGlass.hueKey) private var selectedHueRaw: String = LiquidGlass.defaultHue.rawValue
     @AppStorage(LiquidGlass.accentStyleKey) private var accentStyleRaw: String = AccentStyle.multicolor.rawValue
     @AppStorage(LiquidGlass.surfaceStyleKey) private var surfaceStyleRaw: String = SurfaceStyle.unified.rawValue
-    @AppStorage(LiquidGlass.tintKey) private var surfaceTint: Double = 0
+    @AppStorage(LiquidGlass.tintKey) private var surfaceTint: Double = LiquidGlass.defaultTint
     @AppStorage(SettingsKeys.mergePreviewBackground) private var mergePreviewBackgroundRaw: String = MergePreviewBackgroundStyle.matchMain.rawValue
     @AppStorage(SettingsKeys.dashboardLayout) private var dashboardLayoutRaw: String = DashboardLayout.categories.rawValue
     @AppStorage(SettingsKeys.dashboardCategoryOrder) private var dashboardCategoryOrderRaw: String = ""
@@ -280,7 +280,7 @@ struct AppearanceSettingsTab: View {
             || !ToolOrder.isDefault(dashboardToolOrderRaw)
     }
     private var appearanceMode: AppearanceMode { AppearanceMode(rawValue: appearanceModeRaw) ?? .system }
-    private var glassLevel: GlassLevel { GlassLevel(rawValue: glassLevelRaw) ?? .frosted }
+    private var glassLevel: GlassLevel { GlassLevel(rawValue: glassLevelRaw) ?? LiquidGlass.defaultLevel }
     private var selectedHue: LiquidGlassHue { LiquidGlassHue(rawValue: selectedHueRaw) ?? LiquidGlass.defaultHue }
     private var accentStyle: AccentStyle { AccentStyle(rawValue: accentStyleRaw) ?? .multicolor }
     private var selectedSurfaceStyle: SurfaceStyle { SurfaceStyle(rawValue: surfaceStyleRaw) ?? .unified }
@@ -690,7 +690,7 @@ struct AdvancedSettingsTab: View {
         }
         // Re-seed glassLevel (its absence would trigger the legacy migration path again) and re-apply
         // the now-default (System) theme + logging gate.
-        defaults.set(GlassLevel.frosted.rawValue, forKey: LiquidGlass.levelKey)
+        defaults.set(LiquidGlass.defaultLevel.rawValue, forKey: LiquidGlass.levelKey)
         ActivityLog.shared.minimumLevel = ActivityLog.defaultMinimumLevel
         AppAppearance.applyPersisted()
     }

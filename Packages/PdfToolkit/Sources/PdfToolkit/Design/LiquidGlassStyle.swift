@@ -134,7 +134,7 @@ public enum LiquidGlassHue: String, CaseIterable, Identifiable, Sendable {
 /// The material of the app's glass surfaces (aligned with SyncCloud `Design/GlassLevel`). Replaces
 /// the old free `intensity` Double — that API only ever had two visible states. Stored via
 /// `LiquidGlass.levelKey`.
-public enum GlassLevel: String, CaseIterable, Identifiable {
+public enum GlassLevel: String, CaseIterable, Identifiable, Sendable {
     /// Glass with no frost: the background reads straight through.
     case clear
     /// Standard Liquid Glass — translucent and blurred, legible on top.
@@ -234,13 +234,19 @@ public enum LiquidGlass {
 
     /// Default hue when nothing is stored (matches SyncCloud's default accent).
     public static let defaultHue = LiquidGlassHue.blue
+    /// Default glass material when nothing is stored — `.frosted`, the old intensity slider's 0.65
+    /// look, so a migrated install renders unchanged. The single source for every `@AppStorage`
+    /// initializer and resolve fallback, so the seeded value and the fallback can never drift apart.
+    public static let defaultLevel = GlassLevel.frosted
+    /// Default content-surface accent tint when nothing is stored (0 = no wash).
+    public static let defaultTint: Double = 0
 
     /// Moves a pre-`GlassLevel` install onto the new model. Idempotent: once `levelKey` is set this
     /// is a no-op, so it can run on every launch. Any stored intensity maps to `.frosted` (the old
     /// slider's 0.65 default, and what installs actually rendered), and the retired key is cleared.
     public static func migrateLegacyAppearance(_ defaults: UserDefaults = .standard) {
         guard defaults.string(forKey: levelKey) == nil else { return }
-        defaults.set(GlassLevel.frosted.rawValue, forKey: levelKey)
+        defaults.set(defaultLevel.rawValue, forKey: levelKey)
         defaults.removeObject(forKey: intensityKey)
     }
 }

@@ -58,6 +58,13 @@ private enum SizeEstimate: Equatable {
     var isResolved: Bool { if case .ready = self { return true } else { return false } }
 }
 
+/// Identifies the compression setting a cached output belongs to, so a Save only reuses bytes that
+/// were produced for the exact config being run.
+private enum CompressCacheKey: Equatable {
+    case quality(Int)   // qKey(quality)
+    case target(Int)    // target byte budget
+}
+
 /// The payoff of a finished compression run: the real on-disk sizes before and after, plus where the
 /// output landed so it can be revealed in Finder.
 ///
@@ -116,6 +123,12 @@ struct CompressToolView: View {
     /// Source size remembered while the save dialog is open, so the readout can be built from the
     /// exporter's success callback (where only the output data is otherwise in hand).
     @State private var pendingInputBytes: Int64?
+
+    /// The exact compressed bytes the current setting's estimate already produced, so a Save at that
+    /// same setting reuses them instead of running the whole compression (or target sweep) a second
+    /// time. Pre-strip — `PDFExportCoordinator.route` applies any metadata strip — so it's independent
+    /// of the strip setting; dropped when the selected file changes.
+    @State private var reusableOutput: (path: String, key: CompressCacheKey, data: Data)?
 
     @StateObject private var runner = BatchRunner()
 
@@ -487,6 +500,7 @@ struct CompressToolView: View {
             qualityEstimates = [:]
             targetEstimates = [:]
             estimatedPath = nil
+            reusableOutput = nil
             return
         }
         // A new file — or a change to whether export strips metadata, which re-serializes and so
@@ -496,6 +510,9 @@ struct CompressToolView: View {
         if estimatedPath != url.path || estimatedStripMetadata != strip {
             qualityEstimates = [:]
             targetEstimates = [:]
+            // A genuinely different file also invalidates the reused bytes; a strip change does not,
+            // since those bytes are pre-strip.
+            if estimatedPath != url.path { reusableOutput = nil }
             estimatedPath = url.path
             estimatedStripMetadata = strip
         }
@@ -524,8 +541,12 @@ struct CompressToolView: View {
             // All three cards in ONE enqueued queue slot, not one per card: three separate whole-document
             // compressions would monopolize the serial PDF queue that also renders thumbnails and runs
             // "Compress & save". The batch bails between passes when this task is superseded.
+            //
+            // Keep the compressed bytes for the *active* quality (the config a Save would run) so the
+            // save reuses them; the other cards only need their size measured.
             let path = url.path
-            let sizes = await computeQualityEstimates(url: url, keys: toCompute, stripMetadata: strip)
+            let selectedKey = qKey(quality)
+            let (sizes, selectedData) = await computeQualityEstimates(url: url, keys: toCompute, keepDataFor: selectedKey, stripMetadata: strip)
             // If the selection (or strip setting) moved on while this ran, its caches were reset; writing
             // file X's sizes into file Y's fresh cache would silently show stale numbers with no spinner.
             // Drop the whole batch — the now-current task recomputes what it needs.
@@ -534,15 +555,23 @@ struct CompressToolView: View {
             for key in toCompute {
                 qualityEstimates[key] = sizes[key].map(SizeEstimate.ready) ?? .unavailable
             }
+            if let selectedData {
+                reusableOutput = (path, .quality(selectedKey), selectedData)
+            }
         case .targetSize:
             let key = targetBytes
             guard !(targetEstimates[key]?.isResolved ?? false) else { return }
             targetEstimates[key] = .estimating
             let path = url.path
-            let estimate = await computeTargetEstimate(url: url, targetBytes: key, stripMetadata: strip)
+            let (estimate, data) = await computeTargetEstimate(url: url, targetBytes: key, stripMetadata: strip)
             guard Self.shouldStoreEstimate(computedPath: path, currentPath: estimatedPath, isCancelled: Task.isCancelled)
             else { return }
             targetEstimates[key] = estimate
+            // Keep the swept-to-target bytes so a Save at this target reuses them instead of running
+            // the whole progressive sweep again.
+            if let data {
+                reusableOutput = (path, .target(key), data)
+            }
         }
     }
 
@@ -562,39 +591,46 @@ struct CompressToolView: View {
     /// `compressData` pass itself doesn't poll), and strip-aware so the size matches the saved file when
     /// "Strip metadata on export" is on. Returns key → byte count for the passes that completed; a key
     /// absent from the result failed to compress and surfaces as `.unavailable`.
-    private func computeQualityEstimates(url: URL, keys: Set<Int>, stripMetadata: Bool) async -> [Int: Int] {
+    private func computeQualityEstimates(url: URL, keys: Set<Int>, keepDataFor: Int, stripMetadata: Bool) async -> (sizes: [Int: Int], selectedData: Data?) {
         let sortedKeys = keys.sorted()
         do {
             return try await PDFBackgroundWork.run { isCancelled in
                 try url.withSecurityScopedAccess {
                     var sizes: [Int: Int] = [:]
+                    var selectedData: Data?
                     for key in sortedKeys {
                         if isCancelled() { break }
                         guard let data = try? PDFToolkit.compressData(inputURL: url, quality: Double(key) / 1000)
                         else { continue }
                         sizes[key] = Self.exportedByteCount(of: data, stripMetadata: stripMetadata)
+                        // Retain only the active quality's bytes (the config a Save runs); the other
+                        // cards are measured and their bytes dropped, so at most one blob is held.
+                        if key == keepDataFor { selectedData = data }
                     }
-                    return sizes
+                    return (sizes, selectedData)
                 }
             }
         } catch {
-            return [:]
+            return ([:], nil)
         }
     }
 
     /// Runs the real target-size sweep in memory and returns just its byte count — the exact size the
     /// `.targetSize` run (same `compressToTargetData`) will write, which may sit under the target.
-    private func computeTargetEstimate(url: URL, targetBytes: Int, stripMetadata: Bool) async -> SizeEstimate {
+    private func computeTargetEstimate(url: URL, targetBytes: Int, stripMetadata: Bool) async -> (estimate: SizeEstimate, data: Data?) {
         do {
-            let bytes = try await PDFBackgroundWork.run {
+            // Both the size (post-strip) and the retained bytes (pre-strip) are produced inside the
+            // one queue slot — `exportedByteCount` builds a PDFDocument when stripping, so it must
+            // stay on the serial queue, never hop back to the main actor.
+            let (bytes, data) = try await PDFBackgroundWork.run {
                 try url.withSecurityScopedAccess {
                     let data = try PDFToolkit.compressToTargetData(inputURL: url, targetBytes: targetBytes)
-                    return Self.exportedByteCount(of: data, stripMetadata: stripMetadata)
+                    return (Self.exportedByteCount(of: data, stripMetadata: stripMetadata), data)
                 }
             }
-            return .ready(bytes)
+            return (.ready(bytes), data)
         } catch {
-            return .unavailable
+            return (.unavailable, nil)
         }
     }
 
@@ -628,14 +664,25 @@ struct CompressToolView: View {
         let inputBytes = runner.items.first?.inputBytes
             ?? (try? fileURL.resourceValues(forKeys: [.fileSizeKey]).fileSize).map(Int64.init)
 
+        // The badge estimate for the active setting already ran this exact compression; if its bytes
+        // are still cached for this file and config, reuse them rather than compressing again (the
+        // target sweep especially is not cheap to repeat). The cached bytes are pre-strip, exactly
+        // what the compress calls return, so `route` finalizes them identically.
+        let runKey: CompressCacheKey = selectedMode == .quality ? .quality(qKey(qualityValue)) : .target(targetByteBudget)
+
         do {
-            let data = try await PDFBackgroundWork.run {
-                try fileURL.withSecurityScopedAccess {
-                    switch selectedMode {
-                    case .quality:
-                        return try PDFToolkit.compressData(inputURL: fileURL, quality: qualityValue)
-                    case .targetSize:
-                        return try PDFToolkit.compressToTargetData(inputURL: fileURL, targetBytes: targetByteBudget)
+            let data: Data
+            if let cached = reusableOutput, cached.path == fileURL.path, cached.key == runKey {
+                data = cached.data
+            } else {
+                data = try await PDFBackgroundWork.run {
+                    try fileURL.withSecurityScopedAccess {
+                        switch selectedMode {
+                        case .quality:
+                            return try PDFToolkit.compressData(inputURL: fileURL, quality: qualityValue)
+                        case .targetSize:
+                            return try PDFToolkit.compressToTargetData(inputURL: fileURL, targetBytes: targetByteBudget)
+                        }
                     }
                 }
             }

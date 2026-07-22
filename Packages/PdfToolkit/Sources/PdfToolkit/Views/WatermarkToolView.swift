@@ -316,17 +316,7 @@ struct WatermarkToolView: View {
         VStack(alignment: .leading, spacing: 8) {
             Text("Font")
                 .font(.subheadline.weight(.semibold))
-            Picker("Font", selection: $fontFamily) {
-                Text("System (default)").tag("")
-                Divider()
-                ForEach(Self.availableFamilies, id: \.self) { family in
-                    Text(family).tag(family)
-                }
-            }
-            .pickerStyle(.menu)
-            .labelsHidden()
-            .fixedSize(horizontal: true, vertical: false)
-            .help("Choose the font for the text watermark")
+            WatermarkFontPicker(family: $fontFamily, families: Self.availableFamilies)
         }
     }
 
@@ -376,63 +366,44 @@ struct WatermarkToolView: View {
         }
     }
 
+    @ViewBuilder
     private var livePreview: some View {
+        if mode == .image && imageThumbnail == nil {
+            imagePreviewPlaceholder
+        } else {
+            WatermarkPreviewCanvas(
+                mode: mode,
+                text: text,
+                fontFamily: fontFamily,
+                fontSize: fontSize,
+                color: chosenColor,
+                opacity: opacity,
+                rotation: rotation,
+                tiled: tiled,
+                image: imageThumbnail,
+                imageScale: imageScale
+            )
+        }
+    }
+
+    private var imagePreviewPlaceholder: some View {
         ZStack {
             RoundedRectangle(cornerRadius: 8, style: .continuous)
                 .fill(Color.white)
             RoundedRectangle(cornerRadius: 8, style: .continuous)
                 .strokeBorder(Color.primary.opacity(0.12), lineWidth: 1)
-            previewContent
-        }
-        .frame(height: 96)
-        .frame(maxWidth: .infinity)
-        .accessibilityHidden(true)
-    }
-
-    @ViewBuilder
-    private var previewContent: some View {
-        switch mode {
-        case .text:
-            Text(text.isEmpty ? "DRAFT" : text)
-                .font(previewFont)
-                .foregroundStyle(chosenColor)
-                .opacity(opacity)
-                .rotationEffect(.degrees(rotation))
-                .lineLimit(1)
-                .minimumScaleFactor(0.4)
-                .padding(8)
-        case .image:
-            if let imageThumbnail {
-                GeometryReader { geo in
-                    Image(nsImage: imageThumbnail)
-                        .resizable()
-                        .interpolation(.high)
-                        .scaledToFit()
-                        .frame(width: geo.size.width * imageScale, height: geo.size.height * imageScale)
-                        .opacity(opacity)
-                        .rotationEffect(.degrees(rotation))
-                        .frame(width: geo.size.width, height: geo.size.height)
-                }
-                .padding(8)
-            } else {
-                VStack(spacing: 6) {
-                    Image(systemName: "photo")
-                        .font(.title2)
-                        .foregroundStyle(.tertiary)
-                    Text("Choose an image to preview")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
+            VStack(spacing: 6) {
+                Image(systemName: "photo")
+                    .font(.title2)
+                    .foregroundStyle(.tertiary)
+                Text("Choose an image to preview")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
         }
-    }
-
-    private var previewFont: Font {
-        let size = min(34, fontSize * 0.6)
-        if fontFamily.isEmpty {
-            return .system(size: size, weight: .bold)
-        }
-        return .custom(fontFamily, fixedSize: size)
+        .frame(height: 200)
+        .frame(maxWidth: .infinity)
+        .accessibilityHidden(true)
     }
 
     private func slider(title: String, value: Binding<CGFloat>, range: ClosedRange<CGFloat>, unit: String) -> some View {

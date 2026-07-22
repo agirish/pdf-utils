@@ -93,4 +93,19 @@ import PDFKit
             try PDFToolkit.rotate(inputURL: src, outputURL: dir.url("out.pdf"), pageIndices: [0], quarterTurns: 1)
         }?.kind == "couldNotOpen")
     }
+
+    @Test func outOfRangePageIndexThrowsInsteadOfBeingIgnored() throws {
+        // Rotate used to silently skip a page index past the end (its loop simply never matched it),
+        // so a typo'd selection rotated nothing with no error. It now validates the selection up
+        // front like delete/extract/split and throws pageOutOfBounds naming the 1-based page.
+        let dir = FixtureDir()
+        let src = dir.url("src.pdf")
+        try PDFFixtures.writePDF(pageCount: 3, to: src)
+        let error = #expect(throws: PDFOperationError.self) {
+            try PDFToolkit.rotate(inputURL: src, outputURL: dir.url("out.pdf"), pageIndices: [5], quarterTurns: 1)
+        }
+        if case .pageOutOfBounds(let n)? = error { #expect(n == 6) } else {
+            Issue.record("expected pageOutOfBounds(6), got \(String(describing: error))")
+        }
+    }
 }

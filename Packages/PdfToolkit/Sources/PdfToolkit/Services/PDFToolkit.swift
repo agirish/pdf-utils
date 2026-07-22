@@ -228,6 +228,13 @@ public enum PDFToolkit {
             }
         }
 
+        // NOTE: source outlines (bookmarks) are intentionally dropped for now. A merge concatenates
+        // pages from possibly MANY documents, each with its own outline, at shifting page offsets and
+        // under per-input page selections — a correct combined outline would remap every source's
+        // destinations into its slice of the merged page range and reconcile clashing roots. That is
+        // feasible but non-trivial; until it's built, dropping is safer than a misdirected reassign.
+        // (Interactive `/AcroForm` fields are likewise not carried across the page-copy rebuild.)
+        //
         // A selection that copies nothing (every page dropped/filtered out) would otherwise be
         // written as a one-blank-page file by PDFKit's writer — refuse it with a clear error instead.
         guard merged.pageCount > 0 else { throw PDFOperationError.noPagesSelected }
@@ -248,6 +255,12 @@ public enum PDFToolkit {
         let source = try openUnlockedDocument(at: inputURL)
         guard source.pageCount > 0 else { throw PDFOperationError.emptyPDF }
 
+        // NOTE: the source outline (bookmarks) is intentionally dropped from every part for now.
+        // Each part is a different subset of pages, so a correct remap would have to rebuild a
+        // per-part outline (like `extractData` does via `remapOutline`) and decide how a bookmark
+        // spanning parts is split — deferred until that behavior is specified. Reattaching the whole
+        // source outline naively would point every part's bookmarks at the wrong pages, so we keep
+        // dropping it rather than ship a misdirected one.
         let width = max(2, String(segments.count).count)
         var outputs: [URL] = []
         do {
@@ -271,7 +284,15 @@ public enum PDFToolkit {
                     filename: "\(baseName)-\(suffix).pdf"
                 )
                 try requireDistinctOutput(url, from: [inputURL])
-                guard out.write(to: url) else {
+                // Materialize the bytes and write them atomically — the one write path here that
+                // still used PDFKit's non-atomic `write(to:)`, which can leave a torn part file on a
+                // mid-write failure. A crash now leaves either the whole part or nothing.
+                guard let partData = out.dataRepresentation() else {
+                    throw PDFOperationError.couldNotEncodeOutput
+                }
+                do {
+                    try partData.write(to: url, options: .atomic)
+                } catch {
                     try? FileManager.default.removeItem(at: url)
                     throw PDFOperationError.couldNotWrite(url)
                 }
@@ -302,6 +323,10 @@ public enum PDFToolkit {
         let source = try openUnlockedDocument(at: inputURL)
 
         let out = PDFDocument()
+        // Which output position each *source* page first landed at — the map the outline remap needs
+        // to move a bookmark's destination onto the page's new slot (first occurrence wins when a
+        // page is copied more than once).
+        var sourceToOutput: [Int: Int] = [:]
         var insertAt = 0
         for i in pageIndices {
             guard let src = source.page(at: i) else {
@@ -311,13 +336,77 @@ public enum PDFToolkit {
                 throw PDFOperationError.couldNotOpen(inputURL)
             }
             out.insert(copy, at: insertAt)
+            if sourceToOutput[i] == nil { sourceToOutput[i] = insertAt }
             insertAt += 1
         }
+
+        // Bookmarks reference source pages by their catalog destinations; this is a SUBSET/REORDER,
+        // so the source indices no longer line up with the output. A naive `out.outlineRoot =
+        // source.outlineRoot` would keep the old indices and silently point bookmarks at the wrong
+        // page (or off the end). Rebuild each destination against the retained output page instead,
+        // dropping bookmarks whose target page wasn't extracted. (An interactive `/AcroForm` still
+        // does not survive the page-copy rebuild — out of scope here.)
+        remapOutline(from: source, to: out, sourceToOutput: sourceToOutput)
 
         guard let data = out.dataRepresentation() else {
             throw PDFOperationError.couldNotEncodeOutput
         }
         return data
+    }
+
+    /// Rebuilds `source`'s outline onto `output`, whose pages are a subset and/or reordering of
+    /// `source`'s (extract/reorder). `sourceToOutput` maps a source page index to the output index
+    /// it now occupies. Each surviving bookmark's destination is rebuilt to point at the matching
+    /// `output` page; a bookmark whose target page was dropped is removed and its still-retained
+    /// descendants are promoted to its parent, so a kept child under a dropped folder survives.
+    ///
+    /// Why rebuild rather than reassign: PDFKit serializes an outline destination by the index of
+    /// its page *within that page's own document*. When every page is copied 1:1 in order (the
+    /// crop / remove-password path) those indices are unchanged, so a plain `outlineRoot` reassign
+    /// is correct. For a subset or reorder the indices shift, and only rebuilt destinations point
+    /// where the reader expects — never a dangling or misdirected bookmark.
+    ///
+    /// Bookmarks expressed as GoTo *actions* (rather than an explicit `destination`) carry no
+    /// `destination` here and are dropped; explicit destinations are the common case and the one
+    /// the tools produce.
+    private static func remapOutline(
+        from source: PDFDocument,
+        to output: PDFDocument,
+        sourceToOutput: [Int: Int]
+    ) {
+        guard let sourceRoot = source.outlineRoot else { return }
+
+        func appendRemapped(of node: PDFOutline, into parent: PDFOutline) {
+            for i in 0..<node.numberOfChildren {
+                guard let child = node.child(at: i) else { continue }
+                var mapped: PDFPage?
+                if let destPage = child.destination?.page {
+                    let srcIndex = source.index(for: destPage)
+                    if srcIndex != NSNotFound,
+                       let outIndex = sourceToOutput[srcIndex],
+                       let outPage = output.page(at: outIndex) {
+                        mapped = outPage
+                    }
+                }
+                if let outPage = mapped {
+                    let kept = PDFOutline()
+                    kept.label = child.label
+                    let point = child.destination?.point ?? CGPoint(x: 0, y: outPage.bounds(for: .cropBox).maxY)
+                    kept.destination = PDFDestination(page: outPage, at: point)
+                    parent.insertChild(kept, at: parent.numberOfChildren)
+                    appendRemapped(of: child, into: kept)
+                } else {
+                    // Dropped node: keep walking so retained descendants aren't lost with it.
+                    appendRemapped(of: child, into: parent)
+                }
+            }
+        }
+
+        let newRoot = PDFOutline()
+        appendRemapped(of: sourceRoot, into: newRoot)
+        if newRoot.numberOfChildren > 0 {
+            output.outlineRoot = newRoot
+        }
     }
 
     /// Writes a new PDF whose pages follow `order` (a permutation of the source's zero-based
@@ -345,14 +434,19 @@ public enum PDFToolkit {
         let doc = try openUnlockedDocument(at: inputURL)
 
         let unique = Set(pageIndices)
+        // Bounds-check FIRST: otherwise an out-of-range index inflates `unique.count` and trips the
+        // every-page guard, reporting `cannotRemoveEveryPage` for a request whose real problem is a
+        // bad page number (e.g. [0,1,5] on a 3-page doc). Validate each index, then compare counts.
+        for index in unique {
+            guard index >= 0, index < doc.pageCount else {
+                throw PDFOperationError.pageOutOfBounds(index + 1)
+            }
+        }
         guard unique.count < doc.pageCount else {
             throw PDFOperationError.cannotRemoveEveryPage
         }
 
         for index in unique.sorted(by: >) {
-            guard index >= 0, index < doc.pageCount else {
-                throw PDFOperationError.pageOutOfBounds(index + 1)
-            }
             doc.removePage(at: index)
         }
 
@@ -374,6 +468,14 @@ public enum PDFToolkit {
     /// In-memory core of ``rotate(inputURL:outputURL:pageIndices:quarterTurns:)``.
     internal static func rotateData(inputURL: URL, pageIndices: [Int], quarterTurns: Int) throws -> Data {
         let doc = try openUnlockedDocument(at: inputURL)
+        // Validate the selection up front, like delete/extract/split: a page index past the end used
+        // to be silently ignored (the rotate loop just never matched it), so a typo'd range rotated
+        // nothing on that page with no error. Reject it with `pageOutOfBounds` instead.
+        for i in pageIndices {
+            guard i >= 0, i < doc.pageCount else {
+                throw PDFOperationError.pageOutOfBounds(i + 1)
+            }
+        }
         let turns = ((quarterTurns % 4) + 4) % 4
         if turns != 0 {
             let unique = Set(pageIndices)
@@ -470,9 +572,8 @@ public enum PDFToolkit {
         // encryption into the output, so a just-unlocked doc re-serializes to a file that is
         // still locked with the same password. Rebuild the pages into a fresh document, which
         // has no encryption dictionary, so the saved copy genuinely opens with no password.
-        // The rebuild keeps pages and the info dictionary; document-level structure that PDFKit
-        // can't re-attach (outline/bookmarks, attachments, form dictionary) does not survive —
-        // the tool's UI discloses this.
+        // The rebuild keeps pages and the info dictionary; attachments and an interactive form
+        // dictionary still don't survive it (out of scope — the tool's UI discloses this).
         let output = PDFDocument()
         for i in 0..<doc.pageCount {
             guard let page = doc.page(at: i)?.copy() as? PDFPage else {
@@ -481,6 +582,13 @@ public enum PDFToolkit {
             output.insert(page, at: output.pageCount)
         }
         output.documentAttributes = doc.documentAttributes
+        // Bookmarks live on the catalog, not the pages, so the rebuild would drop them. Every page
+        // is copied here in the SAME order, so reattaching the source outline is safe: PDFKit remaps
+        // each destination onto the matching copy on write (the proven metadata-clean pattern). No
+        // subset or reorder is involved, so the destinations can't dangle or misdirect.
+        if let outline = doc.outlineRoot {
+            output.outlineRoot = outline
+        }
         guard output.pageCount > 0, let data = output.dataRepresentation() else {
             throw PDFOperationError.protectionFailed
         }
@@ -738,7 +846,13 @@ public enum PDFToolkit {
             // ~150 MB of transient bitmap per US Letter page) — that scratch must drain per page,
             // not accumulate for the whole document. The inserted page survives; output owns it.
             try autoreleasepool {
-                guard let page = source.page(at: pageIndex) else { return }
+                // A nil page on an already-opened, valid document should never happen — but returning
+                // here would silently emit a redacted file with FEWER pages than the input, breaking
+                // the page-preservation invariant every other tool upholds (PageReplay's
+                // `displayedPage` throws in exactly this case). Fail loudly instead of dropping a page.
+                guard let page = source.page(at: pageIndex) else {
+                    throw PDFOperationError.redactionFailed
+                }
                 let rectsForPage = (grouped[pageIndex] ?? []).map(\.rect)
 
                 if rectsForPage.isEmpty {

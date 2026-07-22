@@ -60,6 +60,42 @@ enum PDFFixtures {
         return markers
     }
 
+    /// An `n`-page marker PDF carrying a top-level outline: one bookmark per `bookmarks` entry, each
+    /// pointing at the given zero-based page (destination near that page's top edge). Lets
+    /// outline-preservation tests build a source whose bookmarks a later operation must keep pointing
+    /// at the CORRECT page. Built by writing the pages, then attaching the outline via PDFKit and
+    /// rewriting — the same construction the metadata-clean test uses.
+    @discardableResult
+    static func writePDF(
+        pageCount n: Int,
+        bookmarks: [(label: String, pageIndex: Int)],
+        to url: URL,
+        size: CGSize = PDFFixtures.letter
+    ) throws -> [String] {
+        // Write the marker pages to a SEPARATE base file, load from it, then write the outlined
+        // document to the final `url`. `PDFDocument(url:)` reads pages lazily, so writing the outline
+        // back onto the very file being read races those reads and intermittently corrupts the output
+        // (the same self-overwrite hazard `requireDistinctOutput` guards against in production). The
+        // rotations fixture uses this same distinct-base dance for exactly this reason.
+        let base = url.deletingLastPathComponent()
+            .appendingPathComponent("outline-base-\(UUID().uuidString).pdf")
+        defer { try? FileManager.default.removeItem(at: base) }
+        let markers = try writePDF(pageCount: n, to: base, size: size)
+        let doc = try #require(PDFDocument(url: base))
+        let root = PDFOutline()
+        for (i, bookmark) in bookmarks.enumerated() {
+            let child = PDFOutline()
+            child.label = bookmark.label
+            if let page = doc.page(at: bookmark.pageIndex) {
+                child.destination = PDFDestination(page: page, at: CGPoint(x: 0, y: size.height))
+            }
+            root.insertChild(child, at: i)
+        }
+        doc.outlineRoot = root
+        #expect(doc.write(to: url))
+        return markers
+    }
+
     /// Raw bytes of a marker PDF, for callers that build documents in memory.
     static func pdfData(markers: [String], size: CGSize = PDFFixtures.letter) throws -> Data {
         let dir = FixtureDir()
@@ -206,6 +242,27 @@ enum PDFFixtures {
 
     static func pageCount(at url: URL) throws -> Int {
         try #require(PDFDocument(url: url)).pageCount
+    }
+
+    /// The document's top-level outline as `(label, destinationPageIndex)` pairs, in order — read by
+    /// OPENING the output and resolving each bookmark's destination back to a page index in that same
+    /// document, so a test can assert a bookmark both survived AND still points at the correct page.
+    /// A bookmark whose destination no longer resolves to a page in the document reports index `-1`.
+    static func outlineBookmarks(at url: URL) throws -> [(label: String, pageIndex: Int)] {
+        let doc = try #require(PDFDocument(url: url))
+        guard let root = doc.outlineRoot else { return [] }
+        var result: [(label: String, pageIndex: Int)] = []
+        for i in 0..<root.numberOfChildren {
+            guard let child = root.child(at: i) else { continue }
+            let label = child.label ?? ""
+            var index = -1
+            if let page = child.destination?.page {
+                let raw = doc.index(for: page)
+                index = (raw == NSNotFound) ? -1 : raw
+            }
+            result.append((label, index))
+        }
+        return result
     }
 
     /// The trimmed extracted text of every page, in document order.

@@ -190,4 +190,83 @@ import PDFKit
             Issue.record("expected pageOutOfBounds(6), got \(String(describing: error))")
         }
     }
+
+    @Test func deleteReportsTheBadIndexNotCannotRemoveEveryPage() throws {
+        // A request naming as many indices as there are pages, but with one OUT OF RANGE, must report
+        // the bad page — not `cannotRemoveEveryPage`. The every-page count check used to run before
+        // the per-index bounds check, so [0,1,5] on a 3-page doc mis-reported as "removing every page".
+        let dir = FixtureDir()
+        let src = dir.url("src.pdf")
+        try PDFFixtures.writePDF(pageCount: 3, to: src)
+        let error = #expect(throws: PDFOperationError.self) {
+            try PDFToolkit.deletePages(inputURL: src, outputURL: dir.url("out.pdf"), pageIndices: [0, 1, 5])
+        }
+        #expect(error?.kind == "pageOutOfBounds")
+        if case .pageOutOfBounds(let n)? = error { #expect(n == 6) } else {
+            Issue.record("expected pageOutOfBounds(6), got \(String(describing: error))")
+        }
+    }
+}
+
+/// Bookmarks live on the document catalog, so every operation that rebuilds a document from copied
+/// pages must deliberately carry them across — and, for a subset or reorder, REMAP each destination
+/// onto the page's new position rather than reattach the source outline verbatim (which would leave
+/// bookmarks pointing at the wrong page, or off the end). These open the output and assert each
+/// surviving bookmark resolves to the CORRECT page index. Remove-password is grouped here — it too
+/// rebuilds from copied pages, and it has no dedicated owned test file — alongside the extract and
+/// reorder cases whose remap logic is the subtle part.
+@Suite struct PDFToolkitOutlinePreservationTests {
+
+    @Test func extractRemapsSurvivingBookmarksAndDropsThoseForOmittedPages() throws {
+        // Source bookmarks: A→p0, B→p1, C→p3. Extract [3, 1] keeps p3 (now output 0) and p1 (output 1)
+        // and drops p0. So A vanishes, B moves to index 1, C moves to index 0 — proving both the remap
+        // and the drop of a bookmark whose target page isn't in the output.
+        let dir = FixtureDir()
+        let src = dir.url("src.pdf"), out = dir.url("out.pdf")
+        try PDFFixtures.writePDF(pageCount: 4, bookmarks: [("A", 0), ("B", 1), ("C", 3)], to: src)
+
+        try PDFToolkit.extract(inputURL: src, outputURL: out, pageIndices: [3, 1])
+
+        // Sanity: the pages themselves landed where extract promises.
+        let texts = try PDFFixtures.pageTexts(at: out)
+        #expect(texts[0].contains(PDFFixtures.marker(4)))
+        #expect(texts[1].contains(PDFFixtures.marker(2)))
+
+        let bookmarks = try PDFFixtures.outlineBookmarks(at: out)
+        #expect(bookmarks.map(\.label) == ["B", "C"])
+        #expect(bookmarks.map(\.pageIndex) == [1, 0])
+    }
+
+    @Test func reorderRemapsBookmarksToTheNewPositions() throws {
+        // First→p0, Last→p2. Reversing the order ([2,1,0]) sends p0 to output index 2 and p2 to
+        // output index 0, so the bookmarks must follow their pages, not stay at their old indices.
+        let dir = FixtureDir()
+        let src = dir.url("src.pdf"), out = dir.url("out.pdf")
+        try PDFFixtures.writePDF(pageCount: 3, bookmarks: [("First", 0), ("Last", 2)], to: src)
+
+        try PDFToolkit.reorder(inputURL: src, outputURL: out, order: [2, 1, 0])
+
+        let bookmarks = try PDFFixtures.outlineBookmarks(at: out)
+        #expect(bookmarks.map(\.label) == ["First", "Last"])
+        #expect(bookmarks.map(\.pageIndex) == [2, 0])
+    }
+
+    @Test func removePasswordKeepsBookmarksPointingAtTheRightPages() throws {
+        // Remove-password rebuilds the pages into a fresh, unencrypted document (the only way to shed
+        // the encryption); all pages are copied in order, so reattaching the source outline keeps each
+        // bookmark on its original page. Build an ENCRYPTED source that carries an outline, strip the
+        // password, then open the result and check the destinations still resolve correctly.
+        let dir = FixtureDir()
+        let base = dir.url("base.pdf"), locked = dir.url("locked.pdf"), out = dir.url("out.pdf")
+        try PDFFixtures.writePDF(pageCount: 3, bookmarks: [("Intro", 0), ("End", 2)], to: base)
+        try PDFToolkit.encrypt(inputURL: base, outputURL: locked, password: "secret")
+        #expect(try #require(PDFDocument(url: locked)).isLocked)   // sanity: really encrypted
+
+        try PDFToolkit.removePassword(inputURL: locked, outputURL: out, password: "secret")
+
+        #expect(try #require(PDFDocument(url: out)).isLocked == false)
+        let bookmarks = try PDFFixtures.outlineBookmarks(at: out)
+        #expect(bookmarks.map(\.label) == ["Intro", "End"])
+        #expect(bookmarks.map(\.pageIndex) == [0, 2])
+    }
 }

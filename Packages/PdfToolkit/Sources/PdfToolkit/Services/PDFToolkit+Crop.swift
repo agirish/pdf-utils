@@ -60,10 +60,25 @@ extension PDFToolkit {
             }
             output.insert(copy, at: output.pageCount)
         }
+        reattachOutline(from: source, to: output)
         guard let data = output.dataRepresentation() else {
             throw PDFOperationError.couldNotEncodeOutput
         }
         return data
+    }
+
+    /// Carries the source's outline (bookmarks) onto a rebuilt `output` that copied EVERY page in the
+    /// SAME order (crop / auto-crop). The bookmarks live on the catalog, so the page-copy rebuild
+    /// drops them unless reattached; because the page order is unchanged, PDFKit remaps each
+    /// destination onto the matching copy on write — the same pattern the metadata clean proves, with
+    /// no chance of a dangling or misdirected bookmark. Only valid when pages are 1:1 and in order;
+    /// subset/reorder paths must rebuild destinations instead (see `PDFToolkit.remapOutline`).
+    ///
+    /// An interactive `/AcroForm` is not restored by this copy-and-rebuild — out of scope here.
+    static func reattachOutline(from source: PDFDocument, to output: PDFDocument) {
+        if let outline = source.outlineRoot {
+            output.outlineRoot = outline
+        }
     }
 
     /// Crops every page to its rendered content bounds plus `padding` points of breathing room.
@@ -119,6 +134,7 @@ extension PDFToolkit {
             }
             output.insert(copy, at: output.pageCount)
         }
+        reattachOutline(from: source, to: output)
         guard let data = output.dataRepresentation() else {
             throw PDFOperationError.couldNotEncodeOutput
         }

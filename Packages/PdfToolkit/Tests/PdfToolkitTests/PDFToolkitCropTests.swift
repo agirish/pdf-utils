@@ -314,4 +314,42 @@ import Testing
         }
         #expect(error?.kind == "outputMatchesInput")
     }
+
+    // MARK: Outline (bookmark) preservation
+
+    @Test func cropPreservesBookmarksPointingAtTheRightPages() throws {
+        // Crop rebuilds the document from copied pages, which drops the catalog outline unless it is
+        // reattached. Every page is kept in order, so each bookmark must survive AND still resolve to
+        // its ORIGINAL page — assert the destination page index, not merely that an outline exists.
+        let dir = FixtureDir()
+        let src = dir.url("src.pdf"), out = dir.url("out.pdf")
+        try PDFFixtures.writePDF(
+            pageCount: 3,
+            bookmarks: [("Intro", 0), ("Appendix", 2)],
+            to: src
+        )
+        #expect(try PDFFixtures.outlineBookmarks(at: src).count == 2)   // sanity
+
+        try PDFToolkit.crop(inputURL: src, outputURL: out, insets: CropInsets(top: 10, left: 10, bottom: 10, right: 10))
+
+        let bookmarks = try PDFFixtures.outlineBookmarks(at: out)
+        #expect(bookmarks.map(\.label) == ["Intro", "Appendix"])
+        #expect(bookmarks.map(\.pageIndex) == [0, 2])
+    }
+
+    @Test func autoCropPreservesBookmarksPointingAtTheRightPages() throws {
+        let dir = FixtureDir()
+        let src = dir.url("src.pdf"), out = dir.url("out.pdf")
+        try PDFFixtures.writePDF(
+            pageCount: 3,
+            bookmarks: [("Intro", 0), ("Appendix", 2)],
+            to: src
+        )
+
+        try PDFToolkit.autoCrop(inputURL: src, outputURL: out, padding: 10, unified: false)
+
+        let bookmarks = try PDFFixtures.outlineBookmarks(at: out)
+        #expect(bookmarks.map(\.label) == ["Intro", "Appendix"])
+        #expect(bookmarks.map(\.pageIndex) == [0, 2])
+    }
 }

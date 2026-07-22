@@ -26,7 +26,11 @@ final class PdfUtilsFinderSync: FIFinderSync {
     /// (`~/Library/Containers/com.pdfutils.PdfUtils.FinderSync/Data/diag.log`). A deliberate dev aid:
     /// the unified log (`log show`) does not surface this sandboxed process in some environments, so
     /// this file is the only way to observe the extension's behavior.
-    private func diag(_ msg: String) {
+    private func diag(_ msg: String) { Self.diag(msg) }
+
+    /// Static so it can be called from a `@Sendable` completion handler without capturing `self`
+    /// (a non-Sendable class instance). Instance `diag(_:)` forwards here.
+    private static func diag(_ msg: String) {
         let path = (NSHomeDirectory() as NSString).appendingPathComponent("diag.log")
         guard let data = "\(Date()) \(msg)\n".data(using: .utf8) else { return }
         if let fh = try? FileHandle(forWritingTo: URL(fileURLWithPath: path)) {
@@ -153,8 +157,20 @@ final class PdfUtilsFinderSync: FIFinderSync {
         // rules live in `FinderCommandFiles`, shared with the helper and unit-tested there.
         let name = FinderCommandFiles.fileName()
         let cmdURL = URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent(name)
-        if let data = try? JSONSerialization.data(withJSONObject: command, options: [.prettyPrinted]) {
-            do { try data.write(to: cmdURL, options: .atomic) } catch { diag("\(name) write failed: \(error)") }
+        // The ping below only tells the helper "look for new commands" — it carries nothing itself. So
+        // pinging after a failed write would cold-launch the helper to find no new file and do nothing:
+        // the user's right-click evaporates with only a breadcrumb. Bail before the ping (the extension
+        // is sandboxed and has no UI of its own — the diag line is the only signal available here; the
+        // helper's own flash/log covers commands that *do* land) if the command never reached disk.
+        guard let data = try? JSONSerialization.data(withJSONObject: command, options: [.prettyPrinted]) else {
+            diag("\(name) not written: JSON serialization failed; not pinging helper")
+            return
+        }
+        do {
+            try data.write(to: cmdURL, options: .atomic)
+        } catch {
+            diag("\(name) write failed: \(error); not pinging helper")
+            return
         }
         // Ping the resident menu-bar helper via its URL scheme. LaunchServices delivers this to the
         // already-running helper (reliable — no dependence on "became active") or launches it if it
@@ -163,7 +179,7 @@ final class PdfUtilsFinderSync: FIFinderSync {
         let cfg = NSWorkspace.OpenConfiguration()
         cfg.activates = false // the helper works in the background and reveals the result in Finder
         NSWorkspace.shared.open(ping, configuration: cfg) { _, error in
-            if let error = error { self.diag("helper ping failed: \(error)") }
+            if let error = error { Self.diag("helper ping failed: \(error)") }
         }
     }
 }

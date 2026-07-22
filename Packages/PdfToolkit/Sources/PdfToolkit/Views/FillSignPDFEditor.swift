@@ -132,6 +132,14 @@ struct FillSignPDFEditor: NSViewRepresentable {
 
         init(_ parent: FillSignPDFEditor) { self.parent = parent }
 
+        // Explicit teardown to match the base overlay's ObserverBag/deinit contract rather than lean on
+        // the runtime auto-removing a zeroing-weak selector observer at dealloc. `removeObserver(self)`
+        // is safe from this nonisolated deinit — it only needs the observer pointer, touches no
+        // main-actor state — and clears the single `.PDFViewPageChanged` registration below.
+        deinit {
+            NotificationCenter.default.removeObserver(self)
+        }
+
         func observePageChanges(on pdfView: PDFView) {
             NotificationCenter.default.addObserver(
                 self,

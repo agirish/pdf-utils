@@ -119,7 +119,6 @@ struct SettingsSearchEntry: Identifiable {
     static let all: [SettingsSearchEntry] = [
         .init(title: "Theme", tab: .appearance, keywords: ["light", "dark", "system", "appearance", "mode"]),
         .init(title: "Dashboard layout", tab: .appearance, keywords: ["dashboard", "layout", "categories", "grid", "list", "groups", "tools", "arrange"]),
-        .init(title: "Reset order", tab: .appearance, keywords: ["reset", "order", "arrange", "rearrange", "default", "dashboard", "sections", "tools", "pin"]),
         .init(title: "Accent color", tab: .appearance, keywords: ["hue", "tint", "color", "accent", "swatch"]),
         .init(title: "Tool colors", tab: .appearance, keywords: ["tool", "colors", "accent", "multicolor", "single", "monochrome", "style"]),
         .init(title: "Glass effect", tab: .appearance, keywords: ["glass", "blur", "frost", "clear", "solid", "material", "translucent"]),
@@ -134,6 +133,7 @@ struct SettingsSearchEntry: Identifiable {
         .init(title: "Default compression quality", tab: .advanced, keywords: ["compress", "quality", "default", "size"]),
         .init(title: "Strip metadata on export", tab: .advanced, keywords: ["metadata", "strip", "privacy", "author", "title", "dates"]),
         .init(title: "Activity logging level", tab: .advanced, keywords: ["log", "logging", "level", "activity", "debug", "warnings", "errors"]),
+        .init(title: "Reset order", tab: .advanced, keywords: ["reset", "order", "arrange", "rearrange", "default", "dashboard", "sections", "tools", "pin"]),
         .init(title: "Reset all settings", tab: .advanced, keywords: ["reset", "defaults", "restore", "clear", "all"]),
     ]
 
@@ -267,18 +267,8 @@ struct AppearanceSettingsTab: View {
     @AppStorage(LiquidGlass.tintKey) private var surfaceTint: Double = LiquidGlass.defaultTint
     @AppStorage(SettingsKeys.mergePreviewBackground) private var mergePreviewBackgroundRaw: String = MergePreviewBackgroundStyle.matchMain.rawValue
     @AppStorage(SettingsKeys.dashboardLayout) private var dashboardLayoutRaw: String = DashboardLayout.categories.rawValue
-    @AppStorage(SettingsKeys.dashboardCategoryOrder) private var dashboardCategoryOrderRaw: String = ""
-    @AppStorage(SettingsKeys.dashboardToolOrder) private var dashboardToolOrderRaw: String = ""
 
     private var dashboardLayout: DashboardLayout { DashboardLayout(rawValue: dashboardLayoutRaw) ?? .categories }
-
-    /// Whether the user has rearranged the dashboard away from its default section/tool order — gates
-    /// the Reset order button. Pins are tracked separately (``SettingsKeys/dashboardPinnedTools``) and
-    /// deliberately don't count here, so Reset order never removes a pin.
-    private var hasCustomDashboardOrder: Bool {
-        !ToolCategoryOrder.isDefault(ToolCategoryOrder.resolve(dashboardCategoryOrderRaw))
-            || !ToolOrder.isDefault(dashboardToolOrderRaw)
-    }
     private var appearanceMode: AppearanceMode { AppearanceMode(rawValue: appearanceModeRaw) ?? .system }
     private var glassLevel: GlassLevel { GlassLevel(rawValue: glassLevelRaw) ?? LiquidGlass.defaultLevel }
     private var selectedHue: LiquidGlassHue { LiquidGlassHue(rawValue: selectedHueRaw) ?? LiquidGlass.defaultHue }
@@ -314,17 +304,6 @@ struct AppearanceSettingsTab: View {
                 Text("Dashboard layout")
             } footer: {
                 Text(dashboardLayout.detail)
-            }
-
-            Section {
-                Button("Reset order") { resetDashboardOrder() }
-                    .disabled(!hasCustomDashboardOrder)
-            } header: {
-                Text("Dashboard order")
-            } footer: {
-                Text(hasCustomDashboardOrder
-                     ? "Restores the default order of the dashboard sections and the tools within them. Pinned tools aren’t affected."
-                     : "Drag a section header or a tile on the dashboard to rearrange it. Reset order restores the default arrangement; pinned tools aren’t affected.")
             }
 
             Section("Accent color") {
@@ -431,13 +410,6 @@ struct AppearanceSettingsTab: View {
         .onChange(of: appearanceModeRaw) { _, _ in
             AppAppearance.applyPersisted()
         }
-    }
-
-    /// Clear the custom section and within-section tool order, restoring the dashboard's default
-    /// arrangement. Pins are intentionally left in place.
-    private func resetDashboardOrder() {
-        dashboardCategoryOrderRaw = ""
-        dashboardToolOrderRaw = ""
     }
 }
 
@@ -556,6 +528,18 @@ struct AdvancedSettingsTab: View {
     private var stripMetadata: Bool = false
     @AppStorage(ActivityLog.minimumLevelDefaultsKey)
     private var logLevelRaw: String = ActivityLog.defaultMinimumLevel.rawValue
+    @AppStorage(SettingsKeys.dashboardCategoryOrder)
+    private var dashboardCategoryOrderRaw: String = ""
+    @AppStorage(SettingsKeys.dashboardToolOrder)
+    private var dashboardToolOrderRaw: String = ""
+
+    /// Whether the user has rearranged the dashboard away from its default section/tool order — gates
+    /// the Reset order button. Pins are tracked separately (``SettingsKeys/dashboardPinnedTools``) and
+    /// deliberately don't count here, so Reset order never removes a pin.
+    private var hasCustomDashboardOrder: Bool {
+        !ToolCategoryOrder.isDefault(ToolCategoryOrder.resolve(dashboardCategoryOrderRaw))
+            || !ToolOrder.isDefault(dashboardToolOrderRaw)
+    }
 
     /// Coarser-to-finer thresholds shown in the logging picker, each paired with the `LogLevel` whose
     /// raw value is persisted. `.debug` logs everything; `.error` keeps only failures.
@@ -632,6 +616,17 @@ struct AdvancedSettingsTab: View {
             }
 
             Section {
+                Button("Reset order") { resetDashboardOrder() }
+                    .disabled(!hasCustomDashboardOrder)
+            } header: {
+                Text("Dashboard order")
+            } footer: {
+                Text(hasCustomDashboardOrder
+                     ? "Restores the default order of the dashboard sections and the tools within them. Rearrange them by dragging a section header or a tile on the dashboard; pinned tools aren’t affected."
+                     : "Drag a section header or a tile on the dashboard to rearrange it. Reset order restores the default arrangement; pinned tools aren’t affected.")
+            }
+
+            Section {
                 Button("Reset all settings", role: .destructive) {
                     resetAllSettings()
                 }
@@ -656,6 +651,13 @@ struct AdvancedSettingsTab: View {
         .onChange(of: logLevelRaw) { _, newValue in
             ActivityLog.shared.minimumLevel = LogLevel(rawValue: newValue) ?? ActivityLog.defaultMinimumLevel
         }
+    }
+
+    /// Clear the custom section and within-section tool order, restoring the dashboard's default
+    /// arrangement. Pins are intentionally left in place.
+    private func resetDashboardOrder() {
+        dashboardCategoryOrderRaw = ""
+        dashboardToolOrderRaw = ""
     }
 
     private func resetAllSettings() {

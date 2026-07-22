@@ -24,7 +24,15 @@ struct DeletePagesToolView: View {
 
     private var canRunDelete: Bool {
         guard inputURL != nil else { return false }
-        return !rangeText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        guard !rangeText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return false }
+        // If the range resolves and would remove every page, keep Run disabled — the inline note already
+        // explains why, and it matches the export's cannotRemoveEveryPage guard (which stays the backstop
+        // for an invalid range that only errors at parse time).
+        if case .pages(let indices) = PageRangeField.evaluate(rangeText, pageCount: pageSpecs.count, preserveOrder: false),
+           pageSpecs.count > 0, indices.count >= pageSpecs.count {
+            return false
+        }
+        return true
     }
 
     var body: some View {
@@ -43,6 +51,7 @@ struct DeletePagesToolView: View {
                 selectedPages: VisualPageSelection.pages(from: rangeText, pageCount: pageSpecs.count),
                 onTogglePage: togglePage,
                 selectionPrompt: "Click pages to mark them for removal, or type them on the left.",
+                dimsUnselected: false,
                 render: { spec in
                     guard let url = inputURL else { return nil }
                     return (try? await PDFPageThumbnailLoader.loadPage(from: url, pageIndex: spec.id - 1))?.image

@@ -50,4 +50,17 @@ import Foundation
             return
         }
     }
+
+    @Test func reversedRangeCountMatchesEachToolsExport() {
+        // Delete collapses "5-3" to the unique sorted set (3 pages remaining-math); Extract keeps the
+        // descending order (3 pages, 5→4→3). Both counts equal what their exports would produce.
+        #expect(PageRangeField.evaluate("5-3", pageCount: 10, preserveOrder: false) == .pages([2, 3, 4]))
+        #expect(PageRangeField.evaluate("5-3", pageCount: 10, preserveOrder: true) == .pages([4, 3, 2]))
+    }
+
+    @Test func trailingCommaParsesToTheLeadingPage() {
+        // Only a trailing hyphen is treated as mid-type; a trailing comma is a complete list with an
+        // empty tail group the parser skips, so it resolves normally (documented behaviour).
+        #expect(PageRangeField.evaluate("1,", pageCount: 10, preserveOrder: false) == .pages([0]))
+    }
 }

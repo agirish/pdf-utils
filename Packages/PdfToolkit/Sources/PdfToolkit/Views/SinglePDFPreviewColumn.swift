@@ -29,6 +29,12 @@ struct SinglePDFPreviewColumn: View {
     var onTogglePage: ((Int) -> Void)? = nil
     /// Optional one-line hint shown under the subtitle while selecting, explaining what a click does.
     var selectionPrompt: String? = nil
+    /// Whether unselected pages dim. On by default (Extract/Split/Rotate, where "selected = kept/acted
+    /// on"), so the chosen set reads at a glance. Delete turns it OFF: there "selected = marked for
+    /// removal," so dimming the *unselected* pages made a freshly opened document — nothing marked yet —
+    /// look entirely disabled. With it off, unmarked pages stay at full opacity and the accent ring +
+    /// badge alone distinguishes the marked ones.
+    var dimsUnselected: Bool = true
 
     /// Invoked with a cell's 1-based display number to *remove* that page from the preview (Merge's
     /// inline page-drop, Reorder's per-page drop). When non-nil, each thumbnail gains a small trash
@@ -347,8 +353,9 @@ struct SinglePDFPreviewColumn: View {
                 .clipShape(Capsule())
                 .padding(6)
         }
-        // Selected pages stay opaque; unselected dim slightly so the chosen set reads at a glance.
-        .opacity(!selectable || isSelected ? 1 : 0.72)
+        // Selected pages stay opaque; unselected dim slightly so the chosen set reads at a glance —
+        // unless the caller opted out (Delete, where dimming the unmarked pages read as "disabled").
+        .opacity(!selectable || isSelected || !dimsUnselected ? 1 : 0.72)
     }
 
     /// Top-right trash for a droppable thumbnail (Merge's inline page-drop). Carries its own dark disc

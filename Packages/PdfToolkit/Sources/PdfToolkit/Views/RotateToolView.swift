@@ -37,7 +37,7 @@ struct RotateToolView: View {
             tool: .rotate,
             singleActionTitle: "Rotate & save…",
             busy: $busy,
-            makeOperation: { .rotateConfig(quarterTurns: quarterTurns) },
+            makeOperation: { rotateOperation() },
             fallbackSuffix: "rotated",
             previewSubtitle: "Thumbnails show every page; only the pages you choose below are rotated in the new PDF.",
             selectedPages: rangeSelection,
@@ -72,6 +72,19 @@ struct RotateToolView: View {
             }
         }
         .toolErrorAlert($alertMessage)
+    }
+
+    /// The batch operation, and the Run gate: a single file with "Page range" selected but an empty
+    /// field returns nil (button disabled) so the run can't fail with `pageRangeRequired` only after the
+    /// click — Delete gates the same way. Every other configuration (all-pages, a non-empty range, or a
+    /// multi-file run where the range doesn't apply) is always runnable.
+    private func rotateOperation() -> BatchOperation? {
+        if runner.items.count == 1,
+           scope == .range,
+           rangeText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return nil
+        }
+        return .rotateConfig(quarterTurns: quarterTurns)
     }
 
     // MARK: - Config (count-aware: page range for one file, all-pages note for many)
@@ -114,7 +127,15 @@ struct RotateToolView: View {
     @ViewBuilder
     private var rangeNote: some View {
         switch PageRangeField.evaluate(rangeText, pageCount: pageCount, preserveOrder: false) {
-        case .empty, .incomplete:
+        case .empty:
+            // Range scope with an empty field can't run — say so (and the Run button is disabled) rather
+            // than letting the click fail with pageRangeRequired.
+            RangeFieldNote(
+                text: "Choose which pages to rotate — type them or click pages at right.",
+                systemImage: "hand.point.up.left",
+                accent: accent
+            )
+        case .incomplete:
             EmptyView()
         case .pages(let indices):
             RangeFieldNote(

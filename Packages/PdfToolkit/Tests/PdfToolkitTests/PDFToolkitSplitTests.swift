@@ -164,4 +164,25 @@ import PDFKit
         #expect(error?.kind == "pageOutOfBounds")
         #expect(!FileManager.default.fileExists(atPath: dir.path("src-01.pdf")))
     }
+
+    @Test func splitDropsSourceOutlineFromEveryPart() throws {
+        // Each part is a DIFFERENT subset of the source's pages, so split deliberately drops the source
+        // outline rather than reattaching it verbatim — a verbatim reattach would keep the source page
+        // indices and misdirect every part's bookmarks. Given a bookmarked source, every produced part
+        // must carry NO outline. This guard fails loudly if a naive reattach is ever added.
+        let dir = FixtureDir()
+        let src = dir.url("src.pdf")
+        try PDFFixtures.writePDF(pageCount: 4, bookmarks: [("A", 0), ("B", 1), ("C", 3)], to: src)
+
+        let outputs = try PDFToolkit.split(
+            inputURL: src, into: dir.url, baseName: "part",
+            segments: [[0, 1], [2, 3]]
+        )
+
+        #expect(outputs.count == 2)
+        for url in outputs {
+            #expect(try #require(PDFDocument(url: url)).outlineRoot == nil)
+            #expect(try PDFFixtures.outlineBookmarks(at: url).isEmpty)
+        }
+    }
 }

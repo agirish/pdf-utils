@@ -192,4 +192,23 @@ import PDFKit
             try PDFToolkit.merge(inputs: [], outputURL: dir.url("out.pdf"))
         }?.kind == "noInputFiles")
     }
+
+    // MARK: - Outline handling
+
+    @Test func mergeDropsSourceOutlineRatherThanMisdirectIt() throws {
+        // Merge concatenates pages from possibly many documents at shifting page offsets, so it
+        // deliberately does NOT carry any source outline across: a naive `outlineRoot =
+        // source.outlineRoot` would leave the merged file's bookmarks pointing at the wrong pages (or
+        // off the end). Given a bookmarked source, the merged output must therefore carry NO outline.
+        // This guard fails loudly the moment someone adds a well-meaning-but-wrong reattach.
+        let dir = FixtureDir()
+        let a = dir.url("a.pdf"), b = dir.url("b.pdf"), out = dir.url("out.pdf")
+        try PDFFixtures.writePDF(pageCount: 3, bookmarks: [("A", 0), ("B", 2)], to: a)
+        try PDFFixtures.writePDF(pageCount: 2, to: b)
+
+        try PDFToolkit.merge(inputURLs: [a, b], outputURL: out)
+
+        #expect(try #require(PDFDocument(url: out)).outlineRoot == nil)
+        #expect(try PDFFixtures.outlineBookmarks(at: out).isEmpty)
+    }
 }

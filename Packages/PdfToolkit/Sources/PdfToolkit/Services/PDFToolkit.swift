@@ -437,7 +437,10 @@ public enum PDFToolkit {
         // Bounds-check FIRST: otherwise an out-of-range index inflates `unique.count` and trips the
         // every-page guard, reporting `cannotRemoveEveryPage` for a request whose real problem is a
         // bad page number (e.g. [0,1,5] on a 3-page doc). Validate each index, then compare counts.
-        for index in unique {
+        // Iterate in SORTED order rather than raw `Set` order (which is non-deterministic across runs):
+        // when several indices are out of range this reports the smallest offending page every time, so
+        // the thrown `pageOutOfBounds(n)` is stable instead of a coin-flip among the bad indices.
+        for index in unique.sorted() {
             guard index >= 0, index < doc.pageCount else {
                 throw PDFOperationError.pageOutOfBounds(index + 1)
             }

@@ -1,4 +1,5 @@
 import Testing
+import CoreGraphics
 import Foundation
 import PDFKit
 @testable import PdfToolkit
@@ -206,6 +207,26 @@ import PDFKit
             Issue.record("expected pageOutOfBounds(6), got \(String(describing: error))")
         }
     }
+
+    @Test func deleteReportsAStableSmallestBadPageForMultipleOutOfRangeIndices() throws {
+        // With SEVERAL out-of-range indices the reported page must be the SAME every run. The engine
+        // de-duplicates the indices into a Set (whose iteration order is non-deterministic) and then
+        // walks them in SORTED order, so the smallest offending page — here 5, reported 1-based as 6 —
+        // is thrown deterministically rather than whichever index the Set happened to yield first.
+        // Repeated to make a non-deterministic reversion (iterating the raw Set) conspicuous.
+        let dir = FixtureDir()
+        let src = dir.url("src.pdf")
+        try PDFFixtures.writePDF(pageCount: 3, to: src)
+
+        for _ in 0..<16 {
+            let error = #expect(throws: PDFOperationError.self) {
+                try PDFToolkit.deletePages(inputURL: src, outputURL: dir.url("out.pdf"), pageIndices: [9, 7, 5])
+            }
+            if case .pageOutOfBounds(let n)? = error { #expect(n == 6) } else {
+                Issue.record("expected pageOutOfBounds(6), got \(String(describing: error))")
+            }
+        }
+    }
 }
 
 /// Bookmarks live on the document catalog, so every operation that rebuilds a document from copied
@@ -249,6 +270,77 @@ import PDFKit
         let bookmarks = try PDFFixtures.outlineBookmarks(at: out)
         #expect(bookmarks.map(\.label) == ["First", "Last"])
         #expect(bookmarks.map(\.pageIndex) == [2, 0])
+    }
+
+    @Test func reorderFollowsEveryBookmarkThroughAFullPermutation() throws {
+        // A three-page, three-bookmark source under the permutation [1, 2, 0]: output p0 = source p1,
+        // p1 = source p2, p2 = source p0. So One→out2, Two→out0, Three→out1 — every bookmark travels
+        // with its OWN page, none left at its old index. (The two-bookmark reversal above pins the
+        // pair case; this pins a full 3-cycle where each page moves.) The outline keeps its source
+        // order (One, Two, Three); only each destination's page index changes.
+        let dir = FixtureDir()
+        let src = dir.url("src.pdf"), out = dir.url("out.pdf")
+        try PDFFixtures.writePDF(pageCount: 3, bookmarks: [("One", 0), ("Two", 1), ("Three", 2)], to: src)
+
+        try PDFToolkit.reorder(inputURL: src, outputURL: out, order: [1, 2, 0])
+
+        let bookmarks = try PDFFixtures.outlineBookmarks(at: out)
+        #expect(bookmarks.map(\.label) == ["One", "Two", "Three"])
+        #expect(bookmarks.map(\.pageIndex) == [2, 0, 1])
+    }
+
+    @Test func extractMapsABookmarkToTheFirstOccurrenceOfADuplicatedPage() throws {
+        // Extract [0, 0, 1] copies source page 0 twice, then page 1, so the output is [p0, p0, p1].
+        // A bookmark targeting source page 0 must resolve to the FIRST copy (output index 0), and the
+        // page-1 bookmark to output index 2 — the "first occurrence wins" rule the remap map encodes.
+        let dir = FixtureDir()
+        let src = dir.url("src.pdf"), out = dir.url("out.pdf")
+        try PDFFixtures.writePDF(pageCount: 2, bookmarks: [("A", 0), ("B", 1)], to: src)
+
+        try PDFToolkit.extract(inputURL: src, outputURL: out, pageIndices: [0, 0, 1])
+
+        let texts = try PDFFixtures.pageTexts(at: out)
+        #expect(texts.count == 3)
+        #expect(texts[0].contains(PDFFixtures.marker(1)))
+        #expect(texts[1].contains(PDFFixtures.marker(1)))
+        #expect(texts[2].contains(PDFFixtures.marker(2)))
+
+        let bookmarks = try PDFFixtures.outlineBookmarks(at: out)
+        #expect(bookmarks.map(\.label) == ["A", "B"])
+        #expect(bookmarks.map(\.pageIndex) == [0, 2])
+    }
+
+    @Test func extractPromotesAKeptChildWhenItsParentPageIsDropped() throws {
+        // A NESTED outline: Parent → p0 with a nested Child → p2. Extract [2] keeps p2 (output index 0)
+        // and drops p0, so the Parent node — whose target page is gone — must be dropped while its
+        // still-retained Child is PROMOTED to the top level, pointing at the kept page's new slot.
+        // `writePDF(pageCount:bookmarks:)` only builds a flat outline, so construct the nesting here
+        // (writing the pages to a distinct base first, to avoid the self-overwrite hazard the flat
+        // helper documents).
+        let dir = FixtureDir()
+        let base = dir.url("base.pdf"), src = dir.url("src.pdf"), out = dir.url("out.pdf")
+        try PDFFixtures.writePDF(pageCount: 3, to: base)
+        let doc = try #require(PDFDocument(url: base))
+        let root = PDFOutline()
+        let parent = PDFOutline()
+        parent.label = "Parent"
+        parent.destination = PDFDestination(page: try #require(doc.page(at: 0)), at: CGPoint(x: 0, y: PDFFixtures.letter.height))
+        let child = PDFOutline()
+        child.label = "Child"
+        child.destination = PDFDestination(page: try #require(doc.page(at: 2)), at: CGPoint(x: 0, y: PDFFixtures.letter.height))
+        parent.insertChild(child, at: 0)
+        root.insertChild(parent, at: 0)
+        doc.outlineRoot = root
+        #expect(doc.write(to: src))
+
+        try PDFToolkit.extract(inputURL: src, outputURL: out, pageIndices: [2])
+
+        // Only marker page 3 survives, at output index 0.
+        #expect(try PDFFixtures.pageTexts(at: out) == [PDFFixtures.marker(3)])
+        // Parent dropped; Child promoted to the top level, resolving to the kept page (output 0).
+        let bookmarks = try PDFFixtures.outlineBookmarks(at: out)
+        #expect(bookmarks.map(\.label) == ["Child"])
+        #expect(bookmarks.map(\.pageIndex) == [0])
     }
 
     @Test func removePasswordKeepsBookmarksPointingAtTheRightPages() throws {

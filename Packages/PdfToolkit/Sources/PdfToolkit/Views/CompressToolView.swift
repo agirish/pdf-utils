@@ -274,10 +274,22 @@ struct CompressToolView: View {
 
             if busy && progressTotal > 0 {
                 Divider()
-                ProgressView(value: Double(progressPage), total: Double(progressTotal))
-                    .tint(accent)
+                // Quality mode is a single pass over the pages, so its per-page bar is honest. The
+                // target sweep re-runs the WHOLE document at successively lower quality, so a
+                // determinate bar fills on the first pass and then sits at 100% through the remaining
+                // passes — falsely "done". Show an indeterminate "Optimizing…" for that mode instead.
+                if mode == .targetSize {
+                    ProgressView()
+                        .progressViewStyle(.linear)
+                        .tint(accent)
+                } else {
+                    ProgressView(value: Double(progressPage), total: Double(progressTotal))
+                        .tint(accent)
+                }
                 HStack {
-                    Text("Compressing… page \(progressPage) of \(progressTotal)")
+                    Text(mode == .targetSize
+                         ? "Optimizing…"
+                         : "Compressing… page \(progressPage) of \(progressTotal)")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                     Spacer(minLength: 8)

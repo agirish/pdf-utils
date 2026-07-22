@@ -69,15 +69,44 @@ extension PDFToolkit {
 
     /// Carries the source's outline (bookmarks) onto a rebuilt `output` that copied EVERY page in the
     /// SAME order (crop / auto-crop). The bookmarks live on the catalog, so the page-copy rebuild
-    /// drops them unless reattached; because the page order is unchanged, PDFKit remaps each
-    /// destination onto the matching copy on write — the same pattern the metadata clean proves, with
-    /// no chance of a dangling or misdirected bookmark. Only valid when pages are 1:1 and in order;
-    /// subset/reorder paths must rebuild destinations instead (see `PDFToolkit.remapOutline`).
+    /// drops them unless reattached. Every page is 1:1 and in order, so each bookmark resolves to the
+    /// right page — but cropping SHRINKS the page box, and a stored destination point (often the
+    /// page's top edge) can then fall OUTSIDE the trimmed box, scrolling a bookmark to a blank margin
+    /// in viewers that don't clamp. Rebuild each destination on the matching output page with its
+    /// point clamped into that page's new crop box, so the bookmark lands on a visible spot. A node
+    /// with no explicit destination (an action, a nil page) keeps its label + children but drops the
+    /// destination. Subset/reorder paths remap differently (see `PDFToolkit.remapOutline`).
     ///
     /// An interactive `/AcroForm` is not restored by this copy-and-rebuild — out of scope here.
     static func reattachOutline(from source: PDFDocument, to output: PDFDocument) {
-        if let outline = source.outlineRoot {
-            output.outlineRoot = outline
+        guard let sourceRoot = source.outlineRoot else { return }
+
+        func rebuild(_ node: PDFOutline, into parent: PDFOutline) {
+            for i in 0..<node.numberOfChildren {
+                guard let child = node.child(at: i) else { continue }
+                let kept = PDFOutline()
+                kept.label = child.label
+                if let dest = child.destination, let destPage = dest.page {
+                    let index = source.index(for: destPage)
+                    if index != NSNotFound, let outPage = output.page(at: index) {
+                        let box = outPage.bounds(for: .cropBox)
+                        let p = dest.point
+                        let clamped = CGPoint(
+                            x: min(max(p.x, box.minX), box.maxX),
+                            y: min(max(p.y, box.minY), box.maxY)
+                        )
+                        kept.destination = PDFDestination(page: outPage, at: clamped)
+                    }
+                }
+                parent.insertChild(kept, at: parent.numberOfChildren)
+                rebuild(child, into: kept)
+            }
+        }
+
+        let newRoot = PDFOutline()
+        rebuild(sourceRoot, into: newRoot)
+        if newRoot.numberOfChildren > 0 {
+            output.outlineRoot = newRoot
         }
     }
 

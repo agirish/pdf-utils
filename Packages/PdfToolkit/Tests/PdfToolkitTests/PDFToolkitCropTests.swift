@@ -352,4 +352,31 @@ import Testing
         #expect(bookmarks.map(\.label) == ["Intro", "Appendix"])
         #expect(bookmarks.map(\.pageIndex) == [0, 2])
     }
+
+    @Test func cropClampsBookmarkPointsIntoTheTrimmedBox() throws {
+        // The fixture points each bookmark at the page's top-left corner (0, height) — OUTSIDE the box
+        // once cropping trims it. Reattach must clamp the destination point back inside so the bookmark
+        // scrolls to a visible spot, not a blank margin. (The destination PAGE is always correct.)
+        let dir = FixtureDir()
+        let src = dir.url("src.pdf"), out = dir.url("out.pdf")
+        try PDFFixtures.writePDF(pageCount: 2, bookmarks: [("Intro", 0)], to: src)
+
+        try PDFToolkit.crop(inputURL: src, outputURL: out,
+                            insets: CropInsets(top: 10, left: 20, bottom: 30, right: 40))
+
+        // Still resolves to page 0…
+        #expect(try PDFFixtures.outlineBookmarks(at: out).map(\.pageIndex) == [0])
+
+        // …and its point now sits inside the trimmed crop box (origin 20,30 — was 0,792, outside).
+        let doc = try #require(PDFDocument(url: out))
+        let dest = try #require(doc.outlineRoot?.child(at: 0)?.destination)
+        let box = try cropBox(at: out, page: 0)
+        let eps: CGFloat = 0.5
+        #expect(dest.point.x >= box.minX - eps && dest.point.x <= box.maxX + eps,
+                "x \(dest.point.x) outside [\(box.minX), \(box.maxX)]")
+        #expect(dest.point.y >= box.minY - eps && dest.point.y <= box.maxY + eps,
+                "y \(dest.point.y) outside [\(box.minY), \(box.maxY)]")
+        // Prove it actually moved: the original top-edge point (y = 792) was clamped down.
+        #expect(dest.point.y < 792)
+    }
 }

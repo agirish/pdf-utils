@@ -65,6 +65,21 @@ private enum CompressCacheKey: Equatable {
     case target(Int)    // target byte budget
 }
 
+/// A cheap signature of the source file's content, so a Save can tell whether the file was edited on
+/// disk (same path) since its bytes were cached — in which case the cached bytes are stale and Save
+/// must recompress the current content, as it always did before caching existed.
+private struct FileFingerprint: Equatable {
+    let size: Int
+    let modified: Date
+
+    static func of(_ url: URL) -> FileFingerprint? {
+        guard let values = try? url.resourceValues(forKeys: [.fileSizeKey, .contentModificationDateKey]),
+              let size = values.fileSize, let modified = values.contentModificationDate
+        else { return nil }
+        return FileFingerprint(size: size, modified: modified)
+    }
+}
+
 /// The payoff of a finished compression run: the real on-disk sizes before and after, plus where the
 /// output landed so it can be revealed in Finder.
 ///
@@ -127,8 +142,9 @@ struct CompressToolView: View {
     /// The exact compressed bytes the current setting's estimate already produced, so a Save at that
     /// same setting reuses them instead of running the whole compression (or target sweep) a second
     /// time. Pre-strip — `PDFExportCoordinator.route` applies any metadata strip — so it's independent
-    /// of the strip setting; dropped when the selected file changes.
-    @State private var reusableOutput: (path: String, key: CompressCacheKey, data: Data)?
+    /// of the strip setting; dropped when the selected file changes. The `fingerprint` guards against
+    /// the file being edited on disk between the estimate and the Save.
+    @State private var reusableOutput: (path: String, key: CompressCacheKey, fingerprint: FileFingerprint, data: Data)?
 
     @StateObject private var runner = BatchRunner()
 
@@ -555,8 +571,8 @@ struct CompressToolView: View {
             for key in toCompute {
                 qualityEstimates[key] = sizes[key].map(SizeEstimate.ready) ?? .unavailable
             }
-            if let selectedData {
-                reusableOutput = (path, .quality(selectedKey), selectedData)
+            if let selectedData, let fingerprint = FileFingerprint.of(url) {
+                reusableOutput = (path, .quality(selectedKey), fingerprint, selectedData)
             }
         case .targetSize:
             let key = targetBytes
@@ -569,8 +585,8 @@ struct CompressToolView: View {
             targetEstimates[key] = estimate
             // Keep the swept-to-target bytes so a Save at this target reuses them instead of running
             // the whole progressive sweep again.
-            if let data {
-                reusableOutput = (path, .target(key), data)
+            if let data, let fingerprint = FileFingerprint.of(url) {
+                reusableOutput = (path, .target(key), fingerprint, data)
             }
         }
     }
@@ -665,14 +681,16 @@ struct CompressToolView: View {
             ?? (try? fileURL.resourceValues(forKeys: [.fileSizeKey]).fileSize).map(Int64.init)
 
         // The badge estimate for the active setting already ran this exact compression; if its bytes
-        // are still cached for this file and config, reuse them rather than compressing again (the
-        // target sweep especially is not cheap to repeat). The cached bytes are pre-strip, exactly
-        // what the compress calls return, so `route` finalizes them identically.
+        // are still cached for this file and config — and the file on disk hasn't changed since —
+        // reuse them rather than compressing again (the target sweep especially is not cheap to
+        // repeat). The cached bytes are pre-strip, exactly what the compress calls return, so `route`
+        // finalizes them identically.
         let runKey: CompressCacheKey = selectedMode == .quality ? .quality(qKey(qualityValue)) : .target(targetByteBudget)
 
         do {
             let data: Data
-            if let cached = reusableOutput, cached.path == fileURL.path, cached.key == runKey {
+            if let cached = reusableOutput, cached.path == fileURL.path, cached.key == runKey,
+               let fingerprint = FileFingerprint.of(fileURL), fingerprint == cached.fingerprint {
                 data = cached.data
             } else {
                 data = try await PDFBackgroundWork.run {

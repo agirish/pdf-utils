@@ -4,7 +4,7 @@ import CoreGraphics
 
 /// The pure geometry behind drawing and validating redaction rectangles: normalizing a drag into a
 /// positive-sized rect, rejecting rectangles too small to be a deliberate mark, and clipping a mark
-/// to the page's media box (dropping ones that barely graze it).
+/// to the page's crop box (dropping ones that barely graze it).
 @Suite struct RedactionMarkGeometryTests {
 
     // MARK: normalizedDragRect
@@ -40,24 +40,24 @@ import CoreGraphics
         #expect(!RedactionMarkGeometry.isMeaningful(.zero))
     }
 
-    // MARK: clipToMediaBox
+    // MARK: clip (intersect with the crop box, drop slivers)
 
-    private let media = CGRect(x: 0, y: 0, width: 100, height: 100)
+    private let box = CGRect(x: 0, y: 0, width: 100, height: 100)
 
     @Test func clipReturnsAFullyContainedRectUnchanged() {
         let rect = CGRect(x: 10, y: 10, width: 20, height: 20)
-        #expect(RedactionMarkGeometry.clipToMediaBox(rect, mediaBox: media) == rect)
+        #expect(RedactionMarkGeometry.clip(rect, to: box) == rect)
     }
 
     @Test func clipTrimsARectThatOverhangsTheEdge() {
         // A mark dragged past the page edge is clipped to the visible intersection.
         let rect = CGRect(x: 90, y: 90, width: 40, height: 40)
-        #expect(RedactionMarkGeometry.clipToMediaBox(rect, mediaBox: media) == CGRect(x: 90, y: 90, width: 10, height: 10))
+        #expect(RedactionMarkGeometry.clip(rect, to: box) == CGRect(x: 90, y: 90, width: 10, height: 10))
     }
 
     @Test func clipDropsARectEntirelyOutsideThePage() {
         let rect = CGRect(x: 200, y: 200, width: 10, height: 10)
-        #expect(RedactionMarkGeometry.clipToMediaBox(rect, mediaBox: media) == nil)
+        #expect(RedactionMarkGeometry.clip(rect, to: box) == nil)
     }
 
     @Test func clipDropsASliverThinnerThanHalfTheMinimumSide() {
@@ -66,10 +66,10 @@ import CoreGraphics
         let half = RedactionMarkGeometry.minimumSidePt / 2
         // Intersection width = 1pt (< half=2) → dropped.
         let grazing = CGRect(x: 99, y: 10, width: 20, height: 20)
-        #expect(RedactionMarkGeometry.clipToMediaBox(grazing, mediaBox: media) == nil)
+        #expect(RedactionMarkGeometry.clip(grazing, to: box) == nil)
         // Intersection width = exactly half → kept.
         let onBoundary = CGRect(x: 100 - half, y: 10, width: 20, height: 20)
-        let clipped = RedactionMarkGeometry.clipToMediaBox(onBoundary, mediaBox: media)
+        let clipped = RedactionMarkGeometry.clip(onBoundary, to: box)
         #expect(clipped == CGRect(x: 100 - half, y: 10, width: half, height: 20))
     }
 
@@ -77,18 +77,18 @@ import CoreGraphics
 
     @Test func clampLeavesAContainedMarkWhereItIs() {
         let rect = CGRect(x: 10, y: 10, width: 20, height: 20)
-        #expect(RedactionMarkGeometry.clamped(rect, in: media) == rect)
+        #expect(RedactionMarkGeometry.clamped(rect, in: box) == rect)
     }
 
     @Test func clampSlidesAnOverhangingMarkBackInsideWithoutResizing() {
         // Dragged partly past the right/top edge: pushed back so it sits flush, same size.
         let rect = CGRect(x: 95, y: 92, width: 20, height: 20)
-        #expect(RedactionMarkGeometry.clamped(rect, in: media) == CGRect(x: 80, y: 80, width: 20, height: 20))
+        #expect(RedactionMarkGeometry.clamped(rect, in: box) == CGRect(x: 80, y: 80, width: 20, height: 20))
     }
 
     @Test func clampShrinksAMarkLargerThanThePageThenPinsIt() {
         let rect = CGRect(x: -10, y: -10, width: 200, height: 50)
-        let out = RedactionMarkGeometry.clamped(rect, in: media)
+        let out = RedactionMarkGeometry.clamped(rect, in: box)
         #expect(out == CGRect(x: 0, y: 0, width: 100, height: 50))
     }
 

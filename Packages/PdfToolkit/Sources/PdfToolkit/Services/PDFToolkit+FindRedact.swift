@@ -212,7 +212,7 @@ extension PDFToolkit {
             // fully covered — a redaction must never leave a sliver of the value peeking. Clipped to
             // the crop box just like a hand-drawn mark so it can't reach into a cropped-out margin.
             let padded = bounds.insetBy(dx: -1.5, dy: -1)
-            if let clipped = RedactionMarkGeometry.clipToMediaBox(padded, mediaBox: cropBox) {
+            if let clipped = RedactionMarkGeometry.clip(padded, to: cropBox) {
                 rects.append(clipped)
             }
         }

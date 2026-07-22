@@ -47,8 +47,12 @@ enum RedactionMarkGeometry {
         rect.width >= minimumSidePt && rect.height >= minimumSidePt
     }
 
-    static func clipToMediaBox(_ rect: CGRect, mediaBox: CGRect) -> CGRect? {
-        let i = rect.intersection(mediaBox)
+    /// Clips `rect` to `box`, returning the intersection — or `nil` if the surviving overlap is a
+    /// sliver thinner than `minimumSidePt / 2` on either axis (so a mark that only grazes the box is
+    /// dropped rather than kept as a hairline). Every caller passes the page's *crop* box — the
+    /// region the user can see and the same box the export fills against — not the media box.
+    static func clip(_ rect: CGRect, to box: CGRect) -> CGRect? {
+        let i = rect.intersection(box)
         guard i.width >= minimumSidePt / 2, i.height >= minimumSidePt / 2 else { return nil }
         return i
     }

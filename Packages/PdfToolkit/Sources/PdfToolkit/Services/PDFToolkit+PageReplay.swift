@@ -74,7 +74,7 @@ extension PDFToolkit {
     static func emitDisplayedPage(
         _ dp: DisplayedPage,
         into ctx: CGContext,
-        overlay: (CGContext, DisplayedPage) -> Void = { _, _ in }
+        overlay: (CGContext, DisplayedPage) -> Void
     ) {
         beginDisplayedPage(ctx, box: dp.box)
         ctx.saveGState()

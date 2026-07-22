@@ -923,7 +923,7 @@ public enum PDFToolkit {
 
     /// Keep redaction passes from leaving thin gaps between adjacent user rectangles.
     private static func mergeOverlappingRedactions(_ rects: [CGRect], pageBox: CGRect) -> [CGRect] {
-        var list: [CGRect] = rects.compactMap { RedactionMarkGeometry.clipToMediaBox($0, mediaBox: pageBox) }
+        var list: [CGRect] = rects.compactMap { RedactionMarkGeometry.clip($0, to: pageBox) }
         guard !list.isEmpty else { return [] }
 
         var merged = true

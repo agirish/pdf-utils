@@ -61,7 +61,7 @@ struct DashboardView: View {
 
     /// The spring the reorder/pinning reflow settles with — a light overshoot so tiles and sections
     /// snap into place rather than sliding linearly. Shared by the drag drops and the accessibility
-    /// moves so every rearrangement lands the same way. (Reset order itself now lives in Settings.)
+    /// moves so every rearrangement lands the same way. (Reset dashboard order itself now lives in Settings.)
     /// Collapses to an instant, motionless change when the user has asked to reduce motion — the
     /// reflow still happens, just without the spring travel/overshoot.
     private var reorderSpring: Animation {

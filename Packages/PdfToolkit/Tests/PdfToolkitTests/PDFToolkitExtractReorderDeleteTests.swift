@@ -361,4 +361,55 @@ import PDFKit
         #expect(bookmarks.map(\.label) == ["Intro", "End"])
         #expect(bookmarks.map(\.pageIndex) == [0, 2])
     }
+
+    @Test func deleteDropsBookmarksForRemovedPagesAndFollowsTheSurvivors() throws {
+        // Source bookmarks A→p0, B→p1, C→p2. Deleting page 1 (B's page) must DROP B rather than
+        // silently retarget it to page 0 (the misdirection an untouched source outline produced),
+        // while A stays on page 0 and C follows its page to the new index 1.
+        let dir = FixtureDir()
+        let src = dir.url("src.pdf"), out = dir.url("out.pdf")
+        try PDFFixtures.writePDF(pageCount: 3, bookmarks: [("A", 0), ("B", 1), ("C", 2)], to: src)
+
+        try PDFToolkit.deletePages(inputURL: src, outputURL: out, pageIndices: [1])
+
+        // Sanity: the two survivors, in order.
+        let texts = try PDFFixtures.pageTexts(at: out)
+        #expect(texts[0].contains(PDFFixtures.marker(1)))
+        #expect(texts[1].contains(PDFFixtures.marker(3)))
+
+        let bookmarks = try PDFFixtures.outlineBookmarks(at: out)
+        #expect(bookmarks.map(\.label) == ["A", "C"])
+        #expect(bookmarks.map(\.pageIndex) == [0, 1])
+    }
+
+    @Test func deletePromotesAKeptChildWhenItsFolderPageIsDeleted() throws {
+        // A NESTED outline: Parent → p0 with a nested Child → p2. Deleting page 0 removes the Parent's
+        // target page, so the Parent node is dropped while its still-retained Child is PROMOTED to the
+        // top level, resolving to the kept page's new slot (p2 → output index 1). Mirrors the extract
+        // promotion test; `writePDF` only builds a flat outline, so construct the nesting here.
+        let dir = FixtureDir()
+        let base = dir.url("base.pdf"), src = dir.url("src.pdf"), out = dir.url("out.pdf")
+        try PDFFixtures.writePDF(pageCount: 3, to: base)
+        let doc = try #require(PDFDocument(url: base))
+        let root = PDFOutline()
+        let parent = PDFOutline()
+        parent.label = "Parent"
+        parent.destination = PDFDestination(page: try #require(doc.page(at: 0)), at: CGPoint(x: 0, y: PDFFixtures.letter.height))
+        let child = PDFOutline()
+        child.label = "Child"
+        child.destination = PDFDestination(page: try #require(doc.page(at: 2)), at: CGPoint(x: 0, y: PDFFixtures.letter.height))
+        parent.insertChild(child, at: 0)
+        root.insertChild(parent, at: 0)
+        doc.outlineRoot = root
+        #expect(doc.write(to: src))
+
+        try PDFToolkit.deletePages(inputURL: src, outputURL: out, pageIndices: [0])
+
+        // Pages 2 and 3 (markers) survive; page 1 gone.
+        #expect(try PDFFixtures.pageTexts(at: out) == [PDFFixtures.marker(2), PDFFixtures.marker(3)])
+        // Parent dropped; Child promoted to the top level, resolving to the kept page (output index 1).
+        let bookmarks = try PDFFixtures.outlineBookmarks(at: out)
+        #expect(bookmarks.map(\.label) == ["Child"])
+        #expect(bookmarks.map(\.pageIndex) == [1])
+    }
 }

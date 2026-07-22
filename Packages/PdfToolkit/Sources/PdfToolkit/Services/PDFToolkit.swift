@@ -449,6 +449,14 @@ public enum PDFToolkit {
             throw PDFOperationError.cannotRemoveEveryPage
         }
 
+        // Prune the outline BEFORE the pages go, while `doc.index(for:)` still returns the original
+        // indices `unique` is expressed in. Delete used to leave the source outline untouched, but a
+        // bookmark whose target page is removed does NOT vanish — PDFKit silently retargets it to
+        // page 0 (verified), misdirecting the reader to the wrong content. Extract/reorder avoid this
+        // by remapping (see `remapOutline`); delete now drops the orphaned bookmarks the same way,
+        // in place so the catalog (and any `/AcroForm`) survives the removal.
+        pruneOutlineForDeletion(in: doc, deleting: unique)
+
         for index in unique.sorted(by: >) {
             doc.removePage(at: index)
         }
@@ -457,6 +465,50 @@ public enum PDFToolkit {
             throw PDFOperationError.couldNotEncodeOutput
         }
         return data
+    }
+
+    /// Rewrites `doc`'s outline in place for a page deletion: every bookmark whose destination page
+    /// is in `deleted` is dropped, and its still-retained descendants are promoted to its parent, so
+    /// a kept child under a deleted-page folder survives (the same rule ``remapOutline`` applies for
+    /// a subset/reorder). Bookmarks to retained pages — and structural nodes with no destination —
+    /// are kept, pointing at the same page objects; once the pages are removed, PDFKit re-resolves
+    /// each destination's index on write, so a survivor lands on its page's new slot.
+    ///
+    /// Must run BEFORE the pages are removed, while `doc.index(for:)` still returns the original
+    /// indices `deleted` is expressed in. Destination points are copied through unchanged (not
+    /// clamped), matching ``remapOutline``.
+    private static func pruneOutlineForDeletion(in doc: PDFDocument, deleting deleted: Set<Int>) {
+        guard let sourceRoot = doc.outlineRoot else { return }
+
+        func rebuild(_ node: PDFOutline, into parent: PDFOutline) {
+            for i in 0..<node.numberOfChildren {
+                guard let child = node.child(at: i) else { continue }
+                var targetsDeletedPage = false
+                if let destPage = child.destination?.page {
+                    let index = doc.index(for: destPage)
+                    targetsDeletedPage = index != NSNotFound && deleted.contains(index)
+                }
+                if targetsDeletedPage {
+                    // Drop this node, but keep walking so descendants pointing at retained pages are
+                    // promoted rather than lost with it.
+                    rebuild(child, into: parent)
+                } else {
+                    let kept = PDFOutline()
+                    kept.label = child.label
+                    if let dest = child.destination, let destPage = dest.page {
+                        kept.destination = PDFDestination(page: destPage, at: dest.point)
+                    }
+                    parent.insertChild(kept, at: parent.numberOfChildren)
+                    rebuild(child, into: kept)
+                }
+            }
+        }
+
+        let newRoot = PDFOutline()
+        rebuild(sourceRoot, into: newRoot)
+        // Replace the original outline unconditionally — leaving it in place would keep the very
+        // misdirecting bookmarks this prune exists to remove. An empty result clears the outline.
+        doc.outlineRoot = newRoot.numberOfChildren > 0 ? newRoot : nil
     }
 
     /// Rotates selected pages by `quarterTurns` × 90° clockwise.

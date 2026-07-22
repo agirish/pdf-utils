@@ -758,6 +758,14 @@ struct RedactToolView: View {
                 }
             }
 
+            // A Cancel / file switch that lands in the tail window — after the scan's last per-page
+            // cancel check but before we fold the results into `marks` — must record nothing. Without
+            // this, a scan that finished in the background after the user left could append file A's
+            // regions (at A's coordinates) onto the just-reset marks of file B, so a later Redact &
+            // save would burn black boxes in the wrong places. Abort into the silent CancellationError
+            // catch below, exactly as OCR's runOCR guards the same window.
+            try Task.checkCancellation()
+
             let added = appendAutoMarks(result.marks())
             lastFindSummary = FindSummary(
                 target: query.describedTarget,

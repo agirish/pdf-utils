@@ -78,6 +78,59 @@ import Testing
         #expect(!WatermarkToolView.customRangeIsRunnable(scope: .custom, customRange: "1-3", pageCount: 0))
     }
 
+    // MARK: - Crop receipt page count (mode- and drag-scope-dependent)
+
+    @Test func cropAutoAndCustomAlwaysCountEveryPage() {
+        // Auto and Custom trim the whole document; the drag scope flag is irrelevant to them.
+        #expect(CropToolView.croppedCount(mode: .auto, dragAllPages: true, totalPages: 8) == 8)
+        #expect(CropToolView.croppedCount(mode: .auto, dragAllPages: false, totalPages: 8) == 8)
+        #expect(CropToolView.croppedCount(mode: .custom, dragAllPages: false, totalPages: 8) == 8)
+    }
+
+    @Test func cropDragCountsAllPagesOrJustOne() {
+        // Drag mode: "same crop on every page" trims all; "this page only" trims exactly one.
+        #expect(CropToolView.croppedCount(mode: .drag, dragAllPages: true, totalPages: 8) == 8)
+        #expect(CropToolView.croppedCount(mode: .drag, dragAllPages: false, totalPages: 8) == 1)
+    }
+
+    @Test func cropCountIsZeroForAnEmptyDocument() {
+        // No pages loaded yet: every mode reports 0 so the receipt can fall back to "Cropped & saved".
+        #expect(CropToolView.croppedCount(mode: .auto, dragAllPages: true, totalPages: 0) == 0)
+        // Drag "this page only" still claims 1 even with 0 pages; the run guards on inputURL before this
+        // ever runs, so the caller never asks with a zero-page drag — this just pins the pure arithmetic.
+        #expect(CropToolView.croppedCount(mode: .drag, dragAllPages: false, totalPages: 0) == 1)
+    }
+
+    // MARK: - Watermark receipt page count (scope-dependent, with a parse fallback)
+
+    @Test func watermarkAllScopeStampsEveryPage() {
+        #expect(WatermarkToolView.stampedCount(scope: .all, customRange: "", pageCount: 10) == 10)
+    }
+
+    @Test func watermarkFirstScopeStampsOnePageOrNoneWhenEmpty() {
+        #expect(WatermarkToolView.stampedCount(scope: .first, customRange: "", pageCount: 10) == 1)
+        // No pages loaded: First stamps nothing, not one phantom page.
+        #expect(WatermarkToolView.stampedCount(scope: .first, customRange: "", pageCount: 0) == 0)
+    }
+
+    @Test func watermarkCustomScopeCountsTheParsedRange() {
+        // "1, 3-5" → pages 1,3,4,5 → 4 pages.
+        #expect(WatermarkToolView.stampedCount(scope: .custom, customRange: "1, 3-5", pageCount: 10) == 4)
+    }
+
+    @Test func watermarkCustomScopeFallsBackToTheWholeDocumentWhenTheRangeWontParse() {
+        // Empty, malformed, and out-of-bounds ranges all fail to parse; the count falls back to the full
+        // page count rather than showing 0 (the run's own gate keeps a truly bad range from saving).
+        #expect(WatermarkToolView.stampedCount(scope: .custom, customRange: "", pageCount: 10) == 10)
+        #expect(WatermarkToolView.stampedCount(scope: .custom, customRange: "nonsense", pageCount: 10) == 10)
+        #expect(WatermarkToolView.stampedCount(scope: .custom, customRange: "1-99", pageCount: 10) == 10)
+    }
+
+    @Test func watermarkCustomScopeWithNoPagesFallsBackToZero() {
+        // pageCount 0: the parse fails (nothing is in bounds), so the fallback is 0, not a phantom count.
+        #expect(WatermarkToolView.stampedCount(scope: .custom, customRange: "1-3", pageCount: 0) == 0)
+    }
+
     // MARK: - Delete output suffix (Finding 8b)
 
     @Test func deleteOutputSuffixIsActionMatched() {

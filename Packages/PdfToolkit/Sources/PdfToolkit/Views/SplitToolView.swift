@@ -28,6 +28,8 @@ private struct SplitResult {
 
 struct SplitToolView: View {
     @Environment(\.toolAccent) private var accent
+    @Environment(\.colorScheme) private var scheme
+    @Environment(\.colorSchemeContrast) private var contrast
     @State private var inputURL: URL?
     @State private var mode: SplitMode = .visual
     @State private var chunkSize = 1
@@ -334,7 +336,7 @@ struct SplitToolView: View {
                 VStack(alignment: .leading, spacing: 4) {
                     Label("Creates \(parts) file\(parts == 1 ? "" : "s")", systemImage: "doc.on.doc")
                         .font(.caption.weight(.medium))
-                        .foregroundStyle(accent)
+                        .foregroundStyle(Color.accentText(accent, on: scheme, contrast: contrast))
                     if let pageBreakdown {
                         Text(pageBreakdown)
                             .font(.caption)

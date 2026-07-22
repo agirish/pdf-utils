@@ -108,6 +108,9 @@ struct DeletePagesToolView: View {
         .task(id: selectionPathKey) {
             await loadThumbnails()
         }
+        // Editing which pages to remove makes the last run's "Removed N pages" receipt stale — the live
+        // range no longer matches the saved copy — so invalidate it on any range edit.
+        .onChange(of: rangeText) { _, _ in saveSummary = nil }
     }
 
     // MARK: - Sidebar

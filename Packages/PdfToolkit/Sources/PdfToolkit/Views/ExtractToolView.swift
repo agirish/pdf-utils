@@ -90,6 +90,9 @@ struct ExtractToolView: View {
         .task(id: selectionPathKey) {
             await loadThumbnails()
         }
+        // Editing which pages to extract makes the last run's "Extracted N pages" receipt stale — the
+        // live range no longer matches the saved copy — so invalidate it on any range edit.
+        .onChange(of: rangeText) { _, _ in saveSummary = nil }
     }
 
     // MARK: - Sidebar

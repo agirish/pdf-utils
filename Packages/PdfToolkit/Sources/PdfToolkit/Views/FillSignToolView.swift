@@ -121,6 +121,9 @@ struct FillSignToolView: View {
         // the re-commit that fires when undo/redo reassigns `items` records nothing.
         .onChange(of: items) { _, newItems in
             if !editingContinuously { undo.commit(newItems) }
+            // Adding, removing, or editing an item makes the "Saved with N additions" receipt stale —
+            // the live item set no longer matches the saved copy — so invalidate it even mid-edit.
+            saveSummary = nil
         }
         .onChange(of: editingContinuously) { _, active in
             if !active { undo.commit(items) }

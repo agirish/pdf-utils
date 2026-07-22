@@ -198,6 +198,10 @@ struct ReorderToolView: View {
         .task(id: selectionPathKey) {
             await loadThumbnails()
         }
+        // Reordering, removing, or restoring a page changes the very arrangement the receipt vouches
+        // for, so "Reordered N pages in the new order" goes stale. ReorderWorkingSet is Equatable, so
+        // one clear covers every kind of edit to the order.
+        .onChange(of: working) { _, _ in saveSummary = nil }
     }
 
     // MARK: - Sidebar

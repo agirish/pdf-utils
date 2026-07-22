@@ -125,6 +125,19 @@ struct WatermarkToolView: View {
         return false
     }
 
+    /// How many pages get the mark, for the save confirmation: All stamps every page, First stamps one,
+    /// Custom stamps the parsed range — falling back to the whole document when the range won't parse
+    /// (or when `pageCount` is 0). Pure over the scope + range + page count so the confirmation is exact
+    /// and unit-tested away from the panel.
+    static func stampedCount(scope: PageScopeSelection, customRange: String, pageCount: Int) -> Int {
+        switch scope {
+        case .all: return pageCount
+        case .first: return pageCount > 0 ? 1 : 0
+        case .custom:
+            return (try? PageRangeParser.parse(customRange, pageCount: pageCount, emptyMeansAllPages: false))?.count ?? pageCount
+        }
+    }
+
     /// sRGB components of the chosen color, threaded into `WatermarkOptions` and mirrored by the live
     /// preview so both the on-screen sample and the stamped output use exactly the picked color.
     private var chosenRGB: (red: Double, green: Double, blue: Double) {
@@ -167,6 +180,13 @@ struct WatermarkToolView: View {
             // the single-file receipt no longer applies.
             saveSummary = nil
         }
+        // Changing which pages get the mark (scope + custom range) makes the receipt's page count
+        // stale; switching text/image or editing the text changes what was stamped. Either way the
+        // "Watermarked N pages" receipt no longer describes the current config, so invalidate it.
+        .onChange(of: pageScope) { _, _ in saveSummary = nil }
+        .onChange(of: customRange) { _, _ in saveSummary = nil }
+        .onChange(of: mode) { _, _ in saveSummary = nil }
+        .onChange(of: text) { _, _ in saveSummary = nil }
         .fileImporter(
             isPresented: $showImageImporter,
             allowedContentTypes: [.image, .pdf],
@@ -571,16 +591,9 @@ struct WatermarkToolView: View {
         suggestedName = fileURL.deletingPathExtension().lastPathComponent + "-watermarked.pdf"
         let options = draftOptions
 
-        // How many pages get the mark, for the save confirmation: All stamps every page, First stamps
-        // one, Custom stamps the parsed range. `pageCount` is this single file's page count.
-        let stampedCount: Int = {
-            switch pageScope {
-            case .all: return pageCount
-            case .first: return pageCount > 0 ? 1 : 0
-            case .custom:
-                return (try? PageRangeParser.parse(customRange, pageCount: pageCount, emptyMeansAllPages: false))?.count ?? pageCount
-            }
-        }()
+        // How many pages get the mark, for the save confirmation. `pageCount` is this single file's
+        // page count.
+        let stampedCount = Self.stampedCount(scope: pageScope, customRange: customRange, pageCount: pageCount)
 
         do {
             let data = try await PDFBackgroundWork.run {

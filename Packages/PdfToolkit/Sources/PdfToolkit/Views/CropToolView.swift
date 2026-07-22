@@ -5,7 +5,7 @@ import UniformTypeIdentifiers
 
 /// Which lever drives the crop: automatic content detection, hand-typed margins, or a rectangle
 /// dragged directly on the page.
-private enum CropMode: Hashable {
+enum CropMode: Hashable {
     case auto
     case custom
     case drag
@@ -135,6 +135,9 @@ struct CropToolView: View {
             // The interactive PDFView is drag-only; drop the loaded document when leaving so a big
             // file isn't pinned in memory while Auto/Custom use the virtualized thumbnail grid.
             if newMode != .drag { pdfDocument = nil }
+            // A different mode crops a different way (and a different page count in drag mode), so the
+            // last run's "Cropped N pages" receipt no longer describes what a save would do.
+            saveSummary = nil
         }
         // Record each settled margin change as one undo step, but never the intermediate frames of a
         // live drag or an in-progress typing session (editingContinuously gates those; each commits its
@@ -142,7 +145,12 @@ struct CropToolView: View {
         // that fires when undo/redo reassigns the margins records nothing.
         .onChange(of: customInsets) { _, newInsets in
             if !editingContinuously { undo.commit(newInsets) }
+            // Redrawing the marquee / editing the custom insets changes the bounds the receipt vouches
+            // for, so invalidate it even mid-drag.
+            saveSummary = nil
         }
+        // "This page only" vs "every page" flips the drag-mode receipt's page count (1 vs all).
+        .onChange(of: dragAllPages) { _, _ in saveSummary = nil }
         .onChange(of: editingContinuously) { _, active in
             if !active { undo.commit(customInsets) }
         }
@@ -542,6 +550,16 @@ struct CropToolView: View {
 
     // MARK: - Export
 
+    /// How many pages a crop touches, for the save confirmation: Auto and Custom trim every page; Drag
+    /// trims all pages or just the single viewed one. Pure over the mode + drag scope + the document's
+    /// page count so the confirmation is exact, and so it's unit-tested away from the canvas.
+    static func croppedCount(mode: CropMode, dragAllPages: Bool, totalPages: Int) -> Int {
+        switch mode {
+        case .auto, .custom: return totalPages
+        case .drag: return dragAllPages ? totalPages : 1
+        }
+    }
+
     @MainActor
     private func runCrop() async {
         guard let fileURL = inputURL else {
@@ -566,16 +584,14 @@ struct CropToolView: View {
         // For "this page only" in drag mode, clamp the viewed page to the document's real range.
         let dragPageSnapshot = min(max(dragPageIndex, 0), max(0, (pdfDocument?.pageCount ?? 1) - 1))
 
-        // How many pages the crop touches, for the save confirmation: Auto and Custom trim every page;
-        // Drag trims all pages or just the viewed one. `pdfDocument` is loaded in drag mode; the
-        // thumbnail count covers the other two.
+        // How many pages the crop touches, for the save confirmation. `pdfDocument` is loaded in drag
+        // mode; the thumbnail count covers the other two.
         let totalPages = pdfDocument?.pageCount ?? pageSpecs.count
-        let croppedCount: Int = {
-            switch selectedMode {
-            case .auto, .custom: return totalPages
-            case .drag: return dragAllPagesSnapshot ? totalPages : 1
-            }
-        }()
+        let croppedCount = Self.croppedCount(
+            mode: selectedMode,
+            dragAllPages: dragAllPagesSnapshot,
+            totalPages: totalPages
+        )
 
         do {
             let data = try await PDFBackgroundWork.run {

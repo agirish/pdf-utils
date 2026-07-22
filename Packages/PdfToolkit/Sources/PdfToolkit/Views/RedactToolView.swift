@@ -118,6 +118,11 @@ struct RedactToolView: View {
         // the re-commit that fires when undo/redo reassigns `marks` records nothing.
         .onChange(of: marks) { _, newMarks in
             if !canvasInteracting { undo.commit(newMarks) }
+            // Editing the marks (draw, Clear all, Find & redact auto-marks) makes the saved-file
+            // receipt stale: the "permanently removed" banner would still describe the last burn
+            // while the visible marks no longer match it. Invalidate it. The legitimate save path
+            // sets saveSummary only after marks have settled, so it survives its own run.
+            saveSummary = nil
         }
         .onChange(of: canvasInteracting) { _, interacting in
             if !interacting { undo.commit(marks) }

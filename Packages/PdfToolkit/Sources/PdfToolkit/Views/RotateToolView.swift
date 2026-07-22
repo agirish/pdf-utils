@@ -66,6 +66,11 @@ struct RotateToolView: View {
             // the single-file receipt no longer applies.
             saveSummary = nil
         }
+        // Editing what the receipt describes — which pages rotate (scope + range) or by how much
+        // (turn amount) — makes "Rotated N pages" stale, so invalidate it on any of those.
+        .onChange(of: scope) { _, _ in saveSummary = nil }
+        .onChange(of: rangeText) { _, _ in saveSummary = nil }
+        .onChange(of: quarterTurns) { _, _ in saveSummary = nil }
         .fileExporter(
             isPresented: $showExporter,
             document: exportDoc,

@@ -288,7 +288,7 @@ private struct SplitGroupCell: View {
 
     var body: some View {
         ZStack(alignment: .bottomLeading) {
-            SplitPreviewCellImage(spec: spec, render: render)
+            CachedThumbnailCell(cacheKey: spec.cacheKey) { await render(spec) }
                 .frame(width: thumbnailSize)
                 .background(Color.white)
                 .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
@@ -342,44 +342,3 @@ private struct SplitGroupCell: View {
     }
 }
 
-/// One cell's image, read straight from the shared LRU in `body` — no per-cell image state, so a long
-/// document's resident cost stays at the cache's cap. Mirrors ``SinglePDFPreviewColumn``'s private cell
-/// (kept local so Split's grid doesn't reach into another view's internals). On a miss the task renders
-/// off-main, stores, and bumps `tick` to repaint.
-private struct SplitPreviewCellImage: View {
-    let spec: PreviewPageSpec
-    let render: (PreviewPageSpec) async -> NSImage?
-    @State private var tick = 0
-    @State private var attempted = false
-
-    var body: some View {
-        Group {
-            if let image = PreviewThumbnailCache.shared.image(for: spec.cacheKey) {
-                Image(nsImage: image)
-                    .resizable()
-                    .aspectRatio(contentMode: .fit)
-            } else {
-                Color.white
-                    .aspectRatio(8.5 / 11, contentMode: .fit)
-                    .overlay {
-                        if !attempted {
-                            ProgressView()
-                                .controlSize(.small)
-                        }
-                    }
-            }
-        }
-        .id(tick)
-        .task(id: spec.cacheKey) {
-            guard PreviewThumbnailCache.shared.image(for: spec.cacheKey) == nil else { return }
-            attempted = false
-            let rendered = await render(spec)
-            guard !Task.isCancelled else { return }
-            if let rendered {
-                PreviewThumbnailCache.shared.store(rendered, for: spec.cacheKey)
-            }
-            attempted = true
-            tick += 1
-        }
-    }
-}

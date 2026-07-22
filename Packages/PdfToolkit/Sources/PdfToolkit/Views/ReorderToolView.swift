@@ -495,7 +495,7 @@ struct ReorderToolView: View {
         HStack(alignment: .center, spacing: 12) {
             // Same demand-loaded thumbnail (and cache key) as the kept rows and the preview cells
             // — a page dropped after rendering once is a pure cache hit here.
-            ReorderRowThumbnail(cacheKey: "\(fileKeyBase)#\(item.originalIndex)") {
+            CachedThumbnailCell(cacheKey: "\(fileKeyBase)#\(item.originalIndex)", placeholder: .blank) {
                 guard let url = inputURL else { return nil }
                 return (try? await PDFPageThumbnailLoader.loadPage(from: url, pageIndex: item.originalIndex))?.image
             }
@@ -623,31 +623,3 @@ struct ReorderToolView: View {
     }
 }
 
-/// The 34×44 page image in one sidebar row, read from the shared LRU on demand — the same key the
-/// preview column uses for that page, so a row and its preview cell share one render. The row holds
-/// no image state of its own; a long document's rows stay as cheap as its preview cells.
-private struct ReorderRowThumbnail: View {
-    let cacheKey: String
-    let render: () async -> NSImage?
-    /// Repaint trigger after a store; the image itself deliberately lives only in the cache.
-    @State private var tick = 0
-
-    var body: some View {
-        Group {
-            if let image = PreviewThumbnailCache.shared.image(for: cacheKey) {
-                Image(nsImage: image)
-                    .resizable()
-                    .aspectRatio(contentMode: .fit)
-            } else {
-                Color.white
-            }
-        }
-        .id(tick)
-        .task(id: cacheKey) {
-            guard PreviewThumbnailCache.shared.image(for: cacheKey) == nil else { return }
-            guard let rendered = await render(), !Task.isCancelled else { return }
-            PreviewThumbnailCache.shared.store(rendered, for: cacheKey)
-            tick += 1
-        }
-    }
-}

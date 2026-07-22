@@ -116,8 +116,10 @@ struct CropToolView: View {
         .toolErrorAlert($alertMessage)
         .task(id: selectionPathKey) {
             // A new file: re-seed the crop history with the (persistent) current margins so ⌘Z can't
-            // cross the file boundary, then load thumbnails.
+            // cross the file boundary, then load thumbnails. Clear the interaction flag too, in case the
+            // file changed mid-drag, so undo recording isn't left gated off.
             undo.reset(customInsets)
+            canvasInteracting = false
             await loadThumbnails()
         }
         .onChange(of: mode) { _, newMode in

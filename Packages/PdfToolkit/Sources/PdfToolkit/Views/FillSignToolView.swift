@@ -624,7 +624,12 @@ struct FillSignToolView: View {
         )
         items.append(item)
         selectedID = item.id
-        textFieldFocused = true
+        // Focus on the NEXT runloop turn, not synchronously: the inspector text field is gated on
+        // selectedID and isn't in the hierarchy yet, so a synchronous @FocusState request is unreliable
+        // — and it would gate THIS add's undo commit behind the field's focus (editingContinuously),
+        // greying Undo on a placed item and making add-then-Clear non-undoable. Deferring lets the add
+        // commit as its own step first, then focuses the now-rendered field for typing.
+        DispatchQueue.main.async { textFieldFocused = true }
     }
 
     private func placeDrawnSignature() {
@@ -727,6 +732,9 @@ struct FillSignToolView: View {
         items = []
         selectedID = nil
         undo.reset([])
+        // Clear the interaction flag in case the document changed mid-drag, so undo recording isn't
+        // left gated off for the new document (the editor's .ended may not fire on teardown).
+        canvasInteracting = false
         currentPageIndex = 0
         placementCascade = 0
         pdfDocument = nil

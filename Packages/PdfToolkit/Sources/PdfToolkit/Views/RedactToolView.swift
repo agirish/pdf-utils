@@ -623,6 +623,10 @@ struct RedactToolView: View {
         marks = []
         selectedMarkID = nil
         undo.reset([])
+        // Clear the interaction flag in case the document changed mid-drag (the editor's .ended, which
+        // normally clears it, may not fire when the NSView is torn down) — otherwise undo recording
+        // would stay gated off for the new document.
+        canvasInteracting = false
         pdfDocument = nil
         resetFindState()
         guard let url = inputURL else { return }

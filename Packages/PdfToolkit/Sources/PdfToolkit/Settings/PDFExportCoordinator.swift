@@ -42,9 +42,9 @@ enum PDFExportCoordinator {
             : data
 
         let stem = source?.deletingPathExtension().lastPathComponent ?? defaultStem
-        let filename = suggestedFilename(stem: stem, suffixWord: suffixWord)
+        let filename = suggestedFilename(stem: stem, suffixWord: suffixWord, defaults: defaults)
 
-        guard SaveLocation.current() == .besideOriginal, let source else {
+        guard SaveLocation.current(defaults) == .besideOriginal, let source else {
             return .present(document: PDFFileDocument(data: finalized), suggestedName: filename)
         }
 
@@ -52,7 +52,7 @@ enum PDFExportCoordinator {
         let destination = uniqueURL(inDirectory: directory, filename: filename)
         try await writeOffMain(finalized, to: destination)
         ActivityLog.shared.recordSaved(toolTitle, to: destination, bytes: finalized.count)
-        AfterExportAction.current().perform(on: [destination])
+        AfterExportAction.current(defaults).perform(on: [destination])
         return .savedBeside(destination)
     }
 

@@ -307,4 +307,141 @@ import PDFKit
         // No single shared folder was used, so the queue reveals the produced files directly.
         #expect(runner.outputDirectory == nil)
     }
+
+    // MARK: - Per-file logging and the stopped-early warning
+
+    /// A throwaway log backed by its own temp file, so a run's records can be asserted in isolation
+    /// from the shared singleton. Removed by the caller's `defer`.
+    @MainActor
+    private func makeIsolatedLog() -> (log: ActivityLog, url: URL) {
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("pdfutils-batch-log-\(UUID().uuidString).log")
+        return (ActivityLog(fileURL: url), url)
+    }
+
+    /// Polls a log's main-queue-drained mirror until at least `count` entries satisfy `predicate`.
+    @MainActor
+    private func waitForEntries(
+        in log: ActivityLog, count: Int, where predicate: @escaping (LogEntry) -> Bool
+    ) async -> [LogEntry] {
+        for _ in 0..<300 {
+            let matches = log.entries.filter(predicate)
+            if matches.count >= count { return matches }
+            try? await Task.sleep(for: .milliseconds(10))
+        }
+        return log.entries.filter(predicate)
+    }
+
+    /// Keeps the end-of-run after-export action a no-op for the duration of `body` (it reads
+    /// `.standard`, not the injected log), restoring the prior value afterward — matching the other
+    /// runner tests so a run steals no Finder focus.
+    @MainActor
+    private func withNoAfterExportAction(_ body: () async throws -> Void) async rethrows {
+        let previous = UserDefaults.standard.object(forKey: SettingsKeys.afterExportAction)
+        UserDefaults.standard.set(AfterExportAction.doNothing.rawValue, forKey: SettingsKeys.afterExportAction)
+        defer {
+            if let previous { UserDefaults.standard.set(previous, forKey: SettingsKeys.afterExportAction) }
+            else { UserDefaults.standard.removeObject(forKey: SettingsKeys.afterExportAction) }
+        }
+        try await body()
+    }
+
+    @MainActor
+    @Test func batchLogsAnInfoPerSavedFileAndAnErrorPerFailedFile() async throws {
+        let (log, logURL) = makeIsolatedLog()
+        defer { try? FileManager.default.removeItem(at: logURL) }
+
+        let dir = FixtureDir()
+        let outDir = dir.url("out")
+        try FileManager.default.createDirectory(at: outDir, withIntermediateDirectories: true)
+        let good1 = dir.url("good1.pdf"), good2 = dir.url("good2.pdf"), bad = dir.url("bad.pdf")
+        try PDFFixtures.writePDF(pageCount: 2, to: good1)
+        try PDFFixtures.writePDF(pageCount: 3, to: good2)
+        try PDFFixtures.writeCorrupt(to: bad)   // rotate can't open it → a per-file failure
+
+        try await withNoAfterExportAction {
+            let runner = BatchRunner(activityLog: log)
+            runner.addURLs([good1, bad, good2])
+            runner.run(operation: .rotate(quarterTurns: 1), into: outDir)
+            for _ in 0..<250 where runner.isRunning {
+                try await Task.sleep(for: .milliseconds(20))
+            }
+            #expect(!runner.isRunning)
+            #expect(runner.doneCount == 2)
+            #expect(runner.failedCount == 1)
+
+            // One INFO save per completed file (each carrying its output path) and one ERROR.
+            let infos = await waitForEntries(in: log, count: 2) { $0.level == .info && $0.path != nil }
+            let errors = await waitForEntries(in: log, count: 1) { $0.level == .error }
+            // Give any spurious extra entry (there should be none) time to arrive before the exact check.
+            try await Task.sleep(for: .milliseconds(50))
+            #expect(log.entries.filter { $0.level == .info }.count == 2)
+            #expect(log.entries.filter { $0.level == .error }.count == 1)
+            #expect(log.entries.filter { $0.level == .warning }.count == 0)   // nothing skipped → no warning
+
+            // Each INFO attributes the save to the Rotate tool and points at a file that really landed.
+            for info in infos {
+                #expect(info.message.hasPrefix(Tool.rotate.title))
+                #expect(FileManager.default.fileExists(atPath: try #require(info.path)))
+            }
+            // The ERROR blames the corrupt file by name, under the Rotate tool.
+            let error = try #require(errors.first)
+            #expect(error.messageBody.contains(Tool.rotate.title))
+            #expect(error.messageBody.contains("bad.pdf"))
+        }
+    }
+
+    @MainActor
+    @Test func batchCancelledMidQueueLogsOneStoppedEarlyWarningWithTheSkippedCount() async throws {
+        let (log, logURL) = makeIsolatedLog()
+        defer { try? FileManager.default.removeItem(at: logURL) }
+
+        let dir = FixtureDir()
+        let outDir = dir.url("out")
+        try FileManager.default.createDirectory(at: outDir, withIntermediateDirectories: true)
+        // Enough real compress work queued that cancelling right after the first file completes leaves
+        // several files still pending — the window the WARN reports on.
+        var inputs: [URL] = []
+        for i in 0..<6 {
+            let url = dir.url("f\(i).pdf")
+            try PDFFixtures.writePDF(pageCount: 3, to: url)
+            inputs.append(url)
+        }
+
+        try await withNoAfterExportAction {
+            let runner = BatchRunner(activityLog: log)
+            runner.addURLs(inputs)
+            runner.run(operation: .compressQuality(quality: 0.3), into: outDir)
+
+            // Cancel the instant the first file lands, before the queue drains — the rest stay pending.
+            for _ in 0..<500 where runner.doneCount == 0 && runner.isRunning {
+                try await Task.sleep(for: .milliseconds(2))
+            }
+            runner.cancel()
+            for _ in 0..<250 where runner.isRunning {
+                try await Task.sleep(for: .milliseconds(20))
+            }
+            #expect(!runner.isRunning)
+
+            // The run really was interrupted mid-queue: some files finished, some were never reached.
+            let skipped = runner.items.count - runner.doneCount - runner.failedCount
+            #expect(runner.doneCount >= 1)
+            #expect(skipped >= 1)
+
+            // Exactly one WARN — the app's only WARN-level operational line — naming the correct
+            // not-processed count out of the whole queue, under the Compress tool.
+            _ = await waitForEntries(in: log, count: 1) { $0.level == .warning }
+            try await Task.sleep(for: .milliseconds(50))   // room for a (wrong) second warning to surface
+            let warnings = log.entries.filter { $0.level == .warning }
+            #expect(warnings.count == 1)
+            let warning = try #require(warnings.first)
+            #expect(warning.messageBody.contains(Tool.compress.title))
+            #expect(warning.messageBody.contains("batch stopped early"))
+            #expect(warning.messageBody.contains("\(skipped) of \(runner.items.count)"))
+            #expect(warning.messageBody.contains("not processed"))
+
+            // The per-file success logging still fired for every completed file alongside the warning.
+            #expect(log.entries.filter { $0.level == .info && $0.path != nil }.count == runner.doneCount)
+        }
+    }
 }

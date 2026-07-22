@@ -123,6 +123,15 @@ final class BatchRunner: ObservableObject {
 
     private var runTask: Task<Void, Never>?
 
+    /// The activity log a run records into. Defaults to the app-wide singleton; a test injects a
+    /// throwaway instance backed by its own temp file so it can assert the per-file `recordSaved`
+    /// INFO / `error` ERROR lines and the "batch stopped early" WARN in isolation from the shared log.
+    private let activityLog: ActivityLog
+
+    init(activityLog: ActivityLog = .shared) {
+        self.activityLog = activityLog
+    }
+
     // MARK: - Queue editing (only while idle)
 
     var isEmpty: Bool { items.isEmpty }
@@ -255,10 +264,10 @@ final class BatchRunner: ObservableObject {
                     }
                 }
                 items[index].status = .done(outputURL: result.url, outputBytes: result.bytes)
-                ActivityLog.shared.recordSaved(operation.toolTitle, to: result.url, bytes: Int(result.bytes))
+                activityLog.recordSaved(operation.toolTitle, to: result.url, bytes: Int(result.bytes))
             } catch {
                 items[index].status = .failed(error.localizedDescription)
-                ActivityLog.shared.error("\(operation.toolTitle) failed for \(inputURL.lastPathComponent): \(error.localizedDescription)")
+                activityLog.error("\(operation.toolTitle) failed for \(inputURL.lastPathComponent): \(error.localizedDescription)")
             }
         }
 
@@ -269,7 +278,7 @@ final class BatchRunner: ObservableObject {
         let notProcessed = items.filter { $0.status == .pending }.count
         if notProcessed > 0 {
             let noun = notProcessed == 1 ? "file" : "files"
-            ActivityLog.shared.warning("\(operation.toolTitle): batch stopped early — \(notProcessed) of \(items.count) \(noun) not processed")
+            activityLog.warning("\(operation.toolTitle): batch stopped early — \(notProcessed) of \(items.count) \(noun) not processed")
         }
 
         // One after-export action for the whole run, at the end. Per-file firing activated Finder

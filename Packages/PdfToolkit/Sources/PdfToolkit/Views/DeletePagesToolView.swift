@@ -99,13 +99,31 @@ struct DeletePagesToolView: View {
     private var sidebarColumn: some View {
         VStack(spacing: 0) {
             VStack(alignment: .leading, spacing: 14) {
-                headerRow
+                FileSidebarHeader(
+                    accent: accent,
+                    icon: Tool.deletePages.symbolName,
+                    subtitle: sidebarSubtitle,
+                    hasFile: inputURL != nil,
+                    onClear: { inputURL = nil },
+                    onAdd: { showImporter = true }
+                )
 
                 Group {
                     if inputURL == nil {
-                        emptyDropZone
+                        EmptyFileDropZone(
+                            accent: accent,
+                            icon: Tool.deletePages.symbolName,
+                            description: "See every page on the right, then enter which page numbers to remove.",
+                            isTargeted: isDropTargeted,
+                            onChoose: { showImporter = true }
+                        )
                     } else if let url = inputURL {
-                        selectedFileCard(url: url)
+                        SelectedFileCard(
+                            accent: accent,
+                            url: url,
+                            isLoadingPreview: isGeneratingPreviews,
+                            pageCount: pageSpecs.count
+                        )
                     }
                 }
                 .onDrop(of: [.pdf, .fileURL], isTargeted: $isDropTargeted) { providers in
@@ -132,122 +150,11 @@ struct DeletePagesToolView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
-    private var headerRow: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(alignment: .center, spacing: 12) {
-                Image(systemName: Tool.deletePages.symbolName)
-                    .symbolRenderingMode(.hierarchical)
-                    .foregroundStyle(accent)
-                    .font(.title)
-                Text("PDF file")
-                    .font(.title3.weight(.semibold))
-                Spacer(minLength: 8)
-                HStack(spacing: 10) {
-                    if inputURL != nil {
-                        Button("Clear") {
-                            inputURL = nil
-                        }
-                        .buttonStyle(.borderless)
-                        .font(.subheadline.weight(.medium))
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                        .fixedSize(horizontal: true, vertical: false)
-                        .help("Remove the selected file")
-                    }
-                    Button("Add PDF…") { showImporter = true }
-                        .font(.subheadline.weight(.medium))
-                        .lineLimit(1)
-                        .fixedSize(horizontal: true, vertical: false)
-                }
-            }
-            Text(sidebarSubtitle)
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .fixedSize(horizontal: false, vertical: true)
-        }
-    }
-
     private var sidebarSubtitle: String {
         if inputURL == nil {
             return "Drop a PDF or add a file. List pages to remove on the left; preview on the right."
         }
         return "An empty page list does nothing — type which pages to drop. At least one page must remain."
-    }
-
-    private var emptyDropZone: some View {
-        VStack(spacing: 14) {
-            Image(systemName: Tool.deletePages.symbolName)
-                .font(.system(size: 36, weight: .light))
-                .symbolRenderingMode(.hierarchical)
-                .foregroundStyle(accent.opacity(0.85))
-            Text("Drop a PDF here or add a file")
-                .font(.title3.weight(.semibold))
-            Text("See every page on the right, then enter which page numbers to remove.")
-                .font(.body)
-                .foregroundStyle(.secondary)
-                .multilineTextAlignment(.center)
-                .frame(maxWidth: 400)
-            Button("Choose PDF…") { showImporter = true }
-                .buttonStyle(.borderedProminent)
-                .controlSize(.large)
-        }
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, 28)
-        .padding(.horizontal, 16)
-        .background {
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .strokeBorder(
-                    style: StrokeStyle(lineWidth: isDropTargeted ? 2 : 1.2, dash: [7, 5])
-                )
-                .foregroundStyle(isDropTargeted ? accent : Color.secondary.opacity(0.35))
-        }
-        .animation(.easeInOut(duration: 0.18), value: isDropTargeted)
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel("No file selected. Drop a PDF or choose PDF.")
-    }
-
-    private func selectedFileCard(url: URL) -> some View {
-        HStack(alignment: .center, spacing: 12) {
-            ZStack {
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .fill(accent.opacity(0.14))
-                    .frame(width: 40, height: 40)
-                Image(systemName: "doc.fill")
-                    .font(.body.weight(.medium))
-                    .foregroundStyle(accent)
-            }
-            .accessibilityHidden(true)
-
-            VStack(alignment: .leading, spacing: 4) {
-                Text(url.lastPathComponent)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-                    .font(.callout.weight(.medium))
-                if isGeneratingPreviews {
-                    Text("Loading preview…")
-                        .font(.subheadline)
-                        .foregroundStyle(.tertiary)
-                } else if !pageSpecs.isEmpty {
-                    Text("\(pageSpecs.count) page\(pageSpecs.count == 1 ? "" : "s")")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                }
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-        }
-        .padding(.vertical, 10)
-        .padding(.horizontal, 12)
-        .background {
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .fill(Color.primary.opacity(0.025))
-        }
-        .overlay {
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .strokeBorder(Color.primary.opacity(0.06), lineWidth: 1)
-        }
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel("Selected file \(url.lastPathComponent)")
     }
 
     private var pagesSection: some View {

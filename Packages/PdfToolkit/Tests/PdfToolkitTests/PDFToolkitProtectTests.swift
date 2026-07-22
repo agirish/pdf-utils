@@ -59,6 +59,59 @@ import PDFKit
         }?.kind == "couldNotOpen")
     }
 
+    // MARK: Restrict editing (owner-lock)
+
+    /// Writes a restrict-editing copy through the options core and returns it opened.
+    private func makeRestricted(_ dir: FixtureDir, owner: String, pages: Int = 2) throws -> URL {
+        let plain = dir.url("plain.pdf"), out = dir.url("restricted.pdf")
+        try PDFFixtures.writePDF(pageCount: pages, to: plain)
+        let data = try PDFToolkit.encryptData(
+            inputURL: plain,
+            options: ProtectionOptions(userPassword: "", ownerPassword: owner, permissionBits: PDFPermissionPreset.openAndPrintOnly)
+        )
+        try data.write(to: out)
+        return out
+    }
+
+    @Test func restrictEditingOpensFreelyButLocksCopying() throws {
+        // The "printable but locked" mode: encrypted (owner password + permissions), yet it opens with
+        // no password, prints, and withholds copying until the owner password is supplied.
+        let dir = FixtureDir()
+        let out = try makeRestricted(dir, owner: "owner")
+
+        let doc = try #require(PDFDocument(url: out))
+        #expect(doc.isEncrypted)
+        #expect(!doc.isLocked)                       // opens with no password
+        #expect(doc.pageCount == 2)
+        #expect(doc.allowsPrinting)                  // printing granted
+        #expect(!doc.allowsCopying)                  // copying withheld
+        #expect(doc.permissionsStatus == .user)      // opened as user, not owner
+    }
+
+    @Test func restrictEditingOwnerPasswordUnlocksFullAccess() throws {
+        // Supplying the owner password elevates the just-opened document to owner status, restoring
+        // the copy permission the user status withholds.
+        let dir = FixtureDir()
+        let out = try makeRestricted(dir, owner: "owner")
+        let doc = try #require(PDFDocument(url: out))
+
+        #expect(doc.unlock(withPassword: "owner"))
+        #expect(doc.permissionsStatus == .owner)
+        #expect(doc.allowsCopying)
+    }
+
+    @Test func encryptOptionsRejectsAnEmptyOwnerPassword() throws {
+        let dir = FixtureDir()
+        let src = dir.url("src.pdf")
+        try PDFFixtures.writePDF(pageCount: 1, to: src)
+        #expect(#expect(throws: PDFOperationError.self) {
+            _ = try PDFToolkit.encryptData(
+                inputURL: src,
+                options: ProtectionOptions(userPassword: "", ownerPassword: "", permissionBits: nil)
+            )
+        }?.kind == "passwordRequired")
+    }
+
     // MARK: Remove password
 
     @Test func removePasswordOutputOpensWithNoPassword() throws {

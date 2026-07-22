@@ -13,7 +13,7 @@ enum BatchOperation: Sendable {
     case compressTarget(targetBytes: Int)
     case rotate(quarterTurns: Int)
     case watermark(WatermarkOptions)
-    case encrypt(password: String)
+    case encrypt(ProtectionOptions)
     case removePassword(password: String)
 
     /// The single tool this operation belongs to, used to attribute Activity Log entries to the real
@@ -82,8 +82,8 @@ enum BatchOperation: Sendable {
             )
         case .watermark(let options):
             return try PDFToolkit.watermarkData(inputURL: inputURL, options: options)
-        case .encrypt(let password):
-            return try PDFToolkit.encryptData(inputURL: inputURL, password: password)
+        case .encrypt(let options):
+            return try PDFToolkit.encryptData(inputURL: inputURL, options: options)
         case .removePassword(let password):
             return try PDFToolkit.removePasswordData(inputURL: inputURL, password: password)
         }

@@ -106,16 +106,28 @@ import Foundation
 
     // MARK: Protect
 
-    @Test func encryptRequiresMatchingNonEmptyPasswords() {
-        guard case .encrypt(let pw) = BatchOperation.encryptConfig(newPassword: "s3cret", confirmPassword: "s3cret") else {
+    @Test func encryptLockToOpenSetsUserAndOwnerToThePassword() {
+        guard case .encrypt(let options) = BatchOperation.encryptConfig(restrictEditing: false, newPassword: "s3cret", confirmPassword: "s3cret") else {
             Issue.record("expected .encrypt"); return
         }
-        #expect(pw == "s3cret")
+        #expect(options.userPassword == "s3cret")
+        #expect(options.ownerPassword == "s3cret")
+        #expect(options.permissionBits == nil)
+    }
+
+    @Test func encryptRestrictEditingSetsOwnerOnlyWithPrintPermissions() {
+        guard case .encrypt(let options) = BatchOperation.encryptConfig(restrictEditing: true, newPassword: "s3cret", confirmPassword: "s3cret") else {
+            Issue.record("expected .encrypt"); return
+        }
+        #expect(options.userPassword == "")                                  // opens freely
+        #expect(options.ownerPassword == "s3cret")
+        #expect(options.permissionBits == PDFPermissionPreset.openAndPrintOnly)
     }
 
     @Test func encryptIsNilWhenPasswordsMismatchOrAreEmpty() {
-        #expect(BatchOperation.encryptConfig(newPassword: "a", confirmPassword: "b") == nil)
-        #expect(BatchOperation.encryptConfig(newPassword: "", confirmPassword: "") == nil)
+        #expect(BatchOperation.encryptConfig(restrictEditing: false, newPassword: "a", confirmPassword: "b") == nil)
+        #expect(BatchOperation.encryptConfig(restrictEditing: false, newPassword: "", confirmPassword: "") == nil)
+        #expect(BatchOperation.encryptConfig(restrictEditing: true, newPassword: "a", confirmPassword: "b") == nil)
     }
 
     @Test func removePasswordRequiresANonEmptyCurrentPassword() {

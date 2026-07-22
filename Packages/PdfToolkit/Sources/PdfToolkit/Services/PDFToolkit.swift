@@ -18,6 +18,38 @@ struct PDFRedactionExportOptions: Sendable {
     )
 }
 
+/// How a Protect run encrypts a file. Plain values (no PDFKit objects) so the config crosses the PDF
+/// serial queue and can be snapshotted into a batch operation.
+///
+/// Two styles express the same struct:
+/// - **Lock to open** — `userPassword == ownerPassword`, `permissionBits == nil`. One password opens
+///   the file and, once open, grants full access; the original single-password behavior.
+/// - **Restrict editing** — `userPassword == ""`, `ownerPassword` set, `permissionBits` set. The file
+///   opens (and prints) freely, but copying/editing/assembly need the owner password.
+struct ProtectionOptions: Sendable {
+    /// The password required to *open* the file. Empty means the file opens without a password.
+    var userPassword: String
+    /// The password required to change permissions or remove protection. Always required (an empty
+    /// owner password throws `passwordRequired`).
+    var ownerPassword: String
+    /// Raw `PDFAccessPermissions` bits to record, or `nil` to write none (full owner access — the
+    /// single-password lock). See ``PDFPermissionPreset``.
+    var permissionBits: UInt?
+}
+
+/// Named `PDFAccessPermissions` bitmasks for ``ProtectionOptions``. Built from raw bit values because
+/// `PDFAccessPermissions` is imported as an `NS_ENUM` rather than an `OptionSet`, so the members are
+/// combined by OR-ing their `rawValue`s.
+enum PDFPermissionPreset {
+    /// Opens and prints freely; copying text, editing, annotating, and page assembly all require the
+    /// owner password. Accessibility extraction stays allowed so screen readers keep working.
+    static var openAndPrintOnly: UInt {
+        PDFAccessPermissions.allowsLowQualityPrinting.rawValue
+            | PDFAccessPermissions.allowsHighQualityPrinting.rawValue
+            | PDFAccessPermissions.allowsContentAccessibility.rawValue
+    }
+}
+
 /// A decoded logo carried by value so ``WatermarkOptions`` stays `Sendable` across the PDF serial
 /// queue and can be snapshotted into a batch operation. The `CGImage` is immutable and only ever
 /// read (drawn), so `@unchecked Sendable` is safe — nothing mutates it after decode.
@@ -362,16 +394,40 @@ public enum PDFToolkit {
     /// PDF.
     internal static func encryptData(inputURL: URL, password: String) throws -> Data {
         guard !password.isEmpty else { throw PDFOperationError.passwordRequired }
-        // `encryptedInput`, not `incorrectPassword`: the user never typed a password here, so the
-        // "check it and try again" message pointed at a field that doesn't exist on this path.
+        // A single password locks the whole file: user == owner, no permission bits written (once
+        // opened, the reader has full owner access) — byte-for-byte the original single-password lock.
+        return try encryptData(
+            inputURL: inputURL,
+            options: ProtectionOptions(userPassword: password, ownerPassword: password, permissionBits: nil)
+        )
+    }
+
+    /// In-memory core shared by both protection styles. Always encrypts (an owner password is
+    /// required); the user password gates *opening* and is omitted for the restrict-only style so the
+    /// file opens freely, while `permissionBits` — when set — records what a reader may still do
+    /// without the owner password. The input must be an openable, unencrypted PDF; a locked input
+    /// throws `encryptedInput` (via `openUnlockedDocument`), not `incorrectPassword`, since no
+    /// password was typed on this path.
+    internal static func encryptData(inputURL: URL, options: ProtectionOptions) throws -> Data {
+        guard !options.ownerPassword.isEmpty else { throw PDFOperationError.passwordRequired }
         let doc = try openUnlockedDocument(at: inputURL)
         guard doc.pageCount > 0 else { throw PDFOperationError.emptyPDF }
 
-        let options: [PDFDocumentWriteOption: Any] = [
-            .userPasswordOption: password,
-            .ownerPasswordOption: password,
+        var writeOptions: [PDFDocumentWriteOption: Any] = [
+            .ownerPasswordOption: options.ownerPassword,
         ]
-        guard let data = doc.dataRepresentation(options: options) else {
+        // Only set a user (open) password when there is one: an empty string here would demand an
+        // empty password to open rather than opening freely.
+        if !options.userPassword.isEmpty {
+            writeOptions[.userPasswordOption] = options.userPassword
+        }
+        // Access permissions only bite when the file opens without the owner password, which is the
+        // restrict-only style. `PDFAccessPermissions` is declared `NS_ENUM`, so the raw bits are
+        // combined by the caller and passed as an NSNumber — the shape the write option expects.
+        if let bits = options.permissionBits {
+            writeOptions[.accessPermissionsOption] = NSNumber(value: bits)
+        }
+        guard let data = doc.dataRepresentation(options: writeOptions) else {
             throw PDFOperationError.protectionFailed
         }
         return data

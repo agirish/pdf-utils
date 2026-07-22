@@ -15,7 +15,7 @@ import PDFKit
         #expect(BatchOperation.compressQuality(quality: 0.7).suffixWord == "compressed")
         #expect(BatchOperation.compressTarget(targetBytes: 1000).suffixWord == "compressed")
         #expect(BatchOperation.rotate(quarterTurns: 1).suffixWord == "rotated")
-        #expect(BatchOperation.encrypt(password: "x").suffixWord == "protected")
+        #expect(BatchOperation.encrypt(ProtectionOptions(userPassword: "x", ownerPassword: "x", permissionBits: nil)).suffixWord == "protected")
         #expect(BatchOperation.removePassword(password: "x").suffixWord == "unlocked")
         let options = WatermarkOptions(text: "DRAFT", fontSize: 48, opacity: 0.25, rotationDegrees: 45, red: 0.5, green: 0.5, blue: 0.5, tiled: false)
         #expect(BatchOperation.watermark(options).suffixWord == "watermarked")
@@ -27,7 +27,7 @@ import PDFKit
         #expect(BatchOperation.compressQuality(quality: 0.7).toolTitle == Tool.compress.title)
         #expect(BatchOperation.compressTarget(targetBytes: 1000).toolTitle == Tool.compress.title)
         #expect(BatchOperation.rotate(quarterTurns: 1).toolTitle == Tool.rotate.title)
-        #expect(BatchOperation.encrypt(password: "x").toolTitle == Tool.protect.title)
+        #expect(BatchOperation.encrypt(ProtectionOptions(userPassword: "x", ownerPassword: "x", permissionBits: nil)).toolTitle == Tool.protect.title)
         #expect(BatchOperation.removePassword(password: "x").toolTitle == Tool.protect.title)
         let options = WatermarkOptions(text: "DRAFT", fontSize: 48, opacity: 0.25, rotationDegrees: 45, red: 0.5, green: 0.5, blue: 0.5, tiled: false)
         #expect(BatchOperation.watermark(options).toolTitle == Tool.watermark.title)
@@ -50,7 +50,7 @@ import PDFKit
 
     @Test func outputFilenameReflectsEachOperation() {
         #expect(BatchOperation.rotate(quarterTurns: 2).outputFilename(forInputNamed: "A.pdf") == "A-rotated.pdf")
-        #expect(BatchOperation.encrypt(password: "x").outputFilename(forInputNamed: "A.pdf") == "A-protected.pdf")
+        #expect(BatchOperation.encrypt(ProtectionOptions(userPassword: "x", ownerPassword: "x", permissionBits: nil)).outputFilename(forInputNamed: "A.pdf") == "A-protected.pdf")
         #expect(BatchOperation.removePassword(password: "x").outputFilename(forInputNamed: "A.pdf") == "A-unlocked.pdf")
     }
 
@@ -116,7 +116,7 @@ import PDFKit
         let src = dir.url("src.pdf"), locked = dir.url("locked.pdf"), unlocked = dir.url("unlocked.pdf")
         try PDFFixtures.writePDF(pageCount: 1, to: src)
 
-        try BatchOperation.apply(.encrypt(password: "secret"), inputURL: src, outputURL: locked)
+        try BatchOperation.apply(.encrypt(ProtectionOptions(userPassword: "secret", ownerPassword: "secret", permissionBits: nil)), inputURL: src, outputURL: locked)
         let lockedDoc = try #require(PDFDocument(url: locked))
         #expect(lockedDoc.isEncrypted)
 

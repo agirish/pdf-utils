@@ -42,10 +42,15 @@ extension BatchOperation {
     }
 
     /// Protect · Add password: `nil` until the two entries match and are non-empty. Mirrors
-    /// `ProtectToolView`'s `passwordsMatch`.
-    static func encryptConfig(newPassword: String, confirmPassword: String) -> BatchOperation? {
+    /// `ProtectToolView`'s `passwordsMatch`. `restrictEditing` picks the style: when off, the password
+    /// is set as both the user and owner password (locked to open); when on, it becomes the owner
+    /// password only and the file opens/prints freely while copying and editing stay locked.
+    static func encryptConfig(restrictEditing: Bool, newPassword: String, confirmPassword: String) -> BatchOperation? {
         guard !newPassword.isEmpty, newPassword == confirmPassword else { return nil }
-        return .encrypt(password: newPassword)
+        let options = restrictEditing
+            ? ProtectionOptions(userPassword: "", ownerPassword: newPassword, permissionBits: PDFPermissionPreset.openAndPrintOnly)
+            : ProtectionOptions(userPassword: newPassword, ownerPassword: newPassword, permissionBits: nil)
+        return .encrypt(options)
     }
 
     /// Protect · Remove password: `nil` until a current password is entered. Mirrors `ProtectToolView`.

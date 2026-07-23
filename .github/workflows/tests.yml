@@ -1,0 +1,45 @@
+# PdfToolkit test suite on every push to main, on the self-hosted Mac runner.
+#
+# Scope: the PdfToolkit SPM package (Packages/PdfToolkit) — the app's only test
+# target. The root Package.swift (the PdfUtils app plus the Finder extension and
+# Helper executables) has NO test target, and xcodegen/xcodebuild can't build the
+# app here anyway (AppDelegate uses Bundle.module, which exists only under
+# SwiftPM). So there is deliberately no app-target test step: everything under
+# test lives in PdfToolkit, and `swift test` there covers it.
+
+name: tests
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# Every commit gets its own verdict: bursts of landings queue and run
+# sequentially on the single self-hosted runner rather than cancelling each
+# other, so a break is bisectable to the exact SHA. A run is ~2-3 min and the
+# runner is our own hardware, so per-commit cost is negligible. (If a long burst
+# ever backs the queue up, cancel stale runs with `gh run cancel <id>`.)
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  package-tests:
+    runs-on: [self-hosted, macOS]
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Toolchain
+        run: |
+          xcode-select -p
+          swift --version
+
+      # arch -arm64: the agent runs as the osx-x64 build under Rosetta (macOS 26
+      # fork-bug dodge, see docs/ci.md); swift test inherits x86_64 from it and
+      # then exits 1 despite every test passing. Forcing the payload native fixes
+      # the exit code — verified both directions (green suite -> 0, mutated
+      # failing test -> 1). checkout@v4 wipes the tree each run, so this is always
+      # a cold SPM build (no stale .build cache to trip over).
+      - name: Run PdfToolkit suite
+        run: arch -arm64 swift test --package-path Packages/PdfToolkit

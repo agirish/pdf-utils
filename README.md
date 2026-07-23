@@ -1,5 +1,7 @@
 # pdf-utils
 
+[![tests](https://github.com/agirish/pdf-utils/actions/workflows/tests.yml/badge.svg)](https://github.com/agirish/pdf-utils/actions/workflows/tests.yml)
+
 Native **macOS** app for everyday PDF tasks: a tile-based **dashboard** (similar in spirit to tool hubs like [Smallpdf’s tools page](https://smallpdf.com/pdf-tools)), implemented with **SwiftUI** and **PDFKit**. Everything runs on your Mac; you pick input PDFs and save results with the system file UI.
 
 ## Tools

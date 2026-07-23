@@ -210,4 +210,47 @@ import Testing
 
         #expect(try PDFFixtures.pageCount(at: out) == 1)
     }
+
+    /// The public strip entry (shared by the export coordinator, batch runner, and Finder helper)
+    /// drops the catalog XMP packet for an ordinary PDF via the fresh-document rebuild.
+    @Test func strippingAllMetadataDropsXMPForANonFormPDF() throws {
+        let dir = FixtureDir()
+        let src = dir.url("xmp.pdf"), out = dir.url("clean.pdf")
+        try PDFFixtures.writeRawPDF(xmpCreator: "SECRET-XMP-CREATOR", to: src)
+        #expect(try PDFFixtures.catalogHasEntry("Metadata", at: src))   // sanity: source carries XMP
+
+        try PDFToolkit.strippingAllMetadata(from: Data(contentsOf: src)).write(to: out)
+
+        #expect(try PDFFixtures.catalogHasEntry("Metadata", at: out) == false)
+        #expect(try PDFFixtures.pageCount(at: out) == 1)
+    }
+
+    /// A form-bearing PDF takes the in-place Info-only clear (the fresh-doc rebuild that sheds XMP is
+    /// skipped for forms), so its embedded XMP `/Metadata` packet can survive the clean — the tradeoff
+    /// the Metadata tool now discloses instead of claiming a complete strip. (PDFKit's own re-encode
+    /// still drops the `/AcroForm`, so the form isn't truly preserved either — the disclosure only
+    /// promises that some embedded metadata *may remain*, not that the form is kept.)
+    @Test func strippingAllMetadataLeavesXMPOnFormBearingPDFs() throws {
+        let dir = FixtureDir()
+        let src = dir.url("form.pdf"), out = dir.url("out.pdf")
+        try PDFFixtures.writeRawPDF(xmpCreator: "SECRET-XMP", includeAcroForm: true, to: src)
+        #expect(try PDFFixtures.catalogHasEntry("Metadata", at: src))   // sanity: has XMP
+
+        try PDFToolkit.strippingAllMetadata(from: Data(contentsOf: src)).write(to: out)
+
+        // The XMP packet is NOT dropped for a form-bearing file — exactly what the disclosure warns.
+        #expect(try PDFFixtures.catalogHasEntry("Metadata", at: out))
+    }
+
+    /// The URL-taking form check the Metadata tool uses to decide whether to disclose that XMP may
+    /// remain — true for a real `/AcroForm`, false for an ordinary PDF.
+    @Test func detectsInteractiveFormsFromAURL() throws {
+        let dir = FixtureDir()
+        let form = dir.url("form.pdf"), plain = dir.url("plain.pdf")
+        try PDFFixtures.writeRawPDF(includeAcroForm: true, to: form)
+        try PDFFixtures.writePDF(pageCount: 1, to: plain)
+
+        #expect(PDFToolkit.hasInteractiveForm(at: form) == true)
+        #expect(PDFToolkit.hasInteractiveForm(at: plain) == false)
+    }
 }

@@ -14,7 +14,8 @@ import PdfToolkit
 final class HelperAppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDelegate, NSMenuDelegate {
 
     private static let helperBundleID = "com.pdfutils.PdfUtils.Helper"
-    private static let mainAppBundleID = "com.pdfutils.PdfUtils"
+    // nonisolated: read from the nonisolated work-queue strip helper as well as main-actor code.
+    private nonisolated static let mainAppBundleID = "com.pdfutils.PdfUtils"
 
     /// The extension drops its requests here (its own sandbox container, which we can read) — one
     /// `command-<millis>-<uuid>.json` per request. The bare `command.json` name is the pre-queue
@@ -307,6 +308,7 @@ final class HelperAppDelegate: NSObject, NSApplicationDelegate, UNUserNotificati
                     let output = Self.uniqueOutput(for: input, suffix: "compressed")
                     do {
                         try PDFToolkit.compress(inputURL: input, outputURL: output, quality: 0.6)
+                        Self.stripMetadataIfEnabled(output)
                         revealed.append(output)
                         log.recordSaved(Tool.compress.title, to: output, bytes: Self.fileSize(of: output))
                     } catch {
@@ -326,6 +328,7 @@ final class HelperAppDelegate: NSObject, NSApplicationDelegate, UNUserNotificati
                 let output = Self.uniqueOutput(inDirectory: inputs[0].deletingLastPathComponent(), name: "Merged")
                 do {
                     try PDFToolkit.merge(inputURLs: inputs, outputURL: output)
+                    Self.stripMetadataIfEnabled(output)
                     log.recordSaved(Tool.merge.title, to: output, bytes: Self.fileSize(of: output), detail: "\(inputs.count) files")
                     finish(id: "pdfutils.merge", title: "Merge PDFs", revealed: [output], failed: [])
                 } catch {
@@ -348,6 +351,7 @@ final class HelperAppDelegate: NSObject, NSApplicationDelegate, UNUserNotificati
                     let output = Self.uniqueOutput(for: input, suffix: "rotated")
                     do {
                         try PDFToolkit.rotate(inputURL: input, outputURL: output, pageIndices: Array(0..<count), quarterTurns: turns)
+                        Self.stripMetadataIfEnabled(output)
                         revealed.append(output)
                         log.recordSaved(Tool.rotate.title, to: output, bytes: Self.fileSize(of: output))
                     } catch {
@@ -469,6 +473,7 @@ final class HelperAppDelegate: NSObject, NSApplicationDelegate, UNUserNotificati
                     let output = Self.uniqueOutput(for: input, suffix: "unlocked")
                     do {
                         try PDFToolkit.removePassword(inputURL: input, outputURL: output, password: password)
+                        Self.stripMetadataIfEnabled(output)
                         continuation.resume(returning: .success(output))
                     } catch {
                         continuation.resume(returning: .failure(error))
@@ -560,6 +565,7 @@ final class HelperAppDelegate: NSObject, NSApplicationDelegate, UNUserNotificati
             let output = Self.uniqueOutput(for: input, suffix: "pages")
             do {
                 try PDFToolkit.extract(inputURL: input, outputURL: output, pageIndices: indices)
+                Self.stripMetadataIfEnabled(output)
                 log.recordSaved(Tool.extract.title, to: output, bytes: Self.fileSize(of: output), detail: "\(indices.count) pages")
                 finish(id: "pdfutils.extract", title: "Extract Pages", revealed: [output], failed: [])
             } catch {
@@ -607,6 +613,23 @@ final class HelperAppDelegate: NSObject, NSApplicationDelegate, UNUserNotificati
     /// nil size simply omits the suffix rather than failing the recording.
     private nonisolated static func fileSize(of url: URL) -> Int? {
         try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize
+    }
+
+    /// The app's "Strip metadata on export" setting. The helper has its own bundle id, so read the
+    /// app's defaults domain explicitly (like the log level). Finder quick-actions honor it so a
+    /// right-click action respects the same privacy control the in-app and batch paths do.
+    private nonisolated static func stripMetadataOnExportEnabled() -> Bool {
+        UserDefaults(suiteName: mainAppBundleID)?.bool(forKey: SettingsKeys.stripMetadataOnExport) ?? false
+    }
+
+    /// When "Strip metadata on export" is on, rewrite the produced `url` in place with its metadata
+    /// cleared (Info dictionary + catalog XMP). Best-effort — a read/strip/write failure leaves the
+    /// file as produced rather than failing the operation. Call ON THE WORK QUEUE right after the op
+    /// writes: `strippingAllMetadata` builds a `PDFDocument`, which must stay on the single serial
+    /// queue like every other PDF operation here. A no-op setting returns before touching the file.
+    private nonisolated static func stripMetadataIfEnabled(_ url: URL) {
+        guard stripMetadataOnExportEnabled(), let data = try? Data(contentsOf: url) else { return }
+        try? PDFToolkit.strippingAllMetadata(from: data).write(to: url, options: .atomic)
     }
 
     private nonisolated func startBody(_ count: Int) -> String {

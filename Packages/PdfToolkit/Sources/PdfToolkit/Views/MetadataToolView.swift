@@ -10,6 +10,10 @@ struct MetadataToolView: View {
     @State private var loadedFields = PDFMetadataFields()
     /// The fields as currently edited.
     @State private var fields = PDFMetadataFields()
+    /// Whether the loaded file carries an interactive `/AcroForm`. Such a file is cleaned via the
+    /// in-place Info-only path (the XMP-shedding rebuild is skipped for forms), so its embedded XMP
+    /// metadata can survive — the summary copy discloses that instead of claiming a complete strip.
+    @State private var sourceHasForm = false
     @State private var busy = false
     @State private var alertMessage: String?
     @State private var showImporter = false
@@ -243,7 +247,9 @@ struct MetadataToolView: View {
 
     private var summaryLine: String {
         if fields.isCleared {
-            return "Every editable field is cleared—the saved file will carry none of them."
+            return sourceHasForm
+                ? "Every editable field is cleared. This PDF has an interactive form, so some embedded (XMP) metadata may remain in the saved copy."
+                : "Every editable field is cleared—the saved file will carry none of them."
         }
         let named = [
             (fields.author, "an author"),
@@ -258,9 +264,14 @@ struct MetadataToolView: View {
     /// The confirmation copy for a finished run, from a snapshot of the saved fields so it reflects
     /// what was written (not whatever the fields hold by the time a dialog returns).
     private func summaryText(for saved: PDFMetadataFields) -> (title: String, detail: String) {
-        saved.isCleared
-            ? ("Metadata stripped", "Every editable field was removed; the app name and dates were reset.")
-            : ("Metadata cleaned", "The saved copy carries your edits; the app name and dates were reset.")
+        if saved.isCleared {
+            return sourceHasForm
+                ? ("Metadata stripped",
+                   "Editable fields were removed and the app name and dates reset. Because this file has an interactive form, some embedded (XMP) metadata may remain.")
+                : ("Metadata stripped",
+                   "Every editable field was removed; the app name and dates were reset.")
+        }
+        return ("Metadata cleaned", "The saved copy carries your edits; the app name and dates were reset.")
     }
 
     // MARK: - Loading
@@ -273,17 +284,21 @@ struct MetadataToolView: View {
             isGeneratingPreviews = false
             loadedFields = PDFMetadataFields()
             fields = PDFMetadataFields()
+            sourceHasForm = false
             return
         }
         pageSpecs = []
         isGeneratingPreviews = true
         do {
-            let read = try await PDFBackgroundWork.run {
-                try url.withSecurityScopedAccess { try PDFToolkit.readMetadata(inputURL: url) }
+            let (read, hasForm) = try await PDFBackgroundWork.run {
+                try url.withSecurityScopedAccess {
+                    (try PDFToolkit.readMetadata(inputURL: url), PDFToolkit.hasInteractiveForm(at: url))
+                }
             }
             guard !Task.isCancelled else { return }
             loadedFields = read
             fields = read
+            sourceHasForm = hasForm
         } catch is CancellationError {
             return
         } catch {

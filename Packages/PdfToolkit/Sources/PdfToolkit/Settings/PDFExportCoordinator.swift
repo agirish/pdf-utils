@@ -110,12 +110,6 @@ enum PDFExportCoordinator {
     /// lighter Info-only clear (the rebuild would flatten its fields) and an encrypted PDF (the Protect
     /// tool's password mode) is returned untouched — re-serializing it would corrupt its encryption.
     static func stripMetadata(_ data: Data) -> Data {
-        guard let doc = PDFDocument(data: data), !doc.isEncrypted, !doc.isLocked else { return data }
-        if !PDFToolkit.hasInteractiveForm(doc),
-           let rebuilt = PDFToolkit.dataStrippingHiddenMetadata(from: doc, applying: [:]) {
-            return rebuilt
-        }
-        doc.documentAttributes = [:]
-        return doc.dataRepresentation() ?? data
+        PDFToolkit.strippingAllMetadata(from: data)
     }
 }

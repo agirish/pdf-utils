@@ -157,4 +157,27 @@ extension PDFToolkit {
         clean.documentAttributes = attributes
         return clean.dataRepresentation()
     }
+
+    /// Whether the PDF at `url` carries an interactive `/AcroForm`. A URL-taking convenience over
+    /// ``hasInteractiveForm(_:)`` for callers that hold a path, not an open document — the Metadata
+    /// tool uses it to disclose that a form-bearing file keeps its embedded XMP through cleaning.
+    static func hasInteractiveForm(at url: URL) -> Bool {
+        guard let doc = PDFDocument(url: url) else { return false }
+        return hasInteractiveForm(doc)
+    }
+
+    /// Strips all metadata — the Info dictionary AND the catalog XMP `/Metadata` packet — from finished
+    /// PDF `data`, returning the cleaned bytes. Fail-safe: an unreadable, encrypted, or locked document
+    /// (or an encode failure) returns the input unchanged. A form-bearing PDF keeps the lighter
+    /// Info-only clear (a page-by-page rebuild would orphan its form fields), so its XMP packet can
+    /// still remain — the documented tradeoff. Public so the Finder helper (a separate target) can
+    /// honor "Strip metadata on export" the same way ``PDFExportCoordinator`` and ``BatchRunner`` do.
+    public static func strippingAllMetadata(from data: Data) -> Data {
+        guard let doc = PDFDocument(data: data), !doc.isEncrypted, !doc.isLocked else { return data }
+        if !hasInteractiveForm(doc), let rebuilt = dataStrippingHiddenMetadata(from: doc, applying: [:]) {
+            return rebuilt
+        }
+        doc.documentAttributes = [:]
+        return doc.dataRepresentation() ?? data
+    }
 }

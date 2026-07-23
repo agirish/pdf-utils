@@ -478,4 +478,33 @@ import UniformTypeIdentifiers
                     "orientation \(orientation) disagrees with Apple at (\(fx), \(fy))")
         }
     }
+
+    /// The vector rebuild draws the page content under the rotation transform, then restores the
+    /// state before flattening `/Annots`. That looks like a bug — an annotation drawn without the
+    /// page transform — but `PDFAnnotation.draw(with:in:)` performs the display mapping itself, so
+    /// applying the transform first is what rotates it TWICE. The raster path pins this already
+    /// (`annotationsLandUprightOnARotatedPage`); this pins the vector path Watermark/OCR/Fill & Sign
+    /// share, which a review flagged as corrupting rotated scans.
+    ///
+    /// Fixture: /Rotate 90 letter page, green square at page space (300,300)+(80x60) — displayed
+    /// home is x 300–359, y 232–311 on the 792x612 page. The double-rotation bug would park it near
+    /// x 232–311, y 252–311.
+    @Test func watermarkKeepsExistingAnnotationsUprightOnARotatedPage() throws {
+        let dir = FixtureDir()
+        let src = dir.url("src.pdf"), out = dir.url("out.pdf")
+        try PDFFixtures.writePDF(
+            markers: ["ONLY"], rotations: [0: 90],
+            greenSquareOnFirstPage: CGRect(x: 300, y: 300, width: 80, height: 60), to: src
+        )
+        // A near-invisible mark: this test is about where the EXISTING annotation lands, so the
+        // watermark itself must not tint the samples.
+        var options = WatermarkOptions(text: "W", fontSize: 10, opacity: 0.05,
+                                       rotationDegrees: 0, red: 1, green: 0, blue: 0, tiled: false)
+        options.pageScope = .all
+        try PDFToolkit.watermarkData(inputURL: src, options: options).write(to: out)
+
+        let brightness = try PDFFixtures.brightnessSampler(at: out)
+        #expect(brightness(335, 270) < 0.8)   // the annotation's displayed home
+        #expect(brightness(250, 290) > 0.9)   // the double-rotated position stays blank
+    }
 }

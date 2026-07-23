@@ -253,4 +253,52 @@ import Testing
         #expect(PDFToolkit.hasInteractiveForm(at: form) == true)
         #expect(PDFToolkit.hasInteractiveForm(at: plain) == false)
     }
+
+    /// `strippingAllMetadata` is the entry point the GLOBAL "Strip metadata on export" setting hooks
+    /// into — every batch write and every Finder right-click passes through it, unlike the metadata
+    /// tool's `writeMetadata`. It rebuilds the document page by page, so a review argued it must be
+    /// shredding bookmarks on every export. It does not: labels AND destinations survive, while the
+    /// author really is gone. Pinning both halves so a future rebuild change can't quietly make the
+    /// privacy setting a document corrupter.
+    @Test func strippingAllMetadataKeepsBookmarksPointingAtTheRightPages() throws {
+        let dir = FixtureDir()
+        let base = dir.url("base.pdf"), src = dir.url("outlined.pdf")
+        try PDFFixtures.writePDF(pageCount: 3, to: base)
+        let doc = try #require(PDFDocument(url: base))
+        let root = PDFOutline()
+        for (i, item) in [("Intro", 0), ("Appendix", 2)].enumerated() {
+            let child = PDFOutline()
+            child.label = item.0
+            child.destination = PDFDestination(page: try #require(doc.page(at: item.1)), at: CGPoint(x: 0, y: 792))
+            root.insertChild(child, at: i)
+        }
+        doc.outlineRoot = root
+        doc.documentAttributes = [PDFDocumentAttribute.authorAttribute: "Private Person"]
+        #expect(doc.write(to: src))
+
+        let out = try #require(PDFDocument(data: try PDFToolkit.strippingAllMetadata(from: try Data(contentsOf: src))))
+        let indices: [Int] = (0..<(out.outlineRoot?.numberOfChildren ?? 0)).map { i in
+            guard let page = out.outlineRoot?.child(at: i)?.destination?.page else { return -1 }
+            let raw = out.index(for: page)
+            return raw == NSNotFound ? -1 : raw
+        }
+        #expect((0..<(out.outlineRoot?.numberOfChildren ?? 0)).compactMap { out.outlineRoot?.child(at: $0)?.label } == ["Intro", "Appendix"])
+        #expect(indices == [0, 2])
+        #expect(out.documentAttributes?[PDFDocumentAttribute.authorAttribute] == nil)
+    }
+
+    /// The same guarantee one level up, at the export hook the batch runner actually calls.
+    @Test func exportCoordinatorMetadataStripKeepsBookmarks() throws {
+        let dir = FixtureDir()
+        let base = dir.url("base.pdf")
+        try PDFFixtures.writePDF(pageCount: 3, bookmarks: [("Intro", 0), ("End", 2)], to: base)
+
+        let out = try #require(PDFDocument(data: PDFExportCoordinator.stripMetadata(try Data(contentsOf: base))))
+        let indices: [Int] = (0..<(out.outlineRoot?.numberOfChildren ?? 0)).map { i in
+            guard let page = out.outlineRoot?.child(at: i)?.destination?.page else { return -1 }
+            let raw = out.index(for: page)
+            return raw == NSNotFound ? -1 : raw
+        }
+        #expect(indices == [0, 2])
+    }
 }

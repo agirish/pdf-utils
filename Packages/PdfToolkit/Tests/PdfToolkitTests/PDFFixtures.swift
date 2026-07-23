@@ -322,6 +322,21 @@ enum PDFFixtures {
     }
 }
 
+extension PDFFixtures {
+    /// Rebuilds `src` as an image-only PDF at `out` through Compress's **unbounded** core.
+    ///
+    /// `PDFToolkit.compress(inputURL:outputURL:quality:)` is a save path, so it is bounded by the
+    /// input's size (see ``PDFToolkit/compressDataBounded(inputURL:quality:onProgress:isCancelled:)``):
+    /// rasterizing a lean text fixture inflates it, so the public call correctly passes the ORIGINAL
+    /// bytes through and the output still has its text layer. Tests that pin raster mechanics —
+    /// rotation baked flat, annotations drawn in, displayed geometry — and fixtures that need a
+    /// genuinely scanned-looking page must therefore drive the core directly. The save-path bound
+    /// itself is covered by `PDFToolkitReviewFollowUpTests`.
+    static func rasterize(_ src: URL, to out: URL, quality: Double = 1.0) throws {
+        try PDFToolkit.compressData(inputURL: src, quality: quality).write(to: out, options: .atomic)
+    }
+}
+
 extension PDFOperationError {
     /// A stable, associated-value-free tag so tests can assert *which* case was thrown without the
     /// type needing `Equatable` (its associated `URL`/`String`/`Int` payloads are inspected via

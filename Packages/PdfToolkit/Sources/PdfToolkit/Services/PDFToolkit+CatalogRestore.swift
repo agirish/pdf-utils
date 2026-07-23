@@ -62,7 +62,10 @@ extension PDFToolkit {
     /// nearly every file, since almost every producer writes at least a Producer string. Restricting
     /// it to the five editable fields keeps the fast path fast and still honors what "Strip metadata
     /// on export" (default OFF) promises: a tool run does not quietly erase your document's title.
-    private static func restorableAttributes(of source: PDFDocument) -> [AnyHashable: Any] {
+    // Internal (not private): the page-copy rebuilds in sibling files (extract/reorder, crop) apply
+    // the same carry-over. They build a fresh `PDFDocument` rather than a `CGPDFContext`, so they
+    // set these directly instead of going through ``restoringCatalog(_:from:restoreLinks:)``.
+    static func restorableAttributes(of source: PDFDocument) -> [AnyHashable: Any] {
         let keys: [PDFDocumentAttribute] = [
             .titleAttribute, .authorAttribute, .subjectAttribute, .keywordsAttribute, .creatorAttribute,
         ]

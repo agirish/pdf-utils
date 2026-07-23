@@ -31,6 +31,8 @@ struct SplitToolView: View {
     @Environment(\.colorScheme) private var scheme
     @Environment(\.colorSchemeContrast) private var contrast
     @State private var inputURL: URL?
+    /// The pending "your output will lose X" warning and its acknowledgement.
+    @StateObject private var fidelity = OutputFidelityGate()
     @State private var mode: SplitMode = .visual
     @State private var chunkSize = 1
     @State private var rangeText = ""
@@ -155,6 +157,15 @@ struct SplitToolView: View {
         }
         .toolErrorAlert($alertMessage)
         .task(id: selectionPathKey) {
+            guard let url = inputURL else {
+                fidelity.update(nil)
+                return
+            }
+            await fidelity.refresh(urls: [url]) { urls in
+                OutputFidelityWarning.bookmarks(in: urls)
+            }
+        }
+        .task(id: selectionPathKey) {
             await loadThumbnails()
         }
     }
@@ -267,11 +278,20 @@ struct SplitToolView: View {
 
             Divider()
 
-            RunActionButton(title: "Split & save…", busy: busy, canRun: canRun) {
-                Task { await runSplit() }
+            VStack(spacing: 12) {
+                if let warning = fidelity.warning {
+                    OutputFidelityNote(warning: warning, toolTitle: Tool.split.title)
+                }
+                RunActionButton(title: "Split & save…", busy: busy, canRun: canRun) {
+                    guard fidelity.shouldProceed() else { return }
+                    Task { await runSplit() }
+                }
             }
             .padding(16)
             .toolActionBar()
+            .outputFidelityConfirmation(fidelity, toolTitle: Tool.split.title) {
+                Task { await runSplit() }
+            }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }

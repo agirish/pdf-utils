@@ -15,7 +15,7 @@ import Testing
         let vector = dir.url("vector.pdf")
         try PDFFixtures.writePDF(markers: [marker], to: vector)
         let scanned = dir.url("scanned.pdf")
-        try PDFToolkit.compress(inputURL: vector, outputURL: scanned, quality: 1.0)
+        try PDFFixtures.rasterize(vector, to: scanned)
         #expect(try PDFFixtures.pageTexts(at: scanned) == [""], "fixture must start with no text layer")
         return scanned
     }

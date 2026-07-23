@@ -158,6 +158,23 @@ extension PDFToolkit {
         return clean.dataRepresentation()
     }
 
+    /// How many bookmarks (outline entries, counted through the whole tree) the PDF at `url` has, or
+    /// 0 when it has none / can't be read. Powers the Merge and Split warning that the combined or
+    /// split output won't carry them — so the warning only appears when there is something to lose.
+    /// Cheap: PDFKit parses the outline lazily and this walks nodes, not pages.
+    static func bookmarkCount(at url: URL) -> Int {
+        guard let doc = PDFDocument(url: url), !doc.isLocked, let root = doc.outlineRoot else { return 0 }
+        func count(_ node: PDFOutline) -> Int {
+            var total = 0
+            for i in 0..<node.numberOfChildren {
+                guard let child = node.child(at: i) else { continue }
+                total += 1 + count(child)
+            }
+            return total
+        }
+        return count(root)
+    }
+
     /// Whether the PDF at `url` carries an interactive `/AcroForm`. A URL-taking convenience over
     /// ``hasInteractiveForm(_:)`` for callers that hold a path, not an open document — the Metadata
     /// tool uses it to disclose that a form-bearing file keeps its embedded XMP through cleaning.

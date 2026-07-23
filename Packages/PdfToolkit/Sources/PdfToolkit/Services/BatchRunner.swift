@@ -68,7 +68,8 @@ enum BatchOperation: Sendable {
     static func applyData(_ operation: BatchOperation, inputURL: URL) throws -> Data {
         switch operation {
         case .compressQuality(let quality):
-            return try PDFToolkit.compressData(inputURL: inputURL, quality: quality)
+            // Bounded: every batch result is written, so it must never exceed its input's size.
+            return try PDFToolkit.compressDataBounded(inputURL: inputURL, quality: quality)
         case .compressTarget(let targetBytes):
             return try PDFToolkit.compressToTargetData(inputURL: inputURL, targetBytes: targetBytes)
         case .rotate(let quarterTurns):

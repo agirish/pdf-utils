@@ -43,6 +43,8 @@ struct MergeToolView: View {
     @Environment(\.colorScheme) private var scheme
     @Environment(\.colorSchemeContrast) private var contrast
     @State private var entries: [MergeEntry] = []
+    /// The pending "your output will lose X" warning and its acknowledgement.
+    @StateObject private var fidelity = OutputFidelityGate()
     @State private var busy = false
     @State private var alertMessage: String?
     @State private var showImporter = false
@@ -89,6 +91,11 @@ struct MergeToolView: View {
             }
         }
         .toolErrorAlert($alertMessage)
+        .task(id: entriesSignature) {
+            await fidelity.refresh(urls: entries.map(\.url)) { urls in
+                OutputFidelityWarning.bookmarks(in: urls)
+            }
+        }
         .task(id: entriesSignature) {
             await refreshPageSummary()
         }
@@ -191,16 +198,23 @@ struct MergeToolView: View {
                 }
                 // Also disabled while page counts are still loading: resolving a typed range against
                 // a not-yet-known count (`pagesByEntryID[...] ?? 0`) would throw a bogus out-of-bounds error.
+                if let warning = fidelity.warning {
+                    OutputFidelityNote(warning: warning, toolTitle: Tool.merge.title)
+                }
                 RunActionButton(
                     title: "Merge & save…",
                     busy: busy,
                     canRun: !entries.isEmpty && !pageSummaryLoading && lockedEntryIDs.isEmpty
                 ) {
+                    guard fidelity.shouldProceed() else { return }
                     Task { await runMerge() }
                 }
             }
             .padding(16)
             .toolActionBar()
+            .outputFidelityConfirmation(fidelity, toolTitle: Tool.merge.title) {
+                Task { await runMerge() }
+            }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }

@@ -53,6 +53,12 @@ struct UnifiedFilePanel<Config: View>: View {
     /// produces the data, routes it through `PDFExportCoordinator`, and shows its save dialog on
     /// `.present`.
     let runSingle: (URL) async -> Void
+    /// Detects what this tool's output will genuinely lose for the current file set, or nil when the
+    /// tool has no such loss (Rotate, Protect). Runs on the PDF serial queue whenever the file set
+    /// changes; when it yields a warning the panel shows an ``OutputFidelityNote`` above the action
+    /// and makes both run buttons route through a confirmation first. Defaulted, so tools that opt
+    /// out compile unchanged.
+    var detectFidelityWarning: (@Sendable ([URL]) -> OutputFidelityWarning?)? = nil
     /// The tool's configuration cards, count-aware if it needs to be (Rotate swaps page-scope for an
     /// all-pages note once there's more than one file).
     @ViewBuilder var config: () -> Config
@@ -65,6 +71,8 @@ struct UnifiedFilePanel<Config: View>: View {
     @State private var thumbnailSize: CGFloat = 120
     /// The one loaded file is password-locked and can't be previewed until unlocked.
     @State private var previewLocked = false
+    /// The pending "your output will lose X" warning and its acknowledgement.
+    @StateObject private var fidelity = OutputFidelityGate()
     /// The tool's effective accent (per the accent-style preset), injected by ``ToolDetailView``.
     @Environment(\.toolAccent) private var accent
 
@@ -111,6 +119,22 @@ struct UnifiedFilePanel<Config: View>: View {
         .task(id: previewPathKey) {
             await loadThumbnails()
         }
+        .task(id: fidelityPathKey) {
+            await refreshFidelityWarning()
+        }
+    }
+
+    /// Re-detects the fidelity warning whenever the file SET changes (not just the first file, since
+    /// a many-file run is warned about too).
+    private var fidelityPathKey: String {
+        detectFidelityWarning == nil ? "" : runner.items.map(\.url.path).joined(separator: "\u{1}")
+    }
+
+    /// Runs the host's detector on the PDF serial queue — it opens documents, which must not happen
+    /// on the main actor or concurrently with other PDFKit work.
+    private func refreshFidelityWarning() async {
+        guard let detect = detectFidelityWarning else { return }
+        await fidelity.refresh(urls: runner.items.map(\.url), detect: detect)
     }
 
     // MARK: - Sidebar
@@ -336,6 +360,28 @@ struct UnifiedFilePanel<Config: View>: View {
     // MARK: - Action bar
 
     private var actionBar: some View {
+        VStack(spacing: 12) {
+            if let warning = fidelity.warning, !runner.isRunning {
+                OutputFidelityNote(warning: warning, toolTitle: tool.title)
+            }
+            actionControl
+        }
+        .padding(16)
+        .toolActionBar()
+        // Re-enters the same action; the gate now lets it through.
+        .outputFidelityConfirmation(fidelity, toolTitle: tool.title) { runPendingAction() }
+    }
+
+    /// Which action the confirmation should resume — set just before the gate is consulted.
+    private func runPendingAction() {
+        if fileCount >= 2 {
+            startMultiRun()
+        } else if let url = firstURL {
+            Task { await runSingle(url) }
+        }
+    }
+
+    private var actionControl: some View {
         Group {
             if runner.isRunning {
                 Button(role: .destructive) {
@@ -352,17 +398,17 @@ struct UnifiedFilePanel<Config: View>: View {
                 .controlSize(.large)
             } else if fileCount >= 2 {
                 RunActionButton(title: "Run on \(fileCount) files", canRun: currentOperation != nil) {
+                    guard fidelity.shouldProceed() else { return }
                     startMultiRun()
                 }
             } else {
                 RunActionButton(title: singleActionTitle, busy: busy, canRun: !runner.isEmpty && currentOperation != nil) {
                     guard let url = firstURL else { return }
+                    guard fidelity.shouldProceed() else { return }
                     Task { await runSingle(url) }
                 }
             }
         }
-        .padding(16)
-        .toolActionBar()
     }
 
     private func startMultiRun() {

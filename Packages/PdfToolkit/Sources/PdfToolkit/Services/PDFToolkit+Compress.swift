@@ -10,7 +10,8 @@ extension PDFToolkit {
     /// Rebuilds the PDF from rendered page images to reduce size. `quality` is 0...1 (JPEG-style tradeoff).
     public static func compress(inputURL: URL, outputURL: URL, quality: Double) throws {
         try requireDistinctOutput(outputURL, from: [inputURL])
-        try writeOutput(try compressData(inputURL: inputURL, quality: quality), to: outputURL)
+        // Bounded: a write path must never produce a file bigger than its input.
+        try writeOutput(try compressDataBounded(inputURL: inputURL, quality: quality), to: outputURL)
     }
 
     /// In-memory core of ``compress(inputURL:outputURL:quality:)`` — the guarded open plus the
@@ -28,6 +29,36 @@ extension PDFToolkit {
     ) throws -> Data {
         let source = try openUnlockedDocument(at: inputURL)
         return try compressedData(from: source, quality: quality, onProgress: onProgress, isCancelled: isCancelled)
+    }
+
+    /// ``compressData(inputURL:quality:onProgress:isCancelled:)`` bounded by the input's size — the
+    /// variant every path that actually WRITES a file uses.
+    ///
+    /// Rasterizing a lean vector/text PDF can *inflate* it, so quality mode could hand back a
+    /// "compressed" file larger than the original. `compressToTargetData` has always had this
+    /// fallback; quality mode did not, because the Compress screen's strength-estimate cards call
+    /// the raw core directly and a guard there would collapse them all onto the source size (they
+    /// exist to show how the rungs differ). Keeping the bound in a separate save-only wrapper gives
+    /// both: honest per-rung estimates on screen, and an output that is never bigger than the input.
+    ///
+    /// The estimate cards can therefore quote a size the save doesn't produce — only ever in the
+    /// direction of the saved file being *smaller* (the source passed through), which is also what
+    /// the screen's "Already optimized" wording covers.
+    internal static func compressDataBounded(
+        inputURL: URL,
+        quality: Double,
+        onProgress: (@Sendable (_ page: Int, _ total: Int) -> Void)? = nil,
+        isCancelled: (@Sendable () -> Bool)? = nil
+    ) throws -> Data {
+        let compressed = try compressData(
+            inputURL: inputURL, quality: quality, onProgress: onProgress, isCancelled: isCancelled
+        )
+        // The count, not the bytes: the source is only read when it actually wins.
+        guard let sourceBytes = try? inputURL.resourceValues(forKeys: [.fileSizeKey]).fileSize,
+              compressed.count >= sourceBytes,
+              let original = try? Data(contentsOf: inputURL)
+        else { return compressed }
+        return original
     }
 
     /// Compresses toward a byte budget by sweeping a bounded ladder of qualities from high to low,

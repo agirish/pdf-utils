@@ -242,8 +242,15 @@ public enum PDFToolkit {
         guard !inputs.isEmpty else { throw PDFOperationError.noInputFiles }
 
         let merged = PDFDocument()
-        for input in inputs {
+        // The combined document takes the FIRST input's Title/Author (the user's choice): a merge
+        // has no single obvious source, and the output is already named after the first file, so
+        // this is the predictable answer. Without it a merge silently dropped every input's title.
+        var mergedAttributes: [AnyHashable: Any] = [:]
+        for (index, input) in inputs.enumerated() {
             let doc = try openUnlockedDocument(at: input.url)
+            // The FIRST file's fields specifically — not the first non-empty set found. If file 1
+            // is untitled the merge stays untitled rather than silently adopting file 3's title.
+            if index == 0 { mergedAttributes = restorableAttributes(of: doc) }
             let indices = input.pageIndices ?? Array(0..<doc.pageCount)
             for i in indices {
                 guard i >= 0, i < doc.pageCount else {
@@ -266,6 +273,7 @@ public enum PDFToolkit {
         // A selection that copies nothing (every page dropped/filtered out) would otherwise be
         // written as a one-blank-page file by PDFKit's writer — refuse it with a clear error instead.
         guard merged.pageCount > 0 else { throw PDFOperationError.noPagesSelected }
+        if !mergedAttributes.isEmpty { merged.documentAttributes = mergedAttributes }
         guard let data = merged.dataRepresentation() else {
             throw PDFOperationError.couldNotEncodeOutput
         }
@@ -290,6 +298,9 @@ public enum PDFToolkit {
         // source outline naively would point every part's bookmarks at the wrong pages, so we keep
         // dropping it rather than ship a misdirected one.
         let width = max(2, String(segments.count).count)
+        // Every part is the same document cut up, so each inherits the source's Title/Author rather
+        // than being written with an empty info dictionary.
+        let sourceAttributes = restorableAttributes(of: source)
         var outputs: [URL] = []
         do {
             for (partIndex, segment) in segments.enumerated() {
@@ -306,6 +317,7 @@ public enum PDFToolkit {
                     out.insert(copy, at: insertAt)
                     insertAt += 1
                 }
+                if !sourceAttributes.isEmpty { out.documentAttributes = sourceAttributes }
                 let suffix = String(format: "%0\(width)d", partIndex + 1)
                 let url = PDFExportCoordinator.uniqueURL(
                     inDirectory: directory,
@@ -375,6 +387,11 @@ public enum PDFToolkit {
         // dropping bookmarks whose target page wasn't extracted. (An interactive `/AcroForm` still
         // does not survive the page-copy rebuild — out of scope here.)
         remapOutline(from: source, to: out, sourceToOutput: sourceToOutput)
+        // The fresh document starts with an empty info dictionary, so extracting (or reordering)
+        // used to silently strip the document's Title/Author — the same catalog loss the rebuild
+        // family had, and one that contradicts "Strip metadata on export" defaulting to OFF.
+        let attributes = restorableAttributes(of: source)
+        if !attributes.isEmpty { out.documentAttributes = attributes }
 
         guard let data = out.dataRepresentation() else {
             throw PDFOperationError.couldNotEncodeOutput

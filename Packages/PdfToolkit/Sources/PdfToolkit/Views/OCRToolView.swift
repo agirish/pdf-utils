@@ -6,6 +6,8 @@ import UniformTypeIdentifiers
 struct OCRToolView: View {
     @Environment(\.toolAccent) private var accent
     @State private var inputURL: URL?
+    /// The pending "your output will lose X" warning and its acknowledgement.
+    @StateObject private var fidelity = OutputFidelityGate()
     @State private var accurate = true
     @State private var skipPagesWithText = true
     /// Chosen recognition language as a BCP-47 code; empty means Automatic (Vision auto-detects).
@@ -139,6 +141,15 @@ struct OCRToolView: View {
         .onChange(of: recognitionLanguage) { _, _ in saveSummary = nil }
         .onChange(of: skipPagesWithText) { _, _ in saveSummary = nil }
         .task(id: selectionPathKey) {
+            guard let url = inputURL else {
+                fidelity.update(nil)
+                return
+            }
+            await fidelity.refresh(urls: [url]) { urls in
+                urls.first.flatMap(OutputFidelityWarning.interactiveForm(at:))
+            }
+        }
+        .task(id: selectionPathKey) {
             await loadThumbnails()
         }
         // Leaving the screen must free the PDF serial queue, not let a multi-minute recognition
@@ -213,11 +224,20 @@ struct OCRToolView: View {
 
             Divider()
 
-            RunActionButton(title: "Make searchable & save…", busy: busy, canRun: inputURL != nil) {
-                runTask = Task { await runOCR() }
+            VStack(spacing: 12) {
+                if let warning = fidelity.warning {
+                    OutputFidelityNote(warning: warning, toolTitle: Tool.ocr.title)
+                }
+                RunActionButton(title: "Make searchable & save…", busy: busy, canRun: inputURL != nil) {
+                    guard fidelity.shouldProceed() else { return }
+                    runTask = Task { await runOCR() }
+                }
             }
             .padding(16)
             .toolActionBar()
+            .outputFidelityConfirmation(fidelity, toolTitle: Tool.ocr.title) {
+                runTask = Task { await runOCR() }
+            }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }

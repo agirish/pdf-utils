@@ -194,7 +194,8 @@ struct CompressToolView: View {
             makeOperation: { currentBatchOperation },
             fallbackSuffix: "compressed",
             previewSubtitle: "Pages in the file you’re about to compress.",
-            runSingle: { url in await runCompress(url) }
+            runSingle: { url in await runCompress(url) },
+            detectFidelityWarning: { urls in urls.first.flatMap(OutputFidelityWarning.interactiveForm(at:)) }
         ) {
             controlsSection
         }
@@ -784,7 +785,9 @@ struct CompressToolView: View {
                     try fileURL.withSecurityScopedAccess {
                         switch selectedMode {
                         case .quality:
-                            return try PDFToolkit.compressData(
+                            // Bounded on the SAVE path only — the estimate cards above still call
+                            // the raw core so each strength rung reports its own honest size.
+                            return try PDFToolkit.compressDataBounded(
                                 inputURL: fileURL, quality: qualityValue,
                                 onProgress: onProgress, isCancelled: isCancelled
                             )

@@ -134,6 +134,7 @@ extension Tool {
                     "Compression never makes a file bigger: if a page can't be shrunk, the original is passed through unchanged.",
                     "Size estimates follow the “Strip metadata on export” setting, so the preview matches the file you actually save.",
                     "Bookmarks, the document title, and clickable links survive compression—only the page artwork is rebuilt as images.",
+                    "Interactive form fields are flattened into the page — the saved copy looks identical but can no longer be filled in. Bookmarks, links, and the title are kept.",
                 ]
             )
         case .rotate:
@@ -183,6 +184,7 @@ extension Tool {
                 tips: [
                     "A page range keeps the order you type (for example 5,1,2), just like Extract.",
                     "Large merges can take a moment; the window should stay responsive while working.",
+                    "Bookmarks aren’t carried into the merged file — each source has its own outline at different page offsets, so they’re dropped rather than pointed at the wrong pages. Page content, links, form fields, and the first file’s title are unaffected.",
                 ]
             )
         case .split:
@@ -206,6 +208,7 @@ extension Tool {
                 tips: [
                     "The live “Creates N files” count under the options shows how many files the current settings will produce.",
                     "A part whose name is already taken in the chosen folder is numbered (\u{201C}name 2.pdf\u{201D}) — existing files are never overwritten.",
+                    "Bookmarks aren’t carried into the parts — one outline can’t be cut across several files correctly yet, so they’re dropped rather than misdirected. Page content, links, form fields, and the document title are unaffected.",
                 ]
             )
         case .extract:

@@ -61,6 +61,7 @@ extension PDFToolkit {
             output.insert(copy, at: output.pageCount)
         }
         reattachOutline(from: source, to: output)
+        carryDocumentAttributes(from: source, to: output)
         guard let data = output.dataRepresentation() else {
             throw PDFOperationError.couldNotEncodeOutput
         }
@@ -90,12 +91,13 @@ extension PDFToolkit {
                     let index = source.index(for: destPage)
                     if index != NSNotFound, let outPage = output.page(at: index) {
                         let box = outPage.bounds(for: .cropBox)
-                        let p = dest.point
-                        let clamped = CGPoint(
-                            x: min(max(p.x, box.minX), box.maxX),
-                            y: min(max(p.y, box.minY), box.maxY)
+                        kept.destination = PDFDestination(
+                            page: outPage,
+                            at: CGPoint(
+                                x: clampedDestinationCoordinate(dest.point.x, low: box.minX, high: box.maxX),
+                                y: clampedDestinationCoordinate(dest.point.y, low: box.minY, high: box.maxY)
+                            )
                         )
-                        kept.destination = PDFDestination(page: outPage, at: clamped)
                     }
                 }
                 parent.insertChild(kept, at: parent.numberOfChildren)
@@ -108,6 +110,30 @@ extension PDFToolkit {
         if newRoot.numberOfChildren > 0 {
             output.outlineRoot = newRoot
         }
+    }
+
+    /// Clamps one destination coordinate into the trimmed crop box — unless it is PDFKit's
+    /// "unspecified" sentinel, which must be passed through untouched.
+    ///
+    /// A `/FitH`-style destination ("show this page fitted", no explicit scroll position) is
+    /// expressed as `kPDFDestinationUnspecifiedValue` (= FLT_MAX) in the coordinate, and it DOES
+    /// survive a PDFKit write/read round trip (verified empirically). Clamping treated that
+    /// sentinel as a real coordinate and pinned it to the box corner: cropping a document turned
+    /// every "fit the page" bookmark into "scroll to the top-right corner" — measured as
+    /// `(3.4e+38, 3.4e+38)` becoming `(582, 762)` on a 30 pt trim of US Letter. Recognizing the
+    /// sentinel keeps a Fit bookmark a Fit bookmark, while a real point still gets clamped into the
+    /// visible region (the reason the clamp exists).
+    static func clampedDestinationCoordinate(_ value: CGFloat, low: CGFloat, high: CGFloat) -> CGFloat {
+        guard value != CGFloat(kPDFDestinationUnspecifiedValue) else { return value }
+        return min(max(value, low), high)
+    }
+
+    /// Copies the source's user-set info fields onto a page-copy rebuild. A fresh `PDFDocument`
+    /// starts with an empty info dictionary, so without this a crop silently stripped the
+    /// document's Title/Author — which contradicts "Strip metadata on export" defaulting to OFF.
+    static func carryDocumentAttributes(from source: PDFDocument, to output: PDFDocument) {
+        let attributes = restorableAttributes(of: source)
+        if !attributes.isEmpty { output.documentAttributes = attributes }
     }
 
     /// Crops every page to its rendered content bounds plus `padding` points of breathing room.
@@ -164,6 +190,7 @@ extension PDFToolkit {
             output.insert(copy, at: output.pageCount)
         }
         reattachOutline(from: source, to: output)
+        carryDocumentAttributes(from: source, to: output)
         guard let data = output.dataRepresentation() else {
             throw PDFOperationError.couldNotEncodeOutput
         }

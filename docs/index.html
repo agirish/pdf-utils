@@ -113,6 +113,15 @@
 
   /* Feature list */
   .feat-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:18px}
+  .fidelity{border:1px solid var(--line);border-radius:14px;padding:22px 24px;margin-top:18px}
+  .fidelity h3{margin:0 0 6px;font-size:1.05rem}
+  .fidelity p{margin:0 0 14px}
+  .fidelity+.fidelity{margin-top:14px}
+  .keeps{width:100%;border-collapse:collapse;margin-top:22px;font-size:.92rem}
+  .keeps th,.keeps td{border:1px solid var(--line);padding:9px 12px;text-align:left}
+  .keeps th{font-weight:600}
+  .keeps td.no{font-weight:600}
+  .kept{opacity:.75}
   .feat{background:var(--panel);border:1px solid var(--panel-brd);border-radius:14px;padding:20px 20px 22px}
   .feat .ic{font-size:22px;margin-bottom:10px}
   .feat h3{margin:0 0 6px;font-size:16px;letter-spacing:-.01em}
@@ -154,6 +163,7 @@
     <div class="nav-links">
       <a href="#tools" data-collapse>Tools</a>
       <a href="#features" data-collapse>Features</a>
+      <a href="#preserves" data-collapse>What's preserved</a>
       <a href="#privacy" data-collapse>Privacy</a>
       <a class="ghlink" href="https://github.com/agirish/pdf-utils">GitHub ↗</a>
       <div class="theme-btn" id="themeBtn" title="Toggle theme" aria-label="Toggle light/dark theme">◐</div>
@@ -225,6 +235,34 @@
       <div class="feat"><div class="ic">❓</div><h3>In-app help <kbd>⌘?</kbd></h3><p>A built-in help book with per-tool guidance and cross-links, always a keystroke away.</p></div>
       <div class="feat"><div class="ic">🔒</div><h3>On-device by design</h3><p>Security-scoped file access, work off the main thread, and a clear error when macOS says no.</p></div>
     </div>
+  </div>
+</section>
+
+<section id="preserves">
+  <div class="wrap">
+    <div class="sec-head">
+      <div class="eyebrow">Know before you save</div>
+      <h2>What each tool preserves</h2>
+      <p>Some tools rebuild every page to do their job. That is what makes them work — and it has two consequences worth knowing. The app warns you in context, and only when the file you loaded actually has something to lose.</p>
+    </div>
+
+    <div class="fidelity">
+      <h3>Interactive form fields are flattened</h3>
+      <p><b>Affects Watermark, OCR, Fill &amp; Sign, Compress, and Redact.</b> These tools re-emit each page, so a fillable AcroForm — text fields, checkboxes, dropdowns, signature fields — becomes part of the page picture. The saved copy looks and prints identically, but <b>the fields can no longer be filled in, edited, or read back by a form processor</b>. Values already filled in are kept as visible text. If you need the form to stay fillable, keep the original and share the rebuilt copy separately.</p>
+    </div>
+
+    <div class="fidelity">
+      <h3>Bookmarks are not carried over by Merge or Split</h3>
+      <p>A merge concatenates pages from several documents, each with its own outline at shifting page offsets; a split cuts one outline across several files. Producing a correct combined or per-part outline is genuine work that isn't done yet, and a naive copy would point bookmarks at the wrong pages — so both tools drop them rather than ship misdirected ones. <b>Page content, links, form fields, and the document title are unaffected.</b></p>
+    </div>
+
+    <table class="keeps">
+      <tr><th>Tool</th><th>Bookmarks</th><th>Title / author</th><th>Links</th><th>Form fields</th></tr>
+      <tr><td>Watermark, OCR, Fill &amp; Sign, Compress</td><td class="kept">kept</td><td class="kept">kept</td><td class="kept">kept</td><td class="no">flattened</td></tr>
+      <tr><td>Redact</td><td class="kept">kept</td><td class="kept">kept</td><td class="no">dropped on marked pages</td><td class="no">flattened</td></tr>
+      <tr><td>Crop, Extract, Reorder, Delete, Rotate</td><td class="kept">kept</td><td class="kept">kept</td><td class="kept">kept</td><td class="kept">kept</td></tr>
+      <tr><td>Merge, Split</td><td class="no">dropped</td><td class="kept">kept</td><td class="kept">kept</td><td class="kept">kept</td></tr>
+    </table>
   </div>
 </section>
 

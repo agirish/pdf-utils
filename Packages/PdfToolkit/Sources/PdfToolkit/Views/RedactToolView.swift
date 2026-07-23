@@ -10,6 +10,8 @@ struct RedactToolView: View {
     private var rasterLongEdge: Double = 4000
 
     @State private var inputURL: URL?
+    /// The pending "your output will lose X" warning and its acknowledgement.
+    @StateObject private var fidelity = OutputFidelityGate()
     @State private var pdfDocument: PDFDocument?
     @State private var marks: [RedactionMark] = []
     /// The region selected for editing — shared with the canvas so a click there and a tap in the
@@ -113,6 +115,15 @@ struct RedactToolView: View {
         }
         .toolErrorAlert($alertMessage)
         .task(id: selectionPathKey) {
+            guard let url = inputURL else {
+                fidelity.update(nil)
+                return
+            }
+            await fidelity.refresh(urls: [url]) { urls in
+                urls.first.flatMap(OutputFidelityWarning.interactiveForm(at:))
+            }
+        }
+        .task(id: selectionPathKey) {
             await reloadDocumentForSelection()
         }
         // Record every settled change to the marks as one undo step — but not the intermediate frames
@@ -191,15 +202,24 @@ struct RedactToolView: View {
 
             Divider()
 
-            RunActionButton(
-                title: "Redact & save…",
-                busy: busy,
-                canRun: inputURL != nil && pdfDocument != nil && !marks.isEmpty && !searching
-            ) {
-                Task { await runRedact() }
+            VStack(spacing: 12) {
+                if let warning = fidelity.warning {
+                    OutputFidelityNote(warning: warning, toolTitle: Tool.redact.title)
+                }
+                RunActionButton(
+                    title: "Redact & save…",
+                    busy: busy,
+                    canRun: inputURL != nil && pdfDocument != nil && !marks.isEmpty && !searching
+                ) {
+                    guard fidelity.shouldProceed() else { return }
+                    Task { await runRedact() }
+                }
             }
             .padding(16)
             .toolActionBar()
+            .outputFidelityConfirmation(fidelity, toolTitle: Tool.redact.title) {
+                Task { await runRedact() }
+            }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }

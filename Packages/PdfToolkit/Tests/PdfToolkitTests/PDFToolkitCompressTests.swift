@@ -7,6 +7,11 @@ import PDFKit
 /// selectable text. Tests pin that the page count survives, that pages come out rasterized (text no
 /// longer extractable, intrinsic rotation baked flat), and that extreme quality values are clamped
 /// rather than crashing.
+///
+/// The raster-mechanics tests drive the core via `PDFFixtures.rasterize` rather than the public
+/// `compress(inputURL:outputURL:quality:)`: that is a save path and is bounded by the input's size,
+/// so on these deliberately lean text fixtures — which INFLATE when rasterized — it correctly passes
+/// the original bytes through instead. That bound is pinned in `PDFToolkitReviewFollowUpTests`.
 @Suite struct PDFToolkitCompressTests {
 
     @Test func preservesPageCount() throws {
@@ -25,7 +30,7 @@ import PDFKit
         let src = dir.url("src.pdf"), out = dir.url("out.pdf")
         try PDFFixtures.writePDF(markers: ["MARKERPAGE1"], to: src)
 
-        try PDFToolkit.compress(inputURL: src, outputURL: out, quality: 0.5)
+        try PDFFixtures.rasterize(src, to: out, quality: 0.5)
 
         let texts = try PDFFixtures.pageTexts(at: out)
         #expect(!texts[0].contains("MARKERPAGE1"))
@@ -38,7 +43,7 @@ import PDFKit
         let src = dir.url("src.pdf"), out = dir.url("out.pdf")
         try PDFFixtures.writePDF(markers: ["ONLY"], rotations: [0: 90], to: src)
 
-        try PDFToolkit.compress(inputURL: src, outputURL: out, quality: 0.5)
+        try PDFFixtures.rasterize(src, to: out, quality: 0.5)
 
         #expect(try PDFFixtures.pageRotations(at: out) == [0])
     }
@@ -73,7 +78,7 @@ import PDFKit
         let src = dir.url("src.pdf"), out = dir.url("out.pdf")
         try PDFFixtures.writePDF(markers: ["ONLY"], rotations: [0: 90], to: src)
 
-        try PDFToolkit.compress(inputURL: src, outputURL: out, quality: 1.0)
+        try PDFFixtures.rasterize(src, to: out, quality: 1.0)
 
         #expect(try PDFFixtures.pageSize(at: out) == CGSize(width: 792, height: 612))
         #expect(try PDFFixtures.pageRotations(at: out) == [0])
@@ -95,7 +100,7 @@ import PDFKit
         let annotationRect = CGRect(x: 300, y: 300, width: 80, height: 60)
         try PDFFixtures.writePDF(markers: ["ONLY"], greenSquareOnFirstPage: annotationRect, to: src)
 
-        try PDFToolkit.compress(inputURL: src, outputURL: out, quality: 1.0)
+        try PDFFixtures.rasterize(src, to: out, quality: 1.0)
 
         let brightness = try PDFFixtures.brightnessSampler(at: out)
         #expect(brightness(340, 330) < 0.8)   // green square present, not blank white
@@ -114,7 +119,7 @@ import PDFKit
             greenSquareOnFirstPage: CGRect(x: 300, y: 300, width: 80, height: 60), to: src
         )
 
-        try PDFToolkit.compress(inputURL: src, outputURL: out, quality: 1.0)
+        try PDFFixtures.rasterize(src, to: out, quality: 1.0)
 
         let brightness = try PDFFixtures.brightnessSampler(at: out)
         #expect(brightness(335, 270) < 0.8)   // inside the correct displayed rect (and outside the buggy one)
@@ -133,7 +138,7 @@ import PDFKit
             greenSquareOnFirstPage: CGRect(x: 300, y: 300, width: 80, height: 60), to: src
         )
 
-        try PDFToolkit.compress(inputURL: src, outputURL: out, quality: 1.0)
+        try PDFFixtures.rasterize(src, to: out, quality: 1.0)
 
         #expect(try PDFFixtures.pageSize(at: out) == CGSize(width: 500, height: 600))
         let brightness = try PDFFixtures.brightnessSampler(at: out)

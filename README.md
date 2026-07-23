@@ -20,15 +20,15 @@ Tools are grouped on the dashboard into four sections — **Optimize**, **Organi
 
 | Tool | What it does |
 |------|--------------|
-| **Compress PDF** | Rebuilds each page as an image to reduce file size — best for scans and photos. Pick a compression **strength** or a **target size in MB**. Intrinsic page rotation is flattened into the bitmap (output rotation 0, so it's never double-applied). Add several PDFs to compress a whole batch at once. |
-| **OCR PDF** | Runs Apple's on-device text recognition over every page and lays an invisible, selectable text layer behind the scan. The page image is untouched — search, copy, and highlight simply start working. |
+| **Compress PDF** | Rebuilds each page as an image to reduce file size — best for scans and photos. Pick a compression **strength** or a **target size in MB**. Intrinsic page rotation is flattened into the bitmap (output rotation 0, so it's never double-applied). Add several PDFs to compress a whole batch at once. Never writes a file larger than the original. **Interactive form fields are flattened** — see [What each tool preserves](#what-each-tool-preserves). |
+| **OCR PDF** | Runs Apple's on-device text recognition over every page and lays an invisible, selectable text layer behind the scan. The page image is untouched — search, copy, and highlight simply start working. Bookmarks, title, and links survive; **interactive form fields are flattened** — see [What each tool preserves](#what-each-tool-preserves). |
 
 ### Organize pages
 
 | Tool | What it does |
 |------|--------------|
-| **Merge PDF** | Stacks several PDFs into one, top-to-bottom in the list. Take only some pages of a file by typing a range in its **Pages** field (e.g. `1, 3-5`); leave blank for all. Reorder rows with the arrows, or drop a stray page straight from the combined preview. |
-| **Split PDF** | Cuts one PDF into several — fixed chunks of **N pages**, or **custom ranges** where each comma group (`1-3, 4-6, 7-10`) becomes its own file. Parts are written into a folder you choose. |
+| **Merge PDF** | Stacks several PDFs into one, top-to-bottom in the list. Take only some pages of a file by typing a range in its **Pages** field (e.g. `1, 3-5`); leave blank for all. Reorder rows with the arrows, or drop a stray page straight from the combined preview. **Bookmarks are not carried over** — see [What each tool preserves](#what-each-tool-preserves). |
+| **Split PDF** | Cuts one PDF into several — fixed chunks of **N pages**, or **custom ranges** where each comma group (`1-3, 4-6, 7-10`) becomes its own file. Parts are written into a folder you choose. **Bookmarks are not carried over** — see [What each tool preserves](#what-each-tool-preserves). |
 | **Extract PDF Pages** | Saves a new PDF of only the pages you list. Order follows what you type (`5,1,2` → page 5, then 1, then 2); ranges expand forward (`3-5`) or backward (`5-3`). |
 | **Reorder Pages** | Lists every page as a draggable row; rearrange (drag or **↑ / ↓**), trash any you don't need, and save a new PDF. The preview follows the new order, labeled with each page's original number. |
 | **Delete PDF Pages** | Writes a new PDF with the listed pages removed. Requires an explicit list — an empty field does **not** mean "all". At least one page must remain. |
@@ -39,17 +39,50 @@ Tools are grouped on the dashboard into four sections — **Optimize**, **Organi
 | Tool | What it does |
 |------|--------------|
 | **Crop PDF** | Tightens each page's margins — type a trim per edge, drag a box directly on the page, or let the tool find the content bounds automatically. Cropping changes what viewers display; nothing is deleted from the page. |
-| **Watermark PDF** | Stamps **text** (DRAFT, CONFIDENTIAL, a name) or your own **logo image** across pages. Choose font, color, size, angle, and opacity; a single centered stamp or a tiled pattern; every page, the first page, or a range. The underlying page stays vector (text stays selectable). |
-| **Fill & Sign** | Drops typed text onto a non-interactive (flat) form, then draw or type a **signature** and place it. Text stays selectable; the signature is baked in as vector ink. |
+| **Watermark PDF** | Stamps **text** (DRAFT, CONFIDENTIAL, a name) or your own **logo image** across pages. Choose font, color, size, angle, and opacity; a single centered stamp or a tiled pattern; every page, the first page, or a range. The underlying page stays vector (text stays selectable), but **interactive form fields are flattened** — see [What each tool preserves](#what-each-tool-preserves). |
+| **Fill & Sign** | Drops typed text onto a non-interactive (flat) form, then draw or type a **signature** and place it. Text stays selectable; the signature is baked in as vector ink. Built for flat forms — an **interactive** AcroForm is flattened on save, see [What each tool preserves](#what-each-tool-preserves). |
 | **Images to PDF** | Turns **JPG, PNG, or HEIC** images into one PDF, a page per image. Pick a paper size (or match each image exactly) and whether pictures **fit** inside the page or **fill** it edge to edge. |
 
 ### Secure & clean
 
 | Tool | What it does |
 |------|--------------|
-| **Redact PDF** | ⇧-drag rectangles over sensitive regions — or use **Find & redact** to auto-mark every match of a word or pattern. Marked regions are rebuilt as solid black; text there can't be copied or searched. Irreversible — review before saving. |
+| **Redact PDF** | ⇧-drag rectangles over sensitive regions — or use **Find & redact** to auto-mark every match of a word or pattern. Marked regions are rebuilt as solid black; text there can't be copied or searched. Irreversible — review before saving. Marked pages are rasterized, so **form fields are flattened** and links on those pages are dropped — see [What each tool preserves](#what-each-tool-preserves). |
 | **Password Protect** | Encrypts a PDF behind an open password, or removes a password from one you can already open. Standard PDF encryption, applied on your Mac — the password is never stored or sent anywhere. |
 | **Clean Metadata** | Shows what a PDF says about itself — title, author, keywords, producer, dates — then lets you edit any field or strip them all before sharing. Only the info fields are rewritten; the pages are untouched. |
+
+---
+
+## What each tool preserves
+
+Some tools rebuild every page to do their job. That is what makes them work — and it has two
+consequences worth knowing before you save over something you care about. The app warns you in
+context, and only when the file you loaded actually has something to lose.
+
+**Interactive form fields are flattened by Watermark, OCR, Fill & Sign, Compress, and Redact.**
+These tools re-emit each page, so a fillable AcroForm — text fields, checkboxes, dropdowns,
+signature fields — becomes part of the page picture. The saved copy looks identical and prints
+identically, but **the fields can no longer be filled in, edited, or read back by a form processor**.
+Any values already filled in are kept as visible text. If you need the form to stay fillable, keep
+the original and share the rebuilt copy separately.
+
+**Bookmarks are not carried over by Merge or Split.** A merge concatenates pages from several
+documents, each with its own outline at shifting page offsets; a split cuts one outline across
+several files. Producing a correct combined or per-part outline is genuine work that isn't done yet,
+and a naive copy would point bookmarks at the wrong pages — so both tools drop them rather than ship
+misdirected ones. **Page content, links, form fields, and the document title are unaffected.**
+
+Everything else survives. Bookmarks, the document title and author, and clickable links are
+preserved by Watermark, OCR, Fill & Sign, Compress, Redact, Crop, Extract, Reorder, Delete, and
+Rotate. Redaction deliberately drops links **on the pages you marked** — a link's URL can itself
+disclose what you painted over — while unmarked pages keep theirs.
+
+| | Bookmarks | Title / author | Links | Form fields |
+|---|---|---|---|---|
+| Watermark, OCR, Fill & Sign, Compress | kept | kept | kept | **flattened** |
+| Redact | kept | kept | dropped on marked pages | **flattened** |
+| Crop, Extract, Reorder, Delete, Rotate | kept | kept | kept | kept |
+| Merge, Split | **dropped** | kept | kept | kept |
 
 ---
 

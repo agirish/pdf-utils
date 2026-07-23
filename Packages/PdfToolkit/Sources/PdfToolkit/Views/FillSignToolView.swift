@@ -11,6 +11,8 @@ struct FillSignToolView: View {
     @Environment(\.colorScheme) private var scheme
     @Environment(\.colorSchemeContrast) private var contrast
     @State private var inputURL: URL?
+    /// The pending "your output will lose X" warning and its acknowledgement.
+    @StateObject private var fidelity = OutputFidelityGate()
     @State private var pdfDocument: PDFDocument?
     @State private var items: [FillSignItem] = []
     @State private var selectedID: UUID?
@@ -113,6 +115,15 @@ struct FillSignToolView: View {
         }
         .toolErrorAlert($alertMessage)
         .task(id: selectionPathKey) {
+            guard let url = inputURL else {
+                fidelity.update(nil)
+                return
+            }
+            await fidelity.refresh(urls: [url]) { urls in
+                urls.first.flatMap(OutputFidelityWarning.interactiveForm(at:))
+            }
+        }
+        .task(id: selectionPathKey) {
             await reloadDocumentForSelection()
         }
         // Record each settled change to the items as one undo step, but never the intermediate frames
@@ -186,11 +197,20 @@ struct FillSignToolView: View {
 
             Divider()
 
-            RunActionButton(title: "Sign & save…", busy: busy, canRun: canRun) {
-                Task { await runFillSign() }
+            VStack(spacing: 12) {
+                if let warning = fidelity.warning {
+                    OutputFidelityNote(warning: warning, toolTitle: Tool.fillSign.title)
+                }
+                RunActionButton(title: "Sign & save…", busy: busy, canRun: canRun) {
+                    guard fidelity.shouldProceed() else { return }
+                    Task { await runFillSign() }
+                }
             }
             .padding(16)
             .toolActionBar()
+            .outputFidelityConfirmation(fidelity, toolTitle: Tool.fillSign.title) {
+                Task { await runFillSign() }
+            }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }

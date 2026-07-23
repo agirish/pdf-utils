@@ -245,13 +245,19 @@ extension PDFToolkit {
     /// Rasterizes the first page of a PDF logo onto a transparent bitmap so a vector logo can be
     /// stamped like any image, honoring its intrinsic rotation and crop box.
     private static func firstPageImage(ofPDFAt url: URL) -> CGImage? {
-        guard let doc = PDFDocument(url: url), let page = doc.page(at: 0) else { return nil }
+        guard let doc = PDFDocument(url: url), let page = doc.page(at: 0), let cgPage = page.pageRef else {
+            return nil
+        }
         let bounds = page.bounds(for: .cropBox)
         guard bounds.width > 0, bounds.height > 0 else { return nil }
+        // Displayed size (axes swapped for a /Rotate 90|270 logo page) so a rotated logo isn't drawn
+        // into a wrong-aspect bitmap and clipped/squashed. The old path used the raw crop-box size and
+        // `page.draw`, which ignored intrinsic rotation.
+        let displayed = displayedSize(of: bounds, rotation: page.rotation)
         // ~2× the point size keeps a stamped logo crisp without producing an enormous bitmap.
         let scale: CGFloat = 2
-        let pxW = Int((bounds.width * scale).rounded())
-        let pxH = Int((bounds.height * scale).rounded())
+        let pxW = Int((displayed.width * scale).rounded())
+        let pxH = Int((displayed.height * scale).rounded())
         guard pxW > 0, pxH > 0,
               let ctx = CGContext(
                 data: nil, width: pxW, height: pxH, bitsPerComponent: 8, bytesPerRow: 0,
@@ -261,8 +267,14 @@ extension PDFToolkit {
         else { return nil }
         ctx.interpolationQuality = .high
         ctx.scaleBy(x: scale, y: scale)
-        ctx.translateBy(x: -bounds.origin.x, y: -bounds.origin.y)
-        page.draw(with: .cropBox, to: ctx)
+        // `getDrawingTransform(.cropBox)` maps the crop box upright into the displayed-size rect
+        // (rotation applied, crop origin subtracted) — the same proven raster path redaction/compress
+        // use — so a rotated or non-zero-origin logo page lands correctly on the transparent bitmap.
+        let transform = cgPage.getDrawingTransform(
+            .cropBox, rect: CGRect(origin: .zero, size: displayed), rotate: 0, preserveAspectRatio: true
+        )
+        ctx.concatenate(transform)
+        ctx.drawPDFPage(cgPage)
         return ctx.makeImage()
     }
 }

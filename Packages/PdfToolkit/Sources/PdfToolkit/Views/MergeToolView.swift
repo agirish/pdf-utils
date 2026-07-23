@@ -701,6 +701,11 @@ struct MergeToolView: View {
         let stripMetadata = UserDefaults.standard.bool(forKey: SettingsKeys.stripMetadataOnExport)
 
         do {
+            // Refuse to write over one of the inputs. The single-file tools get this from
+            // `PDFToolkit.merge(...)`, but this path calls `mergeData` and writes itself (to honor
+            // strip-metadata and read back the page count), so it must apply the same guard — else
+            // a Save-panel destination that names an input silently overwrites that original.
+            try PDFToolkit.requireDistinctOutput(outputURL, from: urlsSnapshot)
             // Materialize the merged bytes in memory, then land them atomically: writing the
             // PDFDocument straight onto the destination would truncate an existing file before the
             // merge finished serializing, so a mid-write failure (full disk, crash) destroys

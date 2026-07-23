@@ -44,6 +44,13 @@ extension PDFToolkit {
             throw PDFOperationError.couldNotOpen(inputURL)
         }
         let cropBox = page.bounds(for: .cropBox)
+        // A degenerate (zero/negative) crop box would make the emitted media box zero-size, and
+        // `beginDisplayedPage` then silently falls back to a default US-Letter page (see its note),
+        // mis-emitting the page. The raster path (`rasterGeometry`) already rejects this; the vector
+        // rebuild (Watermark / Fill & Sign / OCR) must too. Malformed-source only.
+        guard cropBox.width > 0, cropBox.height > 0 else {
+            throw PDFOperationError.couldNotOpen(inputURL)
+        }
         let rotation = normalizedRotation(page.rotation)
         let box = CGRect(origin: .zero, size: displayedSize(of: cropBox, rotation: rotation))
         let transform = cgPage.getDrawingTransform(.cropBox, rect: box, rotate: 0, preserveAspectRatio: false)

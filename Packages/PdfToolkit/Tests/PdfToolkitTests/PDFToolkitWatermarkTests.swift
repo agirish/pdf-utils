@@ -81,6 +81,19 @@ import UniformTypeIdentifiers
         #expect(texts[0].contains("ROTATED"))
     }
 
+    @Test func pdfLogoBitmapFollowsIntrinsicRotation() throws {
+        // A portrait Letter logo page (612×792) with a baked-in 90° rotation DISPLAYS landscape. The
+        // rasterized logo bitmap must follow the displayed orientation (wide), not the raw crop box
+        // (tall) — otherwise a rotated PDF logo is drawn into a wrong-aspect bitmap and stamped
+        // clipped/squashed. Pins the displayed-size + drawing-transform path in `firstPageImage`.
+        let dir = FixtureDir()
+        let logo = dir.url("logo.pdf")
+        try PDFFixtures.writePDF(markers: ["LOGO"], rotations: [0: 90], to: logo)
+
+        let image = try #require(PDFToolkit.watermarkImageSource(at: logo))
+        #expect(image.cgImage.width > image.cgImage.height)   // displayed landscape, not raw portrait
+    }
+
     @Test func unreadableSourceThrowsCouldNotOpen() throws {
         let dir = FixtureDir()
         let bad = dir.url("bad.pdf")

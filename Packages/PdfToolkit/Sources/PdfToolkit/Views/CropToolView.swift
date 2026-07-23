@@ -366,9 +366,13 @@ struct CropToolView: View {
                 if let warning = fidelity.warning {
                     OutputFidelityNote(warning: warning, toolTitle: Tool.crop.title)
                 }
-                RunActionButton(title: "Crop & save…", busy: busy, canRun: canRun) {
-                    guard fidelity.shouldProceed() else { return }
-                    Task { await runCrop() }
+                RunActionButton(title: "Crop & save…", busy: busy || fidelity.isSettling, canRun: canRun) {
+                    Task {
+                        // Wait for detection so a fast click can't slip past the warning.
+                        await fidelity.settle()
+                        guard fidelity.shouldProceed() else { return }
+                        await runCrop()
+                    }
                 }
             }
             .padding(16)

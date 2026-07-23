@@ -255,9 +255,12 @@ struct ReorderToolView: View {
                 if let warning = fidelity.warning {
                     OutputFidelityNote(warning: warning, toolTitle: Tool.reorder.title)
                 }
-                RunActionButton(title: "Reorder & save…", busy: busy, canRun: !working.items.isEmpty) {
-                    guard fidelity.shouldProceed() else { return }
-                    Task { await runReorder() }
+                RunActionButton(title: "Reorder & save…", busy: busy || fidelity.isSettling, canRun: !working.items.isEmpty) {
+                    Task {
+                        await fidelity.settle()
+                        guard fidelity.shouldProceed() else { return }
+                        await runReorder()
+                    }
                 }
             }
             .padding(16)

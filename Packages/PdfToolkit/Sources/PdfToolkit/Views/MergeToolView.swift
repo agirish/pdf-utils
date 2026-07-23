@@ -201,11 +201,14 @@ struct MergeToolView: View {
                 }
                 RunActionButton(
                     title: "Merge & save…",
-                    busy: busy,
+                    busy: busy || fidelity.isSettling,
                     canRun: !entries.isEmpty && !pageSummaryLoading && lockedEntryIDs.isEmpty
                 ) {
-                    guard fidelity.shouldProceed() else { return }
-                    Task { await runMerge() }
+                    Task {
+                        await fidelity.settle()
+                        guard fidelity.shouldProceed() else { return }
+                        await runMerge()
+                    }
                 }
             }
             .padding(16)

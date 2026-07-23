@@ -217,12 +217,15 @@ struct RedactToolView: View {
                 }
                 RunActionButton(
                     title: "Redact & save…",
-                    busy: busy,
+                    busy: busy || fidelity.isSettling,
                     canRun: inputURL != nil && pdfDocument != nil && !searching
                         && (!marks.isEmpty || !pagesNeedingRasterize.isEmpty)
                 ) {
-                    guard fidelity.shouldProceed() else { return }
-                    startExport()
+                    Task {
+                        await fidelity.settle()
+                        guard fidelity.shouldProceed() else { return }
+                        startExport()
+                    }
                 }
             }
             .padding(16)

@@ -165,9 +165,12 @@ struct ExtractToolView: View {
                 if let warning = fidelity.warning {
                     OutputFidelityNote(warning: warning, toolTitle: Tool.extract.title)
                 }
-                RunActionButton(title: "Extract & save…", busy: busy, canRun: inputURL != nil) {
-                    guard fidelity.shouldProceed() else { return }
-                    Task { await runExtract() }
+                RunActionButton(title: "Extract & save…", busy: busy || fidelity.isSettling, canRun: inputURL != nil) {
+                    Task {
+                        await fidelity.settle()
+                        guard fidelity.shouldProceed() else { return }
+                        await runExtract()
+                    }
                 }
             }
             .padding(16)

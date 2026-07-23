@@ -137,6 +137,71 @@ struct OutputFidelityWarningTests {
         #expect(gate.shouldProceed(), "an identical warning must not re-prompt")
     }
 
+    // MARK: The click-beats-detection race
+
+    /// Detection runs on the shared PDF queue, so a user who drops a file and immediately hits Save
+    /// used to beat it: `warning` was still nil, the gate waved the save through, and the
+    /// confirmation never appeared. `settle()` closes that window.
+    @MainActor
+    @Test func settleMakesAFastClickSeeTheWarning() async throws {
+        let dir = FixtureDir()
+        let form = dir.url("form.pdf")
+        try PDFFixtures.writeAcroFormPDF(to: form)
+
+        let gate = OutputFidelityGate()
+        // Kick detection off WITHOUT awaiting it — exactly what `.task` does before the user clicks.
+        let detection = Task {
+            await gate.refresh(urls: [form], formLoss: .formOrphaned, checksBookmarks: false)
+        }
+        // Let that task actually begin, so this models "detection is in flight when the click
+        // lands" rather than racing the runtime's scheduling.
+        while !gate.detectionHasStarted { await Task.yield() }
+
+        // The click arrives mid-detection: settle, then decide.
+        await gate.settle()
+        #expect(gate.isSettling == false, "the spinner state must not be left on")
+        #expect(gate.warning != nil, "settle must not return before detection has published")
+        #expect(gate.shouldProceed() == false, "the save must be gated, not waved through")
+        _ = await detection.value
+    }
+
+    /// The spinner is for a click that genuinely has to wait. When detection already finished,
+    /// settling is a no-op and the button never flickers.
+    @MainActor
+    @Test func settleIsANoOpOnceDetectionHasFinished() async throws {
+        let dir = FixtureDir()
+        let plain = dir.url("plain.pdf")
+        try PDFFixtures.writePDF(pageCount: 2, to: plain)
+
+        let gate = OutputFidelityGate()
+        await gate.refresh(urls: [plain], formLoss: .formOrphaned, checksBookmarks: true)
+        await gate.settle()
+        #expect(gate.isSettling == false)
+        #expect(gate.warning == nil)
+        #expect(gate.shouldProceed(), "a file with nothing to lose still saves straight through")
+    }
+
+    /// Switching files must leave the gate describing the file now loaded, not the previous one —
+    /// otherwise a user who swaps a form PDF for a plain one keeps being warned about a form that
+    /// is no longer open (or, worse, stops being warned about one that is).
+    @MainActor
+    @Test func switchingFilesRepointsTheWarning() async throws {
+        let dir = FixtureDir()
+        let form = dir.url("form.pdf")
+        try PDFFixtures.writeAcroFormPDF(to: form)
+        let plain = dir.url("plain.pdf")
+        try PDFFixtures.writePDF(pageCount: 2, to: plain)
+
+        let gate = OutputFidelityGate()
+        await gate.refresh(urls: [form], formLoss: .formOrphaned, checksBookmarks: false)
+        #expect(gate.warning?.losses == [.formOrphaned])
+
+        await gate.refresh(urls: [plain], formLoss: .formOrphaned, checksBookmarks: false)
+        await gate.settle()
+        #expect(gate.warning == nil, "the previous file's warning must not linger")
+        #expect(gate.shouldProceed())
+    }
+
     @MainActor
     @Test func clearingTheFileClearsTheWarning() {
         let gate = OutputFidelityGate()

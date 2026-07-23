@@ -403,15 +403,22 @@ struct UnifiedFilePanel<Config: View>: View {
                 .buttonStyle(.bordered)
                 .controlSize(.large)
             } else if fileCount >= 2 {
-                RunActionButton(title: "Run on \(fileCount) files", canRun: currentOperation != nil) {
-                    guard fidelity.shouldProceed() else { return }
-                    startMultiRun()
+                RunActionButton(title: "Run on \(fileCount) files", busy: fidelity.isSettling, canRun: currentOperation != nil) {
+                    Task {
+                        // Wait for detection so a fast click can't slip past the warning.
+                        await fidelity.settle()
+                        guard fidelity.shouldProceed() else { return }
+                        startMultiRun()
+                    }
                 }
             } else {
-                RunActionButton(title: singleActionTitle, busy: busy, canRun: !runner.isEmpty && currentOperation != nil) {
+                RunActionButton(title: singleActionTitle, busy: busy || fidelity.isSettling, canRun: !runner.isEmpty && currentOperation != nil) {
                     guard let url = firstURL else { return }
-                    guard fidelity.shouldProceed() else { return }
-                    Task { await runSingle(url) }
+                    Task {
+                        await fidelity.settle()
+                        guard fidelity.shouldProceed() else { return }
+                        await runSingle(url)
+                    }
                 }
             }
         }

@@ -209,7 +209,16 @@ struct OutputFidelityNote: View {
 final class OutputFidelityGate: ObservableObject {
     @Published private(set) var warning: OutputFidelityWarning?
     @Published var isConfirming = false
+    /// True only while a *click* is waiting for detection to finish — the run button shows its
+    /// spinner for exactly that moment. Deliberately not set during ordinary background detection:
+    /// disabling the button on every file load would read as the app being slow, when the
+    /// overwhelming majority of files have nothing to warn about.
+    @Published private(set) var isSettling = false
     private var acknowledged: OutputFidelityWarning?
+    /// The in-flight detection, so a click can await the answer instead of racing it.
+    private var detectionTask: Task<Void, Never>?
+    /// Guards against a superseded detection publishing its stale result.
+    private var generation = 0
 
     /// Replaces the current warning. Clears the acknowledgement whenever the warning changes, so a
     /// newly loaded file must be confirmed on its own terms.
@@ -236,13 +245,46 @@ final class OutputFidelityGate: ObservableObject {
     /// Re-detects the warning for `urls`. The detector opens PDFs, so it runs on the shared serial
     /// queue — never on the main actor, and never alongside other PDFKit work.
     func refresh(urls: [URL], detect: @escaping @Sendable ([URL]) -> OutputFidelityWarning?) async {
+        generation += 1
+        let generationAtStart = generation
         guard !urls.isEmpty else {
+            detectionTask?.cancel()
+            detectionTask = nil
             update(nil)
             return
         }
-        let detected = try? await PDFBackgroundWork.run { detect(urls) }
-        guard !Task.isCancelled else { return }
-        update(detected ?? nil)
+        // Owned by an inner task rather than run inline, so ``settle()`` has something to await —
+        // the SwiftUI `.task` this runs inside is cancelled on a file switch, which would otherwise
+        // leave a click with no way to know detection was ever in flight.
+        let task = Task { @MainActor [weak self] in
+            let detected = try? await PDFBackgroundWork.run { detect(urls) }
+            guard let self, self.generation == generationAtStart else { return }
+            self.update(detected ?? nil)
+        }
+        detectionTask = task
+        await task.value
+    }
+
+    /// Whether a detection pass has been started for the current file set. Exposed so a test can
+    /// wait for `.task`'s refresh to actually begin before simulating the click — without it the
+    /// test races the runtime rather than the code.
+    ///
+    /// Note the boundary this implies: ``settle()`` waits for a detection that has STARTED. A click
+    /// landing before the view's `.task` body has even run would still slip past — unreachable from
+    /// the UI, where `.task` fires on appearance and a human click cannot precede it, but worth
+    /// knowing if this is ever driven from somewhere else.
+    var detectionHasStarted: Bool { detectionTask != nil }
+
+    /// Waits for any in-flight detection so a Save click can't beat it to the answer.
+    ///
+    /// Returns immediately when detection has already finished — the common case, since a user
+    /// reading the sidebar takes far longer than a catalog read. Only when the click genuinely
+    /// arrives first does `isSettling` flip, showing the button's spinner for that moment.
+    func settle() async {
+        guard let task = detectionTask else { return }
+        isSettling = true
+        await task.value
+        isSettling = false
     }
 
     /// The shape every tool uses: it declares how it damages a form and whether it drops bookmarks.

@@ -280,9 +280,12 @@ struct SplitToolView: View {
                 if let warning = fidelity.warning {
                     OutputFidelityNote(warning: warning, toolTitle: Tool.split.title)
                 }
-                RunActionButton(title: "Split & save…", busy: busy, canRun: canRun) {
-                    guard fidelity.shouldProceed() else { return }
-                    Task { await runSplit() }
+                RunActionButton(title: "Split & save…", busy: busy || fidelity.isSettling, canRun: canRun) {
+                    Task {
+                        await fidelity.settle()
+                        guard fidelity.shouldProceed() else { return }
+                        await runSplit()
+                    }
                 }
             }
             .padding(16)

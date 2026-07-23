@@ -226,9 +226,12 @@ struct OCRToolView: View {
                 if let warning = fidelity.warning {
                     OutputFidelityNote(warning: warning, toolTitle: Tool.ocr.title)
                 }
-                RunActionButton(title: "Make searchable & save…", busy: busy, canRun: inputURL != nil) {
-                    guard fidelity.shouldProceed() else { return }
-                    runTask = Task { await runOCR() }
+                RunActionButton(title: "Make searchable & save…", busy: busy || fidelity.isSettling, canRun: inputURL != nil) {
+                    Task {
+                        await fidelity.settle()
+                        guard fidelity.shouldProceed() else { return }
+                        runTask = Task { await runOCR() }
+                    }
                 }
             }
             .padding(16)

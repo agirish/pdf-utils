@@ -199,9 +199,12 @@ struct FillSignToolView: View {
                 if let warning = fidelity.warning {
                     OutputFidelityNote(warning: warning, toolTitle: Tool.fillSign.title)
                 }
-                RunActionButton(title: "Sign & save…", busy: busy, canRun: canRun) {
-                    guard fidelity.shouldProceed() else { return }
-                    Task { await runFillSign() }
+                RunActionButton(title: "Sign & save…", busy: busy || fidelity.isSettling, canRun: canRun) {
+                    Task {
+                        await fidelity.settle()
+                        guard fidelity.shouldProceed() else { return }
+                        await runFillSign()
+                    }
                 }
             }
             .padding(16)

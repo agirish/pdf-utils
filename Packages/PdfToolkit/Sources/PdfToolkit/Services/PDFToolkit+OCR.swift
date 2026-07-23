@@ -114,7 +114,9 @@ extension PDFToolkit {
         ctx.closePDF()
 
         guard pdfData.length > 0 else { throw PDFOperationError.ocrFailed }
-        return (pdfData as Data, summary)
+        // Recognizing a long scanned book must not cost the reader its bookmarks, title, or links —
+        // the CGPDFContext emits pages only, so the catalog is carried across explicitly.
+        return (restoringCatalog(pdfData as Data, from: source, restoreLinks: true), summary)
     }
 
     /// The BCP-47 languages Vision can recognize on this Mac at the given accuracy level, most-preferred

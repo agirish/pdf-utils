@@ -29,6 +29,7 @@ public enum PDFOperationError: LocalizedError {
     case cropTooSmall(pageNumber: Int)
     case ocrFailed
     case encryptedInput(URL)
+    case permissionsForbidEditing(URL)
     case couldNotEncodeOutput
 
     public var errorDescription: String? {
@@ -89,6 +90,8 @@ public enum PDFOperationError: LocalizedError {
             return "Text recognition failed while rebuilding the PDF."
         case .encryptedInput(let url):
             return "“\(url.lastPathComponent)” is password-protected. Remove its password first (Password Protect → Remove password), then try again."
+        case .permissionsForbidEditing(let url):
+            return "“\(url.lastPathComponent)” has owner-password restrictions that forbid changing its pages. Remove them first (Password Protect → Remove password), then try again."
         case .couldNotEncodeOutput:
             return "Could not build the result PDF in memory."
         }

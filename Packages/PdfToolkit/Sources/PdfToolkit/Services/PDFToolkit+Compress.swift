@@ -224,6 +224,9 @@ extension PDFToolkit {
         guard emitted > 0, pdfData.length > 0 else {
             throw PDFOperationError.compressionFailed
         }
-        return pdfData as Data
+        // Pages are rasterized, but the catalog needn't be: bookmarks, the info dictionary, and
+        // links survive compression. Each page keeps its displayed geometry, so link rects still
+        // land on the same content.
+        return PDFToolkit.restoringCatalog(pdfData as Data, from: source, restoreLinks: true)
     }
 }

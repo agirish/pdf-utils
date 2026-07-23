@@ -149,6 +149,34 @@ public enum PDFToolkit {
         return doc
     }
 
+    /// Opens a PDF for an operation that MUTATES the loaded document in place (rotate, delete),
+    /// refusing one whose permissions forbid it.
+    ///
+    /// A PDF encrypted with only an *owner* password — common in the wild (statements, corporate
+    /// reports) and exactly what this app's own Protect ▸ "Restrict editing" mode writes — opens
+    /// freely and is NOT `isLocked`, so ``openUnlockedDocument(at:)`` lets it through. But PDFKit
+    /// silently refuses to mutate it: `page.rotation = …` and `removePage(at:)` become no-ops that
+    /// only log to the console, and the subsequent `dataRepresentation()` succeeds — so the
+    /// operation "succeeded" and landed an UNCHANGED file under a `-rotated`/`-deleted` name
+    /// (verified empirically: rotations stayed `[0, 0]`, the deleted page was still there). For
+    /// Delete that is a silent disclosure: the user believes a page is gone and ships a file that
+    /// still contains it. Refuse up front instead, with a message that points at the fix.
+    ///
+    /// Only the in-place mutators need this. Every other operation rebuilds by copying pages into a
+    /// fresh document (extract, reorder, merge, crop, watermark, redact, fill & sign) — verified to
+    /// produce correct output on a restricted input — so they keep working through
+    /// ``openUnlockedDocument(at:)``.
+    static func openEditableDocument(at url: URL) throws -> PDFDocument {
+        let doc = try openUnlockedDocument(at: url)
+        // `allowsDocumentAssembly` is the permission PDFKit checks for both page rotation and page
+        // removal; it is `true` on every unencrypted document, so this only ever fires on a
+        // genuinely restricted file.
+        guard !doc.isEncrypted || doc.allowsDocumentAssembly else {
+            throw PDFOperationError.permissionsForbidEditing(url)
+        }
+        return doc
+    }
+
     /// Refuses to write an operation's result on top of one of its own inputs.
     ///
     /// Every write path here targets a *fresh* file, so this only fires on caller misuse — but the
@@ -431,7 +459,9 @@ public enum PDFToolkit {
     /// index first.
     internal static func deletePagesData(inputURL: URL, pageIndices: [Int]) throws -> Data {
         guard !pageIndices.isEmpty else { throw PDFOperationError.noPagesSelected }
-        let doc = try openUnlockedDocument(at: inputURL)
+        // Mutates the loaded document in place, so a permission-restricted file must be refused
+        // rather than silently no-op'd into an unchanged "deleted" file — see openEditableDocument.
+        let doc = try openEditableDocument(at: inputURL)
 
         let unique = Set(pageIndices)
         // Bounds-check FIRST: otherwise an out-of-range index inflates `unique.count` and trips the
@@ -457,8 +487,15 @@ public enum PDFToolkit {
         // in place so the catalog (and any `/AcroForm`) survives the removal.
         pruneOutlineForDeletion(in: doc, deleting: unique)
 
+        let expectedCount = doc.pageCount - unique.count
         for index in unique.sorted(by: >) {
             doc.removePage(at: index)
+        }
+        // Belt and braces behind the permission guard: `removePage` reports nothing when PDFKit
+        // declines it, so confirm the pages actually went. Shipping a file that still contains a
+        // page the user deleted is the one outcome this tool must never produce.
+        guard doc.pageCount == expectedCount else {
+            throw PDFOperationError.permissionsForbidEditing(inputURL)
         }
 
         guard let data = doc.dataRepresentation() else {
@@ -522,7 +559,9 @@ public enum PDFToolkit {
 
     /// In-memory core of ``rotate(inputURL:outputURL:pageIndices:quarterTurns:)``.
     internal static func rotateData(inputURL: URL, pageIndices: [Int], quarterTurns: Int) throws -> Data {
-        let doc = try openUnlockedDocument(at: inputURL)
+        // Mutates `page.rotation` in place, so a permission-restricted file must be refused rather
+        // than silently no-op'd into an unrotated "rotated" file — see openEditableDocument.
+        let doc = try openEditableDocument(at: inputURL)
         // Validate the selection up front, like delete/extract/split: a page index past the end used
         // to be silently ignored (the rotate loop just never matched it), so a typo'd range rotated
         // nothing on that page with no error. Reject it with `pageOutOfBounds` instead.
@@ -541,6 +580,12 @@ public enum PDFToolkit {
                 r += turns * 90
                 r = normalizedRotation(r)
                 page.rotation = r
+                // Belt and braces behind the permission guard: PDFKit reports a declined rotation
+                // only to the console, so confirm it landed rather than saving an unrotated file
+                // under a "-rotated" name.
+                guard normalizedRotation(page.rotation) == r else {
+                    throw PDFOperationError.permissionsForbidEditing(inputURL)
+                }
             }
         }
 
@@ -704,7 +749,9 @@ public enum PDFToolkit {
         ctx.closePDF()
 
         guard pdfData.length > 0 else { throw PDFOperationError.watermarkFailed }
-        return pdfData as Data
+        // The CGPDFContext emits pages only; bookmarks, the info dictionary, and links live on the
+        // catalog and would otherwise be lost (see ``restoringCatalog(_:from:restoreLinks:)``).
+        return restoringCatalog(pdfData as Data, from: source, restoreLinks: true)
     }
 
     /// Bakes placed text and drawn signatures onto their pages and writes a new PDF.
@@ -768,7 +815,7 @@ public enum PDFToolkit {
         ctx.closePDF()
 
         guard pdfData.length > 0 else { throw PDFOperationError.fillSignFailed }
-        return pdfData as Data
+        return restoringCatalog(pdfData as Data, from: source, restoreLinks: true)
     }
 
     /// Maps a PDF-user-space rect into displayed-page coordinates (origin at the displayed crop
@@ -955,7 +1002,10 @@ public enum PDFToolkit {
         guard let data = output.dataRepresentation() else {
             throw PDFOperationError.couldNotEncodeOutput
         }
-        return data
+        // Bookmarks and the info dictionary are restored; links deliberately are NOT — see
+        // ``restoringCatalog(_:from:restoreLinks:)``. A link's URL can disclose the very value the
+        // user painted over, and a live hotspot over a burned-in black box is recoverable content.
+        return restoringCatalog(data, from: source, restoreLinks: false)
     }
 
     /// One-page PDF with explicit Core Graphics MediaBox and bitmap drawn into the full page rect.

@@ -58,6 +58,7 @@ extension Tool {
                     "Selection rectangles land where the recognizer saw each line, so highlights line up with the printed words.",
                     "If every page already has selectable text there is nothing to recognize, so no file is saved—turn off “Skip pages that already have text” to force a fresh layer.",
                     "Recognition quality follows scan quality: a straight, 300-dpi scan reads far better than a skewed phone photo. Crop or rotate first if the page is messy.",
+                    "Bookmarks, the document title, and clickable links are carried into the recognized copy. Interactive form fields are not—each page is redrawn from its content.",
                 ]
             )
         case .crop:
@@ -132,6 +133,7 @@ extension Tool {
                     "The before/after card reports the percent saved and the old→new size. “Already optimized” means the PDF was already about as small as it gets.",
                     "Compression never makes a file bigger: if a page can't be shrunk, the original is passed through unchanged.",
                     "Size estimates follow the “Strip metadata on export” setting, so the preview matches the file you actually save.",
+                    "Bookmarks, the document title, and clickable links survive compression—only the page artwork is rebuilt as images.",
                 ]
             )
         case .rotate:
@@ -153,6 +155,7 @@ extension Tool {
                 tips: [
                     "In a page range, order doesn’t matter—each listed page is rotated once.",
                     "Page ranges apply to a single file; a multi-file run rotates every page of every file.",
+                    "A PDF whose owner-password restrictions forbid changing its pages is refused rather than saved unrotated—remove the restrictions with Password Protect first.",
                 ]
             )
         case .merge:
@@ -266,6 +269,8 @@ extension Tool {
                 ],
                 tips: [
                     "If nothing seems to happen, confirm macOS allowed access to the file (try choosing it again).",
+                    "A PDF whose owner-password restrictions forbid changing its pages is refused rather than saved with the pages still in it—remove the restrictions with Password Protect first.",
+                    "Bookmarks pointing at a deleted page are removed too, so no bookmark sends a reader to the wrong content.",
                 ]
             )
         case .watermark:
@@ -291,7 +296,7 @@ extension Tool {
                 ],
                 tips: [
                     "A subtle text watermark usually reads best at 15–30% opacity and around 45°.",
-                    "Interactive form fields and link annotations are not carried into the watermarked copy, since each page is redrawn from its content.",
+                    "Bookmarks, the document title, and clickable links are carried into the watermarked copy. Interactive form fields are not—each page is redrawn from its content, so a fillable field becomes part of the picture.",
                     "Across several files, a Custom page range follows each file's own page count; an empty Custom range is an error, not “all pages”.",
                 ]
             )
@@ -320,7 +325,8 @@ extension Tool {
                     "Redaction is irreversible—double-check every mark before exporting.",
                     "Rerunning a search won't stack duplicate boxes—an identical region is skipped, and the summary reports how many are new.",
                     "Very small rectangles may be ignored; drag a box at least a few points on each side.",
-                    "Redacted pages are saved as full-page images, so anything on a marked page—not just the black boxes—is flattened out of the text layer.",
+                    "Redacted pages are saved as full-page images, so anything on a marked page—not just the black boxes—is flattened out of the text layer, including any clickable links on that page.",
+                    "Bookmarks and the document title are carried into the sanitized copy; pages you did not mark keep their own links and annotations unless you turn on removing them above.",
                 ]
             )
         case .fillSign:
@@ -346,7 +352,8 @@ extension Tool {
                 tips: [
                     "Text stays selectable and searchable in the export—only the signature is drawn ink.",
                     "New items land centered on whichever page is showing in the preview, and live on that page—scroll to a page before adding to it.",
-                    "Existing interactive AcroForm fields aren't detected here—this tool is for typing onto flat forms and layering a signature on top.",
+                    "Existing interactive AcroForm fields aren't detected here—this tool is for typing onto flat forms and layering a signature on top, and a fillable field becomes part of the picture in the saved copy.",
+                    "Bookmarks, the document title, and clickable links are carried into the signed copy.",
                 ]
             )
         case .protect:

@@ -38,6 +38,7 @@ import Foundation
         .cropTooSmall(pageNumber: 4),
         .ocrFailed,
         .encryptedInput(URL(fileURLWithPath: "/tmp/locked.pdf")),
+        .permissionsForbidEditing(URL(fileURLWithPath: "/tmp/restricted.pdf")),
         .couldNotEncodeOutput,
     ]
 
@@ -48,7 +49,7 @@ import Foundation
         // `all` against a bare literal (22), so it kept passing while the enum grew to 29 and 7 messages
         // went unchecked. Here the count is derived from `all` itself, and distinctness proves no two
         // entries collapse to the same kind (which would let a duplicate hide a missing case).
-        #expect(all.count == 29)
+        #expect(all.count == 30)
         #expect(Set(all.map(\.kind)).count == all.count)
     }
 
@@ -65,7 +66,7 @@ import Foundation
              .watermarkTextRequired, .watermarkImageRequired, .watermarkFailed, .noFillSignItems,
              .fillSignFailed, .passwordRequired, .incorrectPassword, .notEncrypted, .protectionFailed,
              .metadataEncrypted, .couldNotOpenImage, .cropTooSmall, .ocrFailed, .encryptedInput,
-             .couldNotEncodeOutput:
+             .permissionsForbidEditing, .couldNotEncodeOutput:
             break
         }
     }

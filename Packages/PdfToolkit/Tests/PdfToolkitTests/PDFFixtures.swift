@@ -357,6 +357,7 @@ extension PDFOperationError {
         case .cropTooSmall: return "cropTooSmall"
         case .ocrFailed: return "ocrFailed"
         case .encryptedInput: return "encryptedInput"
+        case .permissionsForbidEditing: return "permissionsForbidEditing"
         case .couldNotEncodeOutput: return "couldNotEncodeOutput"
         }
     }

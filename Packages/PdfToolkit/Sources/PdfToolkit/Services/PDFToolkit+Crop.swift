@@ -148,15 +148,15 @@ extension PDFToolkit {
     /// `(3.4e+38, 3.4e+38)` becoming `(582, 762)` on a 30 pt trim of US Letter. Recognizing the
     /// sentinel keeps a Fit bookmark a Fit bookmark, while a real point still gets clamped into the
     /// visible region (the reason the clamp exists).
-    /// True when either coordinate is PDFKit's "unspecified" sentinel — i.e. the destination is a
-    /// "fit the page" one with no real scroll position to transform.
-    static func isUnspecifiedDestinationPoint(_ point: CGPoint) -> Bool {
-        point.x == CGFloat(kPDFDestinationUnspecifiedValue) || point.y == CGFloat(kPDFDestinationUnspecifiedValue)
-    }
-
     static func clampedDestinationCoordinate(_ value: CGFloat, low: CGFloat, high: CGFloat) -> CGFloat {
         guard value != CGFloat(kPDFDestinationUnspecifiedValue) else { return value }
         return min(max(value, low), high)
+    }
+
+    /// True when either coordinate is that same "unspecified" sentinel — i.e. a "fit the page"
+    /// destination with no real scroll position, so there is nothing meaningful to transform.
+    static func isUnspecifiedDestinationPoint(_ point: CGPoint) -> Bool {
+        point.x == CGFloat(kPDFDestinationUnspecifiedValue) || point.y == CGFloat(kPDFDestinationUnspecifiedValue)
     }
 
     /// Copies the source's user-set info fields onto a page-copy rebuild. A fresh `PDFDocument`

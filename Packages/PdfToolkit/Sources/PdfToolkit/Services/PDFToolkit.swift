@@ -464,10 +464,8 @@ public enum PDFToolkit {
                     let action = child.action.flatMap { $0 is PDFActionGoTo ? nil : $0 }
                     appendRemapped(of: child, into: folder)
                     if folder.numberOfChildren > 0 || action != nil {
-                        parent.insertChild(folder, at: parent.numberOfChildren)
-                        // Set AFTER insertion: PDFKit drops an action assigned to a node that isn't
-                        // yet attached to the tree being written.
                         folder.action = action
+                        parent.insertChild(folder, at: parent.numberOfChildren)
                     }
                 } else {
                     // Bookmark whose target page wasn't retained: drop it, but keep walking so
@@ -984,7 +982,13 @@ public enum PDFToolkit {
         marks: [RedactionMark],
         options: PDFRedactionExportOptions = .default
     ) throws -> Data {
-        guard !marks.isEmpty else { throw PDFOperationError.noRedactions }
+        // Marks are the usual reason to run, but not the only one: a page named in
+        // `forceRasterizePages` is being exported precisely BECAUSE its text has to go and no box
+        // could be placed over it. Refusing that combination made the one case the option exists for
+        // — every match unlocatable, nothing else marked — impossible to export.
+        guard !marks.isEmpty || !options.forceRasterizePages.isEmpty else {
+            throw PDFOperationError.noRedactions
+        }
         let source = try openUnlockedDocument(at: inputURL)
         guard source.pageCount > 0 else { throw PDFOperationError.emptyPDF }
 
@@ -992,6 +996,14 @@ public enum PDFToolkit {
         for key in grouped.keys {
             guard key >= 0, key < source.pageCount else {
                 throw PDFOperationError.pageOutOfBounds(key + 1)
+            }
+        }
+        // Validated exactly like a mark's page. Silently ignoring a bad index here would be the
+        // worst possible failure for this option: the caller asked for a page's text to be destroyed
+        // and would be told it was, while the page shipped untouched.
+        for index in options.forceRasterizePages {
+            guard index >= 0, index < source.pageCount else {
+                throw PDFOperationError.pageOutOfBounds(index + 1)
             }
         }
 

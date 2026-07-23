@@ -218,7 +218,8 @@ struct RedactToolView: View {
                 RunActionButton(
                     title: "Redact & save…",
                     busy: busy,
-                    canRun: inputURL != nil && pdfDocument != nil && !marks.isEmpty && !searching
+                    canRun: inputURL != nil && pdfDocument != nil && !searching
+                        && (!marks.isEmpty || !pagesNeedingRasterize.isEmpty)
                 ) {
                     guard fidelity.shouldProceed() else { return }
                     startExport()
@@ -696,7 +697,7 @@ struct RedactToolView: View {
         guard !leaking.isEmpty else {
             return "\(matches) couldn't be placed as a box, but \(n == 1 ? "it sits" : "they sit") on \(n == 1 ? "a page" : "pages") you're already redacting, so \(n == 1 ? "its" : "their") text is removed with the rest."
         }
-        return "\(matches) couldn't be placed as a box (no readable position) on \(pageListPhrase(leaking)) — \(n == 1 ? "that text" : "that text") stays readable in the saved copy unless you mark \(n == 1 ? "it" : "them") by hand or remove the text on \(leaking.count == 1 ? "that page" : "those pages") when you export."
+        return "\(matches) couldn't be placed as a box (no readable position) on \(pageListPhrase(leaking)) — that text stays readable in the saved copy unless you mark \(n == 1 ? "it" : "them") by hand or remove the text on \(leaking.count == 1 ? "that page" : "those pages") when you export."
     }
 
     /// The export gate's message: what will happen, per page, in the two directions the user can go.
@@ -919,9 +920,12 @@ struct RedactToolView: View {
                 pagesWithoutText: result.pagesWithoutText.count,
                 unlocatablePages: result.unlocatablePages
             )
-            // The gate reads this after the summary line is long forgotten, and a fresh scan
-            // re-arms it: a previously acknowledged export must not carry over to new findings.
-            unlocatablePages = result.unlocatablePages
+            // MERGED, not replaced: auto-marks from earlier scans stay in `marks`, so an earlier
+            // scan's unmarkable match is just as outstanding. Replacing here meant searching for
+            // something else afterwards silently retired the gate — and the first search's finding
+            // shipped unannounced. Per-page max rather than a sum, so re-running the same search
+            // doesn't inflate the count.
+            unlocatablePages.merge(result.unlocatablePages) { existing, found in max(existing, found) }
             forceRasterizePages = []
             ActivityLog.shared.info(
                 "\(Tool.redact.title): found \(result.matchCount) match\(result.matchCount == 1 ? "" : "es") for \(query.describedTarget); \(added) region\(added == 1 ? "" : "s") marked for review."
@@ -969,7 +973,9 @@ struct RedactToolView: View {
             alertMessage = PDFOperationError.noInputFiles.localizedDescription
             return
         }
-        guard !marks.isEmpty else {
+        // Mirrors the engine's guard: removing the text on a page whose match couldn't be boxed is
+        // a legitimate run on its own, even with nothing drawn.
+        guard !marks.isEmpty || !forceRasterizePages.isEmpty else {
             alertMessage = PDFOperationError.noRedactions.localizedDescription
             return
         }
@@ -997,14 +1003,21 @@ struct RedactToolView: View {
         // The receipt names the force-rasterized pages too: the user approved removing text there,
         // and unlike a mark it leaves no black box behind, so the confirmation is the only evidence
         // it happened.
+        let forcedPhrase = pageListPhrase(forced.sorted())
         let forcedDetail = forced.isEmpty
             ? ""
-            : " Text was also removed from \(pageListPhrase(forced.sorted())), where matches couldn't be marked."
-        let summary = ToolSaveSummary(
-            title: "\(counts.regions) region\(counts.regions == 1 ? "" : "s") redacted across \(counts.pages) page\(counts.pages == 1 ? "" : "s")",
-            detail: "The marked content was permanently removed from the saved copy." + forcedDetail,
-            url: nil
-        )
+            : " Text was also removed from \(forcedPhrase), where matches couldn't be marked."
+        // With nothing drawn, the run IS the forced removal — a "0 regions redacted" headline would
+        // read as a no-op export of a file that just had a page's text destroyed.
+        let summary = marks.isEmpty
+            ? ToolSaveSummary(
+                title: "Text removed from \(forcedPhrase)",
+                detail: "No regions were marked. The matches that couldn't be boxed can no longer be extracted from the saved copy.",
+                url: nil)
+            : ToolSaveSummary(
+                title: "\(counts.regions) region\(counts.regions == 1 ? "" : "s") redacted across \(counts.pages) page\(counts.pages == 1 ? "" : "s")",
+                detail: "The marked content was permanently removed from the saved copy." + forcedDetail,
+                url: nil)
 
         do {
             let data = try await PDFBackgroundWork.run {

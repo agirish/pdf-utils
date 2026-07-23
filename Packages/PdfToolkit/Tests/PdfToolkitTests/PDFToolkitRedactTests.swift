@@ -313,17 +313,73 @@ import CoreGraphics
         #expect(texts[2].contains("P3"), "page 3 was neither marked nor named, so it stays vector")
     }
 
-    /// The scan reports WHICH page each unmarkable match sits on, because that is what decides
-    /// whether anything leaks — a match on an already-marked page is destroyed with that page.
-    @Test func findReportsUnlocatableMatchesPerPage() throws {
+    /// The case the option exists for: every match unlocatable, so nothing is drawn and the ONLY
+    /// thing to do is destroy the text. This used to be impossible — the engine refused any export
+    /// without marks, so the user was warned about a leak they could not act on.
+    @Test func aForcedPageAloneIsAValidExport() throws {
         let dir = FixtureDir()
         let src = dir.url("src.pdf")
-        try PDFFixtures.writePDF(markers: ["SSN 123-45-6789", "clean"], to: src)
+        try PDFFixtures.writePDF(markers: ["P1", "P2"], to: src)
 
-        let result = try PDFToolkit.findRedactionMarks(inputURL: src, query: .literal("123-45-6789"))
-        // This fixture's match IS locatable; the point is that the totals and the per-page map agree,
-        // so the export gate can trust one from the other.
-        #expect(result.unlocatableMatches == result.unlocatablePages.values.reduce(0, +))
-        #expect(result.unlocatablePages.keys.allSatisfy { $0 >= 0 })
+        var options = PDFRedactionExportOptions.default
+        options.forceRasterizePages = [1]
+        let texts = try PDFFixtures.pageTexts(
+            data: try PDFToolkit.redactData(inputURL: src, marks: [], options: options))
+
+        #expect(!texts[1].contains("P2"), "the named page's text must be gone")
+        #expect(texts[0].contains("P1"), "and no other page may be touched")
+    }
+
+    /// Neither marks nor forced pages is still nothing to do.
+    @Test func noMarksAndNoForcedPagesStillThrows() throws {
+        let dir = FixtureDir()
+        let src = dir.url("src.pdf")
+        try PDFFixtures.writePDF(pageCount: 2, to: src)
+        #expect(#expect(throws: PDFOperationError.self) {
+            try PDFToolkit.redactData(inputURL: src, marks: [])
+        }?.kind == "noRedactions")
+    }
+
+    /// A bad index must fail loudly, like a mark's does. Silently ignoring it is the worst outcome
+    /// available here: the caller is told the text was destroyed while the page shipped intact.
+    @Test func aForcedPageOutOfBoundsThrows() throws {
+        let dir = FixtureDir()
+        let src = dir.url("src.pdf")
+        try PDFFixtures.writePDF(pageCount: 2, to: src)
+
+        var options = PDFRedactionExportOptions.default
+        options.forceRasterizePages = [7]
+        let error = #expect(throws: PDFOperationError.self) {
+            try PDFToolkit.redactData(
+                inputURL: src,
+                marks: [RedactionMark(pageIndex: 0, rect: CGRect(x: 10, y: 10, width: 40, height: 20))],
+                options: options
+            )
+        }
+        if case .pageOutOfBounds(let n)? = error { #expect(n == 8) } else {
+            Issue.record("expected pageOutOfBounds(8), got \(String(describing: error))")
+        }
+    }
+
+    /// A forced page goes through the same raster path a marked page does, so it comes out upright
+    /// at its displayed size with /Rotate baked in — pinned so this option can't start emitting a
+    /// differently-shaped page than the rest of the tool.
+    @Test func aForcedRotatedPageKeepsItsDisplayedGeometry() throws {
+        let dir = FixtureDir()
+        let src = dir.url("rot.pdf")
+        try PDFFixtures.writePDF(markers: ["P1", "P2"], rotations: [1: 90], to: src)
+
+        var options = PDFRedactionExportOptions.default
+        options.forceRasterizePages = [1]
+        let data = try PDFToolkit.redactData(
+            inputURL: src,
+            marks: [RedactionMark(pageIndex: 0, rect: CGRect(x: 50, y: 300, width: 200, height: 40))],
+            options: options
+        )
+        let doc = try #require(PDFDocument(data: data))
+        let page = try #require(doc.page(at: 1))
+        // 612x792 turned 90° displays as 792x612; the raster carries that, with rotation reset.
+        #expect(page.bounds(for: .cropBox).size == CGSize(width: 792, height: 612))
+        #expect(page.rotation == 0)
     }
 }

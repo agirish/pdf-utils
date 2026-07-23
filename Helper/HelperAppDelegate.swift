@@ -307,7 +307,7 @@ final class HelperAppDelegate: NSObject, NSApplicationDelegate, UNUserNotificati
                 for input in inputs {
                     let output = Self.uniqueOutput(for: input, suffix: "compressed")
                     do {
-                        try PDFToolkit.compress(inputURL: input, outputURL: output, quality: 0.6)
+                        try PDFToolkit.compress(inputURL: input, outputURL: output, quality: Self.defaultCompressionQuality())
                         Self.stripMetadataIfEnabled(output)
                         revealed.append(output)
                         log.recordSaved(Tool.compress.title, to: output, bytes: Self.fileSize(of: output))
@@ -620,6 +620,13 @@ final class HelperAppDelegate: NSObject, NSApplicationDelegate, UNUserNotificati
     /// right-click action respects the same privacy control the in-app and batch paths do.
     private nonisolated static func stripMetadataOnExportEnabled() -> Bool {
         UserDefaults(suiteName: mainAppBundleID)?.bool(forKey: SettingsKeys.stripMetadataOnExport) ?? false
+    }
+
+    /// The app's configured default compression quality, so a right-click Compress produces what the
+    /// app would at its default settings. Falls back to the app's own default (0.72) when the user has
+    /// never changed it — the previous hardcoded 0.6 compressed more aggressively than the app did.
+    private nonisolated static func defaultCompressionQuality() -> Double {
+        (UserDefaults(suiteName: mainAppBundleID)?.object(forKey: SettingsKeys.defaultCompressionQuality) as? Double) ?? 0.72
     }
 
     /// When "Strip metadata on export" is on, rewrite the produced `url` in place with its metadata

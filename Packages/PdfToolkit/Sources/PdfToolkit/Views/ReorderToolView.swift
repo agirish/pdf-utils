@@ -207,33 +207,36 @@ struct ReorderToolView: View {
     // MARK: - Sidebar
 
     private var sidebarColumn: some View {
+        // ScrollView wrapper like every other single-file tool: without it, the controls stack
+        // (file card + guidance + the removed-pages list) overflows UP into the tool header at the
+        // min window height instead of scrolling. The action bar stays pinned below the scroll.
         VStack(spacing: 0) {
-            VStack(alignment: .leading, spacing: 12) {
-                VStack(alignment: .leading, spacing: 14) {
-                    headerRow
+            ScrollView {
+                VStack(alignment: .leading, spacing: 12) {
+                    VStack(alignment: .leading, spacing: 14) {
+                        headerRow
 
-                    Group {
-                        if inputURL == nil {
-                            emptyDropZone
-                        } else if let url = inputURL {
-                            loadedControls(url: url)
+                        Group {
+                            if inputURL == nil {
+                                emptyDropZone
+                            } else if let url = inputURL {
+                                loadedControls(url: url)
+                            }
+                        }
+                        .onDrop(of: [.pdf, .fileURL], isTargeted: $isDropTargeted) { providers in
+                            consumeDroppedProviders(providers)
+                            return true
                         }
                     }
-                    .onDrop(of: [.pdf, .fileURL], isTargeted: $isDropTargeted) { providers in
-                        consumeDroppedProviders(providers)
-                        return true
+                    .padding(18)
+                    .formCard()
+
+                    if let saveSummary {
+                        ToolSaveBanner(accent: accent, summary: saveSummary)
                     }
                 }
-                .padding(18)
-                .formCard()
-
-                if let saveSummary {
-                    ToolSaveBanner(accent: accent, summary: saveSummary)
-                }
+                .padding(12)
             }
-            .padding(12)
-
-            Spacer(minLength: 0)
 
             Divider()
 

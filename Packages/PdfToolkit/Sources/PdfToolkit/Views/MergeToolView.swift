@@ -92,9 +92,7 @@ struct MergeToolView: View {
         }
         .toolErrorAlert($alertMessage)
         .task(id: entriesSignature) {
-            await fidelity.refresh(urls: entries.map(\.url)) { urls in
-                OutputFidelityWarning.bookmarks(in: urls)
-            }
+            await fidelity.refresh(urls: entries.map(\.url), formLoss: .formOrphaned, checksBookmarks: true)
         }
         .task(id: entriesSignature) {
             await refreshPageSummary()

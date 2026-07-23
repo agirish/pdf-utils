@@ -6,6 +6,8 @@ import UniformTypeIdentifiers
 struct ExtractToolView: View {
     @Environment(\.toolAccent) private var accent
     @State private var inputURL: URL?
+    /// The pending "your output will lose X" warning and its acknowledgement.
+    @StateObject private var fidelity = OutputFidelityGate()
     // Blank means "all pages" (see the field's hint). Loading a file also resets this to "" in
     // loadThumbnails, so seeding it to "1" only made the field visibly flip 1 → blank on first load.
     @State private var rangeText = ""
@@ -88,6 +90,15 @@ struct ExtractToolView: View {
         }
         .toolErrorAlert($alertMessage)
         .task(id: selectionPathKey) {
+            guard let url = inputURL else {
+                fidelity.update(nil)
+                return
+            }
+            // Copying pages into a fresh document leaves the widgets but drops the catalog
+            // /AcroForm, so a real form stops being fillable — verified empirically.
+            await fidelity.refresh(urls: [url], formLoss: .formOrphaned, checksBookmarks: false)
+        }
+        .task(id: selectionPathKey) {
             await loadThumbnails()
         }
         // Editing which pages to extract makes the last run's "Extracted N pages" receipt stale — the
@@ -150,11 +161,20 @@ struct ExtractToolView: View {
 
             Divider()
 
-            RunActionButton(title: "Extract & save…", busy: busy, canRun: inputURL != nil) {
-                Task { await runExtract() }
+            VStack(spacing: 12) {
+                if let warning = fidelity.warning {
+                    OutputFidelityNote(warning: warning, toolTitle: Tool.extract.title)
+                }
+                RunActionButton(title: "Extract & save…", busy: busy, canRun: inputURL != nil) {
+                    guard fidelity.shouldProceed() else { return }
+                    Task { await runExtract() }
+                }
             }
             .padding(16)
             .toolActionBar()
+            .outputFidelityConfirmation(fidelity, toolTitle: Tool.extract.title) {
+                Task { await runExtract() }
+            }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }

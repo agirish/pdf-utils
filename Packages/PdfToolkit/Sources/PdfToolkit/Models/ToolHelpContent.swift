@@ -86,6 +86,7 @@ extension Tool {
                     "In Custom margins and Drag to crop, Crop & save… stays disabled until you set a non-zero trim.",
                     "A trim that would leave less than about a third of an inch of page is refused rather than producing a sliver.",
                     "Blank pages are left alone by Auto-detect—there is nothing to crop to.",
+                    "An interactive form stops working in the saved copy — the fields stay visible and keep their values, but no reader will treat them as a fillable form again. Bookmarks, links, and the document title are kept.",
                 ]
             )
         case .imagesToPdf:
@@ -185,6 +186,7 @@ extension Tool {
                     "A page range keeps the order you type (for example 5,1,2), just like Extract.",
                     "Large merges can take a moment; the window should stay responsive while working.",
                     "Bookmarks aren’t carried into the merged file — each source has its own outline at different page offsets, so they’re dropped rather than pointed at the wrong pages. Page content, links, form fields, and the first file’s title are unaffected.",
+                    "An interactive form also stops working — the fields stay visible and keep their values, but no reader will treat them as a fillable form again.",
                 ]
             )
         case .split:
@@ -209,6 +211,7 @@ extension Tool {
                     "The live “Creates N files” count under the options shows how many files the current settings will produce.",
                     "A part whose name is already taken in the chosen folder is numbered (\u{201C}name 2.pdf\u{201D}) — existing files are never overwritten.",
                     "Bookmarks aren’t carried into the parts — one outline can’t be cut across several files correctly yet, so they’re dropped rather than misdirected. Page content, links, form fields, and the document title are unaffected.",
+                    "An interactive form also stops working — the fields stay visible and keep their values, but no reader will treat them as a fillable form again.",
                 ]
             )
         case .extract:
@@ -228,6 +231,7 @@ extension Tool {
                 tips: [
                     "You can list the same page more than once if you need duplicates in the output.",
                     "Clicking pages sorts them into ascending order. To keep a custom order (for example 5, 1, 2), type it in the field and leave the thumbnails alone.",
+                    "An interactive form stops working in the saved copy — the fields stay visible and keep their values, but no reader will treat them as a fillable form again. Bookmarks, links, and the document title are kept.",
                 ]
             )
         case .reorder:
@@ -254,6 +258,7 @@ extension Tool {
                 tips: [
                     "Saving without changing anything just copies the document in its original order.",
                     "Saving is blocked while every page is removed—restore at least one to write a file.",
+                    "An interactive form stops working in the saved copy — the fields stay visible and keep their values, but no reader will treat them as a fillable form again. Bookmarks, links, and the document title are kept.",
                 ]
             )
         case .deletePages:

@@ -55,7 +55,7 @@ struct OutputFidelityWarningTests {
         let plain = dir.url("plain.pdf")
         try PDFFixtures.writePDF(pageCount: 3, to: plain)
         #expect(PDFToolkit.bookmarkCount(at: plain) == 0)
-        #expect(OutputFidelityWarning.bookmarks(in: [plain]) == nil)
+        #expect(OutputFidelityWarning.detect(in: [plain], formLoss: nil, checksBookmarks: true) == nil)
     }
 
     @Test func bookmarkWarningTotalsAcrossOnlyTheFilesThatHaveThem() throws {
@@ -64,8 +64,8 @@ struct OutputFidelityWarningTests {
         let b = try pdfWithBookmarks(0, in: dir, named: "b.pdf")
         let c = try pdfWithBookmarks(2, in: dir, named: "c.pdf")
 
-        let warning = try #require(OutputFidelityWarning.bookmarks(in: [a, b, c]))
-        #expect(warning.kind == .bookmarks(total: 5, fileCount: 2))
+        let warning = try #require(OutputFidelityWarning.detect(in: [a, b, c], formLoss: nil, checksBookmarks: true))
+        #expect(warning.losses == [.bookmarks(total: 5, fileCount: 2)])
         let detail = warning.detail(toolTitle: "Merge")
         #expect(detail.contains("2 of these files"))
         #expect(detail.contains("5 bookmarks"))
@@ -74,9 +74,9 @@ struct OutputFidelityWarningTests {
     @Test func singleFileBookmarkWarningReadsNaturally() throws {
         let dir = FixtureDir()
         let a = try pdfWithBookmarks(1, in: dir, named: "a.pdf")
-        let warning = try #require(OutputFidelityWarning.bookmarks(in: [a]))
+        let warning = try #require(OutputFidelityWarning.detect(in: [a], formLoss: nil, checksBookmarks: true))
         let detail = warning.detail(toolTitle: "Split")
-        #expect(detail.contains("This PDF has 1 bookmark."))
+        #expect(detail.contains("This PDF has 1 bookmark,"))
         #expect(!detail.contains("1 bookmarks"))
     }
 
@@ -86,7 +86,7 @@ struct OutputFidelityWarningTests {
         let dir = FixtureDir()
         let plain = dir.url("plain.pdf")
         try PDFFixtures.writePDF(pageCount: 2, to: plain)
-        #expect(OutputFidelityWarning.interactiveForm(at: plain) == nil)
+        #expect(OutputFidelityWarning.detect(in: [plain], formLoss: .formFlattened, checksBookmarks: false) == nil)
     }
 
     // MARK: The acknowledgement gate
@@ -94,7 +94,7 @@ struct OutputFidelityWarningTests {
     @MainActor
     @Test func gateBlocksOnceThenLetsTheRetryThrough() {
         let gate = OutputFidelityGate()
-        gate.update(OutputFidelityWarning(kind: .interactiveForm))
+        gate.update(OutputFidelityWarning(losses: [.formFlattened]))
 
         #expect(gate.shouldProceed() == false, "first attempt must raise the confirmation")
         #expect(gate.isConfirming)
@@ -116,12 +116,12 @@ struct OutputFidelityWarningTests {
     @MainActor
     @Test func aDifferentWarningReArmsTheConfirmation() {
         let gate = OutputFidelityGate()
-        gate.update(OutputFidelityWarning(kind: .interactiveForm))
+        gate.update(OutputFidelityWarning(losses: [.formFlattened]))
         _ = gate.shouldProceed()
         gate.acknowledge()
         #expect(gate.shouldProceed())
 
-        gate.update(OutputFidelityWarning(kind: .bookmarks(total: 4, fileCount: 1)))
+        gate.update(OutputFidelityWarning(losses: [.bookmarks(total: 4, fileCount: 1)]))
         #expect(gate.shouldProceed() == false, "a new warning must be confirmed on its own terms")
     }
 
@@ -129,18 +129,18 @@ struct OutputFidelityWarningTests {
     @MainActor
     @Test func reDetectingTheSameWarningKeepsTheAcknowledgement() {
         let gate = OutputFidelityGate()
-        gate.update(OutputFidelityWarning(kind: .interactiveForm))
+        gate.update(OutputFidelityWarning(losses: [.formFlattened]))
         _ = gate.shouldProceed()
         gate.acknowledge()
 
-        gate.update(OutputFidelityWarning(kind: .interactiveForm))
+        gate.update(OutputFidelityWarning(losses: [.formFlattened]))
         #expect(gate.shouldProceed(), "an identical warning must not re-prompt")
     }
 
     @MainActor
     @Test func clearingTheFileClearsTheWarning() {
         let gate = OutputFidelityGate()
-        gate.update(OutputFidelityWarning(kind: .interactiveForm))
+        gate.update(OutputFidelityWarning(losses: [.formFlattened]))
         gate.update(nil)
         #expect(gate.warning == nil)
         #expect(gate.shouldProceed())

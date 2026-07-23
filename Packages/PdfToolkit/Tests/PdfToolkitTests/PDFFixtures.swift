@@ -323,6 +323,42 @@ enum PDFFixtures {
 }
 
 extension PDFFixtures {
+    /// A 2-page PDF carrying a REAL catalog `/AcroForm` with one text field on page 1.
+    ///
+    /// Assembled byte by byte because PDFKit's writer will NOT produce an `/AcroForm` from widget
+    /// annotations — a fixture built with `PDFAnnotation(forType: .widget)` reports
+    /// `hasInteractiveForm == false`, so it silently tests nothing. Offsets are computed so the xref
+    /// table is valid and PDFKit parses the file.
+    static func writeAcroFormPDF(to url: URL) throws {
+        let stream = "BT /Helv 24 Tf 72 396 Td (MARKERPAGE1) Tj ET"
+        let objects = [
+            "<< /Type /Catalog /Pages 2 0 R /AcroForm << /Fields [5 0 R] /DA (/Helv 0 Tf 0 g) >> >>",
+            "<< /Type /Pages /Kids [3 0 R 4 0 R] /Count 2 >>",
+            "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Annots [5 0 R] /Contents 6 0 R /Resources << /Font << /Helv 7 0 R >> >> >>",
+            "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 6 0 R /Resources << /Font << /Helv 7 0 R >> >> >>",
+            "<< /Type /Annot /Subtype /Widget /FT /Tx /T (FullName) /V (typed value) /Rect [72 600 272 624] /DA (/Helv 12 Tf 0 g) /F 4 /P 3 0 R >>",
+            "<< /Length \(stream.utf8.count) >>\nstream\n\(stream)\nendstream",
+            "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+        ]
+        var pdf = "%PDF-1.7\n"
+        var offsets: [Int] = []
+        for (i, body) in objects.enumerated() {
+            offsets.append(pdf.utf8.count)
+            pdf += "\(i + 1) 0 obj\n\(body)\nendobj\n"
+        }
+        let xrefOffset = pdf.utf8.count
+        pdf += "xref\n0 \(objects.count + 1)\n0000000000 65535 f \n"
+        for offset in offsets {
+            pdf += String(format: "%010d 00000 n \n", offset)
+        }
+        pdf += "trailer\n<< /Size \(objects.count + 1) /Root 1 0 R >>\nstartxref\n\(xrefOffset)\n%%EOF\n"
+        guard let data = pdf.data(using: .ascii) else {
+            throw PDFOperationError.couldNotEncodeOutput
+        }
+        try data.write(to: url, options: .atomic)
+    }
+
+
     /// Rebuilds `src` as an image-only PDF at `out` through Compress's **unbounded** core.
     ///
     /// `PDFToolkit.compress(inputURL:outputURL:quality:)` is a save path, so it is bounded by the

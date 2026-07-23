@@ -165,7 +165,7 @@ struct WatermarkToolView: View {
             previewSubtitle: "The original pages. Your watermark is stamped on the pages you choose when you save.",
             onPageCountChange: { pageCount = $0 },
             runSingle: { url in await runWatermark(url) },
-            detectFidelityWarning: { urls in urls.first.flatMap(OutputFidelityWarning.interactiveForm(at:)) }
+            detectFidelityWarning: { urls in OutputFidelityWarning.detect(in: urls, formLoss: .formFlattened, checksBookmarks: false) }
         ) {
             watermarkOptions
         }

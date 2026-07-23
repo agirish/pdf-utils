@@ -2,92 +2,149 @@ import Foundation
 import PDFKit
 import SwiftUI
 
-/// Something a tool's output will genuinely lose, detected from the loaded source file(s).
+/// What a tool's output will genuinely lose, detected from the loaded source file(s).
 ///
-/// Two rebuild limits can't be engineered away, so they are disclosed instead of discovered:
+/// Three limits can't be engineered away, so they are disclosed instead of discovered. All were
+/// confirmed empirically against a hand-authored PDF carrying a real catalog `/AcroForm`
+/// (PDFKit's writer won't produce one from widget annotations, so the fixture is assembled byte by
+/// byte — see `PDFFixtures.writeAcroFormPDF`):
 ///
-/// - **Interactive form fields** — Watermark, OCR, Fill & Sign, Compress and Redact re-emit each
-///   page through a `CGPDFContext`, which has no notion of an `/AcroForm`. A fillable field is
-///   flattened into the page picture: it still *looks* right, but it can't be filled in again.
-/// - **Bookmarks** — Merge concatenates pages from many documents (each with its own outline, at
-///   shifting offsets, under per-file page selections) and Split cuts one outline across several
-///   files. A correct combined or per-part outline is real work, and a naive reassign would point
-///   bookmarks at the wrong pages, so both deliberately drop it (see the NOTE comments in
-///   `PDFToolkit.mergeData` / `PDFToolkit.split`).
+/// - **A form is flattened** by the tools that re-emit each page through a `CGPDFContext`
+///   (Watermark, OCR, Fill & Sign, Compress, Redact). Both the catalog `/AcroForm` AND the widget
+///   annotations go: the field's *appearance* is painted into the page, so the saved copy looks and
+///   prints identically, but nothing interactive remains.
+/// - **A form is orphaned** by the tools that rebuild by copying pages into a fresh document
+///   (Extract, Reorder, Crop, Merge, Split). The widget annotations ride along on the copied pages,
+///   but the catalog `/AcroForm` that binds them into a form does not — so the fields stay visible
+///   and keep their values, yet no reader treats them as a fillable form any more. This is the
+///   subtler of the two, which is exactly why it needs saying.
+/// - **Bookmarks are dropped** by Merge and Split. A merge concatenates outlines from many documents
+///   at shifting page offsets; a split cuts one outline across several files. Both deliberately drop
+///   rather than ship misdirected bookmarks (see the NOTE comments in `PDFToolkit.mergeData` /
+///   `PDFToolkit.split`).
+///
+/// Delete and Rotate mutate the document in place and lose none of the three.
 ///
 /// A warning is only ever built when the *loaded file actually has* the thing at risk, so it stays
-/// meaningful rather than becoming permanent wallpaper. Everything else the rebuilds used to lose —
-/// bookmarks, the document title, links — is now preserved (`PDFToolkit.restoringCatalog`), so it is
-/// deliberately NOT listed here.
+/// meaningful rather than becoming permanent wallpaper. Everything else these rebuilds used to lose —
+/// bookmarks outside merge/split, the document title, links — is now preserved, so it is
+/// deliberately not listed here.
 struct OutputFidelityWarning: Equatable {
-    enum Kind: Equatable {
-        case interactiveForm
+    /// One thing this tool's output will lose. A tool can have more than one — Merge and Split lose
+    /// both a form and bookmarks.
+    enum Loss: Equatable {
+        /// Catalog form and widgets both gone; the fields' appearance is baked into the page.
+        case formFlattened
+        /// Widgets survive as visible annotations, but the catalog `/AcroForm` does not.
+        case formOrphaned
         /// `total` bookmarks across `fileCount` source files.
         case bookmarks(total: Int, fileCount: Int)
+
+        var isFormLoss: Bool {
+            switch self {
+            case .formFlattened, .formOrphaned: return true
+            case .bookmarks: return false
+            }
+        }
     }
 
-    var kind: Kind
+    /// In detection order, so the banner reads the same way every time.
+    var losses: [Loss]
+
+    private var losesForm: Bool { losses.contains(where: \.isFormLoss) }
+    private var losesBookmarks: Bool { losses.contains { !$0.isFormLoss } }
 
     var symbolName: String {
-        switch kind {
-        case .interactiveForm: return "exclamationmark.triangle.fill"
-        case .bookmarks: return "bookmark.slash.fill"
-        }
+        losesForm ? "exclamationmark.triangle.fill" : "bookmark.slash.fill"
     }
 
-    /// The banner's bold first line.
     var headline: String {
-        switch kind {
-        case .interactiveForm:
-            return "This PDF has fillable form fields"
-        case .bookmarks:
-            return "Bookmarks won’t carry over"
+        guard losses.count == 1 else { return "Some things won’t carry over" }
+        switch losses[0] {
+        case .formFlattened, .formOrphaned: return "This PDF has fillable form fields"
+        case .bookmarks: return "Bookmarks won’t carry over"
         }
     }
 
-    /// The banner's body — states exactly what is lost and what is not.
+    /// One sentence per loss, each stating exactly what goes.
+    func detailLines(toolTitle: String) -> [String] {
+        losses.map { loss in
+            switch loss {
+            case .formFlattened:
+                return "The form fields will be flattened into the page — the saved copy looks identical but can no longer be filled in or edited."
+            case .formOrphaned:
+                return "The form fields will stop working — they stay visible, and keep any values already filled in, but no reader will treat them as a fillable form again."
+            case .bookmarks(let total, let fileCount):
+                let bookmarks = total == 1 ? "1 bookmark" : "\(total) bookmarks"
+                let source = fileCount <= 1
+                    ? "This PDF has \(bookmarks)"
+                    : "\(fileCount) of these files have bookmarks (\(bookmarks) in total)"
+                return "\(source), and the \(toolTitle.lowercased()) output won’t have any."
+            }
+        }
+    }
+
+    /// The "and here's what survives" clause, so the warning never reads as "this tool ruins your
+    /// file". Tailored to which losses actually apply.
+    var keptLine: String {
+        switch (losesForm, losesBookmarks) {
+        case (true, true): return "Page content, links, and the document title are kept."
+        case (true, false): return "Bookmarks, links, and the document title are kept."
+        case (false, true): return "Page content, links, form fields, and the document title are kept."
+        case (false, false): return ""
+        }
+    }
+
+    /// The whole thing as one string — the confirmation's message, and the accessibility label.
     func detail(toolTitle: String) -> String {
-        switch kind {
-        case .interactiveForm:
-            return "They’ll be flattened into the page — the saved copy looks identical but can no longer be filled in or edited. Bookmarks, links, and the title are kept."
-        case .bookmarks(let total, let fileCount):
-            let bookmarks = total == 1 ? "1 bookmark" : "\(total) bookmarks"
-            let source = fileCount <= 1
-                ? "This PDF has \(bookmarks)."
-                : "\(fileCount) of these files have bookmarks (\(bookmarks) in total)."
-            return "\(source) The \(toolTitle.lowercased()) output won’t have any — page content, links, and form fields are unaffected."
-        }
+        (detailLines(toolTitle: toolTitle) + [keptLine])
+            .filter { !$0.isEmpty }
+            .joined(separator: " ")
     }
 
-    /// Title of the confirmation the user must acknowledge before the file is written.
     var confirmationTitle: String {
-        switch kind {
-        case .interactiveForm: return "Form fields will be flattened"
+        guard losses.count == 1 else { return "Some things won’t carry over" }
+        switch losses[0] {
+        case .formFlattened: return "Form fields will be flattened"
+        case .formOrphaned: return "Form fields will stop working"
         case .bookmarks: return "Bookmarks won’t carry over"
         }
     }
 
     var confirmButtonTitle: String {
-        switch kind {
-        case .interactiveForm: return "Flatten and continue"
+        guard losses.count == 1 else { return "Continue anyway" }
+        switch losses[0] {
+        case .formFlattened: return "Flatten and continue"
+        case .formOrphaned: return "Continue anyway"
         case .bookmarks: return "Continue without bookmarks"
         }
     }
 
     // MARK: Detection
 
-    /// The form warning for a single loaded file, or nil when it carries no `/AcroForm`.
+    /// Builds the warning for `urls`, or nil when none of the requested checks finds anything at risk.
     ///
-    /// Touches PDFKit, so call it off the main actor through ``PDFBackgroundWork``.
-    static func interactiveForm(at url: URL) -> OutputFidelityWarning? {
-        let hasForm = (try? url.withSecurityScopedAccess { PDFToolkit.hasInteractiveForm(at: url) }) ?? false
-        return hasForm ? OutputFidelityWarning(kind: .interactiveForm) : nil
+    /// `formLoss` is how THIS tool damages a form (nil = it doesn't); `checksBookmarks` is whether
+    /// this tool drops them. Both are properties of the tool; whether they *matter* is a property of
+    /// the loaded file — which is what makes the warning conditional.
+    ///
+    /// Opens PDFs, so call it off the main actor through ``PDFBackgroundWork``.
+    static func detect(in urls: [URL], formLoss: Loss?, checksBookmarks: Bool) -> OutputFidelityWarning? {
+        var losses: [Loss] = []
+        if let formLoss, urls.contains(where: hasForm(at:)) {
+            losses.append(formLoss)
+        }
+        if checksBookmarks, let bookmarks = bookmarkLoss(in: urls) {
+            losses.append(bookmarks)
+        }
+        return losses.isEmpty ? nil : OutputFidelityWarning(losses: losses)
     }
 
-    /// The bookmark warning for the queued sources, or nil when none of them has an outline.
-    ///
-    /// Touches PDFKit, so call it off the main actor through ``PDFBackgroundWork``.
-    static func bookmarks(in urls: [URL]) -> OutputFidelityWarning? {
+    private static func hasForm(at url: URL) -> Bool {
+        (try? url.withSecurityScopedAccess { PDFToolkit.hasInteractiveForm(at: url) }) ?? false
+    }
+
+    private static func bookmarkLoss(in urls: [URL]) -> Loss? {
         var total = 0
         var files = 0
         for url in urls {
@@ -97,8 +154,7 @@ struct OutputFidelityWarning: Equatable {
                 files += 1
             }
         }
-        guard total > 0 else { return nil }
-        return OutputFidelityWarning(kind: .bookmarks(total: total, fileCount: files))
+        return total > 0 ? .bookmarks(total: total, fileCount: files) : nil
     }
 }
 
@@ -119,9 +175,16 @@ struct OutputFidelityNote: View {
             VStack(alignment: .leading, spacing: 3) {
                 Text(warning.headline)
                     .font(.caption.weight(.medium))
-                Text(warning.detail(toolTitle: toolTitle))
-                    .font(.caption)
-                    .fixedSize(horizontal: false, vertical: true)
+                ForEach(Array(warning.detailLines(toolTitle: toolTitle).enumerated()), id: \.offset) { _, line in
+                    Text(line)
+                        .font(.caption)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                if !warning.keptLine.isEmpty {
+                    Text(warning.keptLine)
+                        .font(.caption)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
             }
             .foregroundStyle(Color.fieldWarning)
             Spacer(minLength: 0)
@@ -180,6 +243,13 @@ final class OutputFidelityGate: ObservableObject {
         let detected = try? await PDFBackgroundWork.run { detect(urls) }
         guard !Task.isCancelled else { return }
         update(detected ?? nil)
+    }
+
+    /// The shape every tool uses: it declares how it damages a form and whether it drops bookmarks.
+    func refresh(urls: [URL], formLoss: OutputFidelityWarning.Loss?, checksBookmarks: Bool) async {
+        await refresh(urls: urls) { urls in
+            OutputFidelityWarning.detect(in: urls, formLoss: formLoss, checksBookmarks: checksBookmarks)
+        }
     }
 }
 

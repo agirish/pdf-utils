@@ -195,7 +195,7 @@ struct CompressToolView: View {
             fallbackSuffix: "compressed",
             previewSubtitle: "Pages in the file you’re about to compress.",
             runSingle: { url in await runCompress(url) },
-            detectFidelityWarning: { urls in urls.first.flatMap(OutputFidelityWarning.interactiveForm(at:)) }
+            detectFidelityWarning: { urls in OutputFidelityWarning.detect(in: urls, formLoss: .formFlattened, checksBookmarks: false) }
         ) {
             controlsSection
         }

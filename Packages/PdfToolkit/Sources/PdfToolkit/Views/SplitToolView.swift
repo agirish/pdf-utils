@@ -161,9 +161,7 @@ struct SplitToolView: View {
                 fidelity.update(nil)
                 return
             }
-            await fidelity.refresh(urls: [url]) { urls in
-                OutputFidelityWarning.bookmarks(in: urls)
-            }
+            await fidelity.refresh(urls: [url], formLoss: .formOrphaned, checksBookmarks: true)
         }
         .task(id: selectionPathKey) {
             await loadThumbnails()

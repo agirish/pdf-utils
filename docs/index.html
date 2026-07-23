@@ -247,8 +247,10 @@
     </div>
 
     <div class="fidelity">
-      <h3>Interactive form fields are flattened</h3>
-      <p><b>Affects Watermark, OCR, Fill &amp; Sign, Compress, and Redact.</b> These tools re-emit each page, so a fillable AcroForm — text fields, checkboxes, dropdowns, signature fields — becomes part of the page picture. The saved copy looks and prints identically, but <b>the fields can no longer be filled in, edited, or read back by a form processor</b>. Values already filled in are kept as visible text. If you need the form to stay fillable, keep the original and share the rebuilt copy separately.</p>
+      <h3>An interactive form stops working — everywhere except Delete and Rotate</h3>
+      <p><b>Flattened, by Watermark, OCR, Fill &amp; Sign, Compress, and Redact.</b> These re-emit each page, so a fillable AcroForm — text fields, checkboxes, dropdowns, signature fields — becomes part of the page picture. The saved copy looks and prints identically, but <b>nothing interactive remains</b>; values already filled in survive as visible text.</p>
+      <p><b>Orphaned, by Extract, Reorder, Crop, Merge, and Split.</b> These copy pages into a new document. The fields ride along and stay visible, complete with their values, but the catalog entry that binds them into a form does not — so <b>no reader will treat them as a fillable form again</b>. This one is easy to miss, because the file still <i>looks</i> like a form.</p>
+      <p>Either way: if you need the form to stay fillable, keep the original and share the rebuilt copy separately.</p>
     </div>
 
     <div class="fidelity">
@@ -258,10 +260,11 @@
 
     <table class="keeps">
       <tr><th>Tool</th><th>Bookmarks</th><th>Title / author</th><th>Links</th><th>Form fields</th></tr>
+      <tr><td>Delete, Rotate</td><td class="kept">kept</td><td class="kept">kept</td><td class="kept">kept</td><td class="kept">kept</td></tr>
+      <tr><td>Crop, Extract, Reorder</td><td class="kept">kept</td><td class="kept">kept</td><td class="kept">kept</td><td class="no">orphaned</td></tr>
       <tr><td>Watermark, OCR, Fill &amp; Sign, Compress</td><td class="kept">kept</td><td class="kept">kept</td><td class="kept">kept</td><td class="no">flattened</td></tr>
       <tr><td>Redact</td><td class="kept">kept</td><td class="kept">kept</td><td class="no">dropped on marked pages</td><td class="no">flattened</td></tr>
-      <tr><td>Crop, Extract, Reorder, Delete, Rotate</td><td class="kept">kept</td><td class="kept">kept</td><td class="kept">kept</td><td class="kept">kept</td></tr>
-      <tr><td>Merge, Split</td><td class="no">dropped</td><td class="kept">kept</td><td class="kept">kept</td><td class="kept">kept</td></tr>
+      <tr><td>Merge, Split</td><td class="no">dropped</td><td class="kept">kept</td><td class="kept">kept</td><td class="no">orphaned</td></tr>
     </table>
   </div>
 </section>

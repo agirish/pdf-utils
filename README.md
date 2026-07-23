@@ -27,10 +27,10 @@ Tools are grouped on the dashboard into four sections — **Optimize**, **Organi
 
 | Tool | What it does |
 |------|--------------|
-| **Merge PDF** | Stacks several PDFs into one, top-to-bottom in the list. Take only some pages of a file by typing a range in its **Pages** field (e.g. `1, 3-5`); leave blank for all. Reorder rows with the arrows, or drop a stray page straight from the combined preview. **Bookmarks are not carried over** — see [What each tool preserves](#what-each-tool-preserves). |
-| **Split PDF** | Cuts one PDF into several — fixed chunks of **N pages**, or **custom ranges** where each comma group (`1-3, 4-6, 7-10`) becomes its own file. Parts are written into a folder you choose. **Bookmarks are not carried over** — see [What each tool preserves](#what-each-tool-preserves). |
-| **Extract PDF Pages** | Saves a new PDF of only the pages you list. Order follows what you type (`5,1,2` → page 5, then 1, then 2); ranges expand forward (`3-5`) or backward (`5-3`). |
-| **Reorder Pages** | Lists every page as a draggable row; rearrange (drag or **↑ / ↓**), trash any you don't need, and save a new PDF. The preview follows the new order, labeled with each page's original number. |
+| **Merge PDF** | Stacks several PDFs into one, top-to-bottom in the list. Take only some pages of a file by typing a range in its **Pages** field (e.g. `1, 3-5`); leave blank for all. Reorder rows with the arrows, or drop a stray page straight from the combined preview. **Bookmarks are not carried over, and an interactive form stops working** — see [What each tool preserves](#what-each-tool-preserves). |
+| **Split PDF** | Cuts one PDF into several — fixed chunks of **N pages**, or **custom ranges** where each comma group (`1-3, 4-6, 7-10`) becomes its own file. Parts are written into a folder you choose. **Bookmarks are not carried over, and an interactive form stops working** — see [What each tool preserves](#what-each-tool-preserves). |
+| **Extract PDF Pages** | Saves a new PDF of only the pages you list. Order follows what you type (`5,1,2` → page 5, then 1, then 2); ranges expand forward (`3-5`) or backward (`5-3`). An interactive form stops working — see [What each tool preserves](#what-each-tool-preserves). |
+| **Reorder Pages** | Lists every page as a draggable row; rearrange (drag or **↑ / ↓**), trash any you don't need, and save a new PDF. The preview follows the new order, labeled with each page's original number. An interactive form stops working — see [What each tool preserves](#what-each-tool-preserves). |
 | **Delete PDF Pages** | Writes a new PDF with the listed pages removed. Requires an explicit list — an empty field does **not** mean "all". At least one page must remain. |
 | **Rotate PDF** | Rotates all pages or a **page range** by 90° / 180° / 270°. Batch several PDFs in one run. |
 
@@ -38,7 +38,7 @@ Tools are grouped on the dashboard into four sections — **Optimize**, **Organi
 
 | Tool | What it does |
 |------|--------------|
-| **Crop PDF** | Tightens each page's margins — type a trim per edge, drag a box directly on the page, or let the tool find the content bounds automatically. Cropping changes what viewers display; nothing is deleted from the page. |
+| **Crop PDF** | Tightens each page's margins — type a trim per edge, drag a box directly on the page, or let the tool find the content bounds automatically. Cropping changes what viewers display; nothing is deleted from the page. An interactive form stops working — see [What each tool preserves](#what-each-tool-preserves). |
 | **Watermark PDF** | Stamps **text** (DRAFT, CONFIDENTIAL, a name) or your own **logo image** across pages. Choose font, color, size, angle, and opacity; a single centered stamp or a tiled pattern; every page, the first page, or a range. The underlying page stays vector (text stays selectable), but **interactive form fields are flattened** — see [What each tool preserves](#what-each-tool-preserves). |
 | **Fill & Sign** | Drops typed text onto a non-interactive (flat) form, then draw or type a **signature** and place it. Text stays selectable; the signature is baked in as vector ink. Built for flat forms — an **interactive** AcroForm is flattened on save, see [What each tool preserves](#what-each-tool-preserves). |
 | **Images to PDF** | Turns **JPG, PNG, or HEIC** images into one PDF, a page per image. Pick a paper size (or match each image exactly) and whether pictures **fit** inside the page or **fill** it edge to edge. |
@@ -59,12 +59,20 @@ Some tools rebuild every page to do their job. That is what makes them work — 
 consequences worth knowing before you save over something you care about. The app warns you in
 context, and only when the file you loaded actually has something to lose.
 
-**Interactive form fields are flattened by Watermark, OCR, Fill & Sign, Compress, and Redact.**
-These tools re-emit each page, so a fillable AcroForm — text fields, checkboxes, dropdowns,
-signature fields — becomes part of the page picture. The saved copy looks identical and prints
-identically, but **the fields can no longer be filled in, edited, or read back by a form processor**.
-Any values already filled in are kept as visible text. If you need the form to stay fillable, keep
-the original and share the rebuilt copy separately.
+**An interactive form stops working in every tool except Delete and Rotate**, in one of two ways.
+
+*Flattened* — by **Watermark, OCR, Fill & Sign, Compress, and Redact.** These re-emit each page, so
+a fillable AcroForm — text fields, checkboxes, dropdowns, signature fields — becomes part of the page
+picture. The saved copy looks and prints identically, but **nothing interactive remains**; values
+already filled in survive as visible text.
+
+*Orphaned* — by **Extract, Reorder, Crop, Merge, and Split.** These copy pages into a new document.
+The fields ride along and stay visible, complete with their values, but the catalog entry that binds
+them into a form does not — so **no reader will treat them as a fillable form again**. This one is
+easy to miss, because the file still *looks* like a form.
+
+Either way: if you need the form to stay fillable, keep the original and share the rebuilt copy
+separately. Only **Delete** and **Rotate** leave a form intact.
 
 **Bookmarks are not carried over by Merge or Split.** A merge concatenates pages from several
 documents, each with its own outline at shifting page offsets; a split cuts one outline across
@@ -79,10 +87,11 @@ disclose what you painted over — while unmarked pages keep theirs.
 
 | | Bookmarks | Title / author | Links | Form fields |
 |---|---|---|---|---|
+| Delete, Rotate | kept | kept | kept | kept |
+| Crop, Extract, Reorder | kept | kept | kept | **orphaned** |
 | Watermark, OCR, Fill & Sign, Compress | kept | kept | kept | **flattened** |
 | Redact | kept | kept | dropped on marked pages | **flattened** |
-| Crop, Extract, Reorder, Delete, Rotate | kept | kept | kept | kept |
-| Merge, Split | **dropped** | kept | kept | kept |
+| Merge, Split | **dropped** | kept | kept | **orphaned** |
 
 ---
 

@@ -14,6 +14,8 @@ enum CropMode: Hashable {
 struct CropToolView: View {
     @Environment(\.toolAccent) private var accent
     @State private var inputURL: URL?
+    /// The pending "your output will lose X" warning and its acknowledgement.
+    @StateObject private var fidelity = OutputFidelityGate()
     @State private var mode: CropMode = .auto
     @State private var padding: Double = 12
     /// Auto-detect only: unify the detected trim into one uniform crop across all pages.
@@ -123,6 +125,15 @@ struct CropToolView: View {
             pendingSaveSummary = nil
         }
         .toolErrorAlert($alertMessage)
+        .task(id: selectionPathKey) {
+            guard let url = inputURL else {
+                fidelity.update(nil)
+                return
+            }
+            // Copying pages into a fresh document leaves the widgets but drops the catalog
+            // /AcroForm, so a real form stops being fillable — verified empirically.
+            await fidelity.refresh(urls: [url], formLoss: .formOrphaned, checksBookmarks: false)
+        }
         .task(id: selectionPathKey) {
             // A new file: re-seed the crop history with the (persistent) current margins so ⌘Z can't
             // cross the file boundary, then load thumbnails. Clear the interaction flag too, in case the
@@ -351,11 +362,20 @@ struct CropToolView: View {
 
             Divider()
 
-            RunActionButton(title: "Crop & save…", busy: busy, canRun: canRun) {
-                Task { await runCrop() }
+            VStack(spacing: 12) {
+                if let warning = fidelity.warning {
+                    OutputFidelityNote(warning: warning, toolTitle: Tool.crop.title)
+                }
+                RunActionButton(title: "Crop & save…", busy: busy, canRun: canRun) {
+                    guard fidelity.shouldProceed() else { return }
+                    Task { await runCrop() }
+                }
             }
             .padding(16)
             .toolActionBar()
+            .outputFidelityConfirmation(fidelity, toolTitle: Tool.crop.title) {
+                Task { await runCrop() }
+            }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }

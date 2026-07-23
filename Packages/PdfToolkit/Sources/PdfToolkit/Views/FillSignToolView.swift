@@ -119,9 +119,7 @@ struct FillSignToolView: View {
                 fidelity.update(nil)
                 return
             }
-            await fidelity.refresh(urls: [url]) { urls in
-                urls.first.flatMap(OutputFidelityWarning.interactiveForm(at:))
-            }
+            await fidelity.refresh(urls: [url], formLoss: .formFlattened, checksBookmarks: false)
         }
         .task(id: selectionPathKey) {
             await reloadDocumentForSelection()

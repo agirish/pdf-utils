@@ -87,6 +87,8 @@ struct ReorderWorkingSet: Equatable {
 struct ReorderToolView: View {
     @Environment(\.toolAccent) private var accent
     @State private var inputURL: URL?
+    /// The pending "your output will lose X" warning and its acknowledgement.
+    @StateObject private var fidelity = OutputFidelityGate()
     /// The pages kept (in output order) and the pages removed. All the reorder/remove/restore/reset
     /// index math lives on this value type so it can be unit-tested away from SwiftUI; the list, the
     /// preview, and the exported copy all follow `working.items`.
@@ -196,6 +198,15 @@ struct ReorderToolView: View {
         }
         .toolErrorAlert($alertMessage)
         .task(id: selectionPathKey) {
+            guard let url = inputURL else {
+                fidelity.update(nil)
+                return
+            }
+            // Copying pages into a fresh document leaves the widgets but drops the catalog
+            // /AcroForm, so a real form stops being fillable — verified empirically.
+            await fidelity.refresh(urls: [url], formLoss: .formOrphaned, checksBookmarks: false)
+        }
+        .task(id: selectionPathKey) {
             await loadThumbnails()
         }
         // Reordering, removing, or restoring a page changes the very arrangement the receipt vouches
@@ -240,11 +251,20 @@ struct ReorderToolView: View {
 
             Divider()
 
-            RunActionButton(title: "Reorder & save…", busy: busy, canRun: !working.items.isEmpty) {
-                Task { await runReorder() }
+            VStack(spacing: 12) {
+                if let warning = fidelity.warning {
+                    OutputFidelityNote(warning: warning, toolTitle: Tool.reorder.title)
+                }
+                RunActionButton(title: "Reorder & save…", busy: busy, canRun: !working.items.isEmpty) {
+                    guard fidelity.shouldProceed() else { return }
+                    Task { await runReorder() }
+                }
             }
             .padding(16)
             .toolActionBar()
+            .outputFidelityConfirmation(fidelity, toolTitle: Tool.reorder.title) {
+                Task { await runReorder() }
+            }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }

@@ -1086,15 +1086,17 @@ public enum PDFToolkit {
         // ``restoringCatalog(_:from:restoreLinks:)``. A link's URL can disclose the very value the
         // user painted over, and a live hotspot over a burned-in black box is recoverable content.
         //
-        // Only the MARKED pages were rasterized into display space; the rest are untouched copies
+        // Only the RASTERIZED pages were emitted in display space; the rest are untouched copies
         // that keep the source's box and `/Rotate`. Passing that set keeps each bookmark's
         // destination in the space its own page actually uses — a blanket mapping moved bookmarks
-        // into unmarked, rotated or offset pages to the wrong spot.
+        // into unmarked, rotated or offset pages to the wrong spot. The set is the same test the
+        // page loop above makes: marked OR force-rasterized. Deriving it from the marks alone
+        // missed the force-rasterized pages, which carry no marks yet are rasterized all the same.
         return restoringCatalog(
             data,
             from: source,
             restoreLinks: false,
-            displayMappedPages: Set(grouped.keys)
+            displayMappedPages: Set(grouped.keys).union(options.forceRasterizePages)
         )
     }
 

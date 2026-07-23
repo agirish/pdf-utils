@@ -262,6 +262,18 @@ import Testing
         #expect(result.pagesWithoutText == [1])
     }
 
+    @Test func locatableMatchesReportNoUnlocatableCount() throws {
+        // Every hit here has real on-page geometry, so the undercount guard must stay at zero — it
+        // only fires when PDFKit yields empty bounds for a match it did find in the text layer.
+        let dir = FixtureDir()
+        let src = dir.url("src.pdf")
+        try PDFFixtures.writeTwoZonePage(top: "agent@example.com", bottom: "PUBLICLINE", to: src)
+
+        let result = try PDFToolkit.findRedactionMarks(inputURL: src, query: .literal("agent@example.com"))
+        #expect(result.matchCount == 1)
+        #expect(result.unlocatableMatches == 0)
+    }
+
     // MARK: - Guards
 
     @Test func lockedInputIsRefused() throws {

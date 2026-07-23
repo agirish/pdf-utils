@@ -129,6 +129,11 @@ struct FindRedactResult: Sendable {
     /// Zero-based indices of pages whose text layer was empty. Search cannot see these (they may be
     /// un-recognized scans), so the caller surfaces them rather than letting matches hide silently.
     var pagesWithoutText: [Int]
+    /// Occurrences whose text was matched but whose on-page rectangle came back empty — PDFKit gave
+    /// no selection geometry, or the match clipped entirely into a cropped-out margin — so no box
+    /// could be placed. Surfaced to the user rather than dropped silently: a redaction tool must not
+    /// hide a match it couldn't mark.
+    var unlocatableMatches: Int = 0
 
     /// Occurrences found (an occurrence spanning two lines still counts once).
     var matchCount: Int { matches.count }
@@ -172,6 +177,7 @@ extension PDFToolkit {
 
         var matches: [FindRedactMatch] = []
         var pagesWithoutText: [Int] = []
+        var unlocatable = 0
 
         for pageIndex in 0..<source.pageCount {
             progress?(pageIndex + 1, source.pageCount)
@@ -187,13 +193,18 @@ extension PDFToolkit {
             let cropBox = page.bounds(for: .cropBox)
             for range in matcher.ranges(in: text) {
                 let rects = Self.rects(forCharacterRange: range, on: page, cropBox: cropBox)
-                if !rects.isEmpty {
+                if rects.isEmpty {
+                    // Matched in the text layer but no on-page rectangle (no selection geometry, or the
+                    // match clips wholly into a cropped-out margin) — can't place a box. Count it so the
+                    // tool warns instead of silently under-marking a value it did find.
+                    unlocatable += 1
+                } else {
                     matches.append(FindRedactMatch(pageIndex: pageIndex, rects: rects))
                 }
             }
         }
 
-        return FindRedactResult(matches: matches, pagesWithoutText: pagesWithoutText)
+        return FindRedactResult(matches: matches, pagesWithoutText: pagesWithoutText, unlocatableMatches: unlocatable)
     }
 
     /// A match's character range → the covering rectangle(s) in PDF user space, one per visual line.

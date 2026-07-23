@@ -57,6 +57,9 @@ struct RedactToolView: View {
         /// Marks actually added after de-duping against ones already present.
         let addedCount: Int
         let pagesWithoutText: Int
+        /// Occurrences matched in the text but with no placeable on-page rectangle (see
+        /// `FindRedactResult.unlocatableMatches`) — surfaced so the user can mark them by hand.
+        let unlocatableMatches: Int
     }
 
     private var autoMarkCount: Int {
@@ -573,6 +576,15 @@ struct RedactToolView: View {
                 .foregroundStyle(.tertiary)
                 .fixedSize(horizontal: false, vertical: true)
             }
+            if summary.unlocatableMatches > 0 {
+                Label(
+                    "\(summary.unlocatableMatches) match\(summary.unlocatableMatches == 1 ? "" : "es") couldn't be placed as a box (no readable position) — find and mark \(summary.unlocatableMatches == 1 ? "it" : "them") by hand.",
+                    systemImage: "exclamationmark.triangle"
+                )
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
+                .fixedSize(horizontal: false, vertical: true)
+            }
         }
         .fixedSize(horizontal: false, vertical: true)
     }
@@ -772,7 +784,8 @@ struct RedactToolView: View {
                 matchCount: result.matchCount,
                 pageCount: result.pageCount,
                 addedCount: added,
-                pagesWithoutText: result.pagesWithoutText.count
+                pagesWithoutText: result.pagesWithoutText.count,
+                unlocatableMatches: result.unlocatableMatches
             )
             ActivityLog.shared.info(
                 "\(Tool.redact.title): found \(result.matchCount) match\(result.matchCount == 1 ? "" : "es") for \(query.describedTarget); \(added) region\(added == 1 ? "" : "s") marked for review."

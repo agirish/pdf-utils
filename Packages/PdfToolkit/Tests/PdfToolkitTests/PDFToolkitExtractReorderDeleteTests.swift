@@ -421,6 +421,51 @@ import PDFKit
         #expect((kept.action as? PDFActionURL)?.url?.absoluteString == "https://example.com/docs")
     }
 
+    /// Delete rebuilds the outline too, and it used to copy only each survivor's destination — so a
+    /// web-link bookmark (action, no destination) came through as dead label text. A GoTo action into
+    /// a page that WAS deleted still has to go, the same as an explicit destination would.
+    @Test func deleteKeepsURLOnlyBookmarksAndDropsGoToActionsIntoDeletedPages() throws {
+        let dir = FixtureDir()
+        let base = dir.url("base.pdf"), src = dir.url("src.pdf"), out = dir.url("out.pdf")
+        try PDFFixtures.writePDF(pageCount: 3, to: base)
+        let doc = try #require(PDFDocument(url: base))
+        let root = PDFOutline()
+        let web = PDFOutline()
+        web.label = "Our site"
+        web.action = PDFActionURL(url: try #require(URL(string: "https://example.com/docs")))
+        root.insertChild(web, at: 0)
+        let goneJump = PDFOutline()
+        goneJump.label = "To page 2"
+        goneJump.action = PDFActionGoTo(
+            destination: PDFDestination(page: try #require(doc.page(at: 1)), at: .zero)
+        )
+        root.insertChild(goneJump, at: 1)
+        let keptJump = PDFOutline()
+        keptJump.label = "To page 3"
+        keptJump.action = PDFActionGoTo(
+            destination: PDFDestination(page: try #require(doc.page(at: 2)), at: .zero)
+        )
+        root.insertChild(keptJump, at: 2)
+        doc.outlineRoot = root
+        #expect(doc.write(to: src))
+
+        try PDFToolkit.deletePages(inputURL: src, outputURL: out, pageIndices: [1])
+
+        // The document must stay alive in a local: a PDFOutline read off a temporary document
+        // loses its action the moment that document deallocates.
+        let outDoc = try #require(PDFDocument(url: out))
+        let outRoot = try #require(outDoc.outlineRoot)
+        #expect(outRoot.numberOfChildren == 2, "the bookmark into the deleted page should be gone")
+        let kept = try #require(outRoot.child(at: 0))
+        #expect(kept.label == "Our site")
+        #expect((kept.action as? PDFActionURL)?.url?.absoluteString == "https://example.com/docs")
+        let jump = try #require(outRoot.child(at: 1))
+        #expect(jump.label == "To page 3")
+        let target = try #require(jump.destination ?? (jump.action as? PDFActionGoTo)?.destination)
+        let targetPage = try #require(target.page)
+        #expect(outDoc.index(for: targetPage) == 1)
+    }
+
     @Test func removePasswordKeepsBookmarksPointingAtTheRightPages() throws {
         // Remove-password rebuilds the pages into a fresh, unencrypted document (the only way to shed
         // the encryption); all pages are copied in order, so reattaching the source outline keeps each

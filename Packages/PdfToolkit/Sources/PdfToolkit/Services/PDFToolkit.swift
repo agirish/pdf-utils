@@ -565,8 +565,11 @@ public enum PDFToolkit {
         func rebuild(_ node: PDFOutline, into parent: PDFOutline) {
             for i in 0..<node.numberOfChildren {
                 guard let child = node.child(at: i) else { continue }
+                // A bookmark's jump arrives either as an explicit destination or as a GoTo action;
+                // both point at a page, so both have to be tested against the deletion.
+                let jump = child.destination ?? (child.action as? PDFActionGoTo)?.destination
                 var targetsDeletedPage = false
-                if let destPage = child.destination?.page {
+                if let destPage = jump?.page {
                     let index = doc.index(for: destPage)
                     targetsDeletedPage = index != NSNotFound && deleted.contains(index)
                 }
@@ -579,6 +582,14 @@ public enum PDFToolkit {
                     kept.label = child.label
                     if let dest = child.destination, let destPage = dest.page {
                         kept.destination = PDFDestination(page: destPage, at: dest.point)
+                    } else if let action = child.action {
+                        // No destination of its own: whatever makes this node do something lives in
+                        // its action (a web-link bookmark, a named or remote GoTo, or a GoTo to a
+                        // retained page — the deleted-target case was dropped above). Copying only
+                        // the destination left the label behind as dead text. A GoTo is safe to
+                        // carry here — unlike `reattachOutline`, this rebuild stays inside the same
+                        // document, so the action's page object is still one of ours.
+                        kept.action = action
                     }
                     parent.insertChild(kept, at: parent.numberOfChildren)
                     rebuild(child, into: kept)

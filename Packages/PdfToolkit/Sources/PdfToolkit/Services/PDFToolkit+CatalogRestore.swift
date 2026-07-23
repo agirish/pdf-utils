@@ -152,12 +152,19 @@ extension PDFToolkit {
                 let targetIndex = source.index(for: targetPage)
                 guard targetIndex != NSNotFound else { return nil }
                 // The destination point needs the same display mapping as the bounds above — but
-                // against the *target* page's box and rotation, not this link's page.
-                let targetPoint = displayPoint(
-                    target.point,
-                    cropBox: targetPage.bounds(for: .cropBox),
-                    rotation: normalizedRotation(targetPage.rotation)
-                )
+                // against the *target* page's box and rotation, not this link's page. A "Fit"-style
+                // destination carries the unspecified sentinel instead of a real coordinate, and the
+                // mapping swaps/negates coordinates on a rotated page — which turned `+FLT_MAX` into
+                // `-FLT_MAX`, a sentinel PDFKit no longer recognizes, so "fit the page" became a
+                // jump far off the page. Pass the sentinel through, exactly as `reattachOutline`
+                // does for bookmarks.
+                let targetPoint = isUnspecifiedDestinationPoint(target.point)
+                    ? target.point
+                    : displayPoint(
+                        target.point,
+                        cropBox: targetPage.bounds(for: .cropBox),
+                        rotation: normalizedRotation(targetPage.rotation)
+                    )
                 return SourceLink(
                     bounds: bounds,
                     url: nil,

@@ -293,6 +293,37 @@ struct PDFToolkitCatalogRestoreTests {
         #expect((kept.action as? PDFActionURL)?.url?.absoluteString == "https://example.com/docs")
     }
 
+    /// A "fit the page" link destination carries PDFKit's unspecified sentinel (+FLT_MAX) instead of
+    /// a real coordinate. Running it through the display mapping of a rotated target page negated it
+    /// into -FLT_MAX — which PDFKit reads as a real coordinate far off the page — so every Fit link
+    /// into a rotated page turned into a jump to nowhere. The sentinel has to pass through untouched.
+    @Test func restoredFitLinkIntoARotatedPageKeepsItsSentinel() throws {
+        let dir = FixtureDir()
+        let base = dir.url("base.pdf"), src = dir.url("fitlink.pdf")
+        try PDFFixtures.writePDF(pageCount: 2, to: base)
+        let doc = try #require(PDFDocument(url: base))
+        let target = try #require(doc.page(at: 1))
+        target.rotation = 90
+        let sentinel = CGFloat(kPDFDestinationUnspecifiedValue)
+        let link = PDFAnnotation(bounds: CGRect(x: 72, y: 300, width: 160, height: 20),
+                                 forType: .link, withProperties: nil)
+        link.action = PDFActionGoTo(
+            destination: PDFDestination(page: target, at: CGPoint(x: sentinel, y: sentinel))
+        )
+        doc.page(at: 0)?.addAnnotation(link)
+        #expect(doc.write(to: src))
+
+        var options = WatermarkOptions(text: "DRAFT", fontSize: 40, opacity: 0.3,
+                                       rotationDegrees: 0, red: 1, green: 0, blue: 0, tiled: false)
+        options.pageScope = .all
+        let out = try #require(PDFDocument(data: try PDFToolkit.watermarkData(inputURL: src, options: options)))
+        let restored = try #require(out.page(at: 0)?.annotations.first { $0.type == "Link" })
+        let dest = try #require(restored.destination ?? (restored.action as? PDFActionGoTo)?.destination)
+        #expect(out.index(for: try #require(dest.page)) == 1)
+        #expect(dest.point.x == sentinel)
+        #expect(dest.point.y == sentinel)
+    }
+
     /// A rebuild whose page count doesn't match the source is left alone rather than mangled.
     @Test func mismatchedPageCountLeavesTheOutputUntouched() throws {
         let dir = FixtureDir()

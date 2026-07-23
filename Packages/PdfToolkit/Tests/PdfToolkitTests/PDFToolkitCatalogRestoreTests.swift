@@ -173,6 +173,55 @@ struct PDFToolkitCatalogRestoreTests {
         #expect(out.page(at: 1)?.string?.contains(PDFFixtures.marker(2)) == true)
     }
 
+    // MARK: Mixed-space output (Redact)
+
+    /// Redact rasterizes only the MARKED pages and copies the rest whole, so its output is
+    /// mixed-space: a rasterized page is upright at a zero origin, a copied page keeps the source's
+    /// crop box and `/Rotate`. Applying one blanket display mapping to every destination moved
+    /// bookmarks into the copied pages to the wrong spot — measured as (100, 400) becoming
+    /// (340, 350) on a page with crop origin (50, 60) and rotation 90.
+    @Test func redactKeepsBookmarkPositionsOnBothKindsOfPage() throws {
+        let dir = FixtureDir()
+        let plain = dir.url("plain.pdf")
+        try PDFFixtures.writePDF(pageCount: 2, to: plain)
+        let doc = try #require(PDFDocument(url: plain))
+
+        // Both pages get an awkward geometry so a wrong mapping cannot hide.
+        for index in 0..<2 {
+            let page = try #require(doc.page(at: index))
+            page.setBounds(CGRect(x: 50, y: 60, width: 400, height: 500), for: .cropBox)
+            page.rotation = 90
+        }
+        let root = PDFOutline()
+        for (index, label) in ["To page 1", "To page 2"].enumerated() {
+            let child = PDFOutline()
+            child.label = label
+            child.destination = PDFDestination(page: try #require(doc.page(at: index)), at: CGPoint(x: 100, y: 400))
+            root.insertChild(child, at: root.numberOfChildren)
+        }
+        doc.outlineRoot = root
+        let url = dir.url("mixed.pdf")
+        try #require(doc.write(to: url))
+
+        // Mark page 1 only: page 1 is rasterized, page 2 is copied whole.
+        let out = try #require(PDFDocument(data: try PDFToolkit.redactData(
+            inputURL: url,
+            marks: [RedactionMark(pageIndex: 0, rect: CGRect(x: 100, y: 100, width: 200, height: 60))]
+        )))
+
+        // The rasterized page is emitted upright at a zero origin, so its destination is mapped.
+        let marked = try #require(out.outlineRoot?.child(at: 0)?.destination)
+        #expect(out.index(for: try #require(marked.page)) == 0)
+        #expect(marked.point == PDFToolkit.displayPoint(
+            CGPoint(x: 100, y: 400), cropBox: CGRect(x: 50, y: 60, width: 400, height: 500), rotation: 90
+        ))
+
+        // The copied page still uses the SOURCE's space, so its destination must be untouched.
+        let copied = try #require(out.outlineRoot?.child(at: 1)?.destination)
+        #expect(out.index(for: try #require(copied.page)) == 1)
+        #expect(copied.point == CGPoint(x: 100, y: 400), "a copied page's destination must not be display-mapped")
+    }
+
     // MARK: Fast path
 
     /// A plain document with nothing on its catalog must skip the restore pass entirely — the

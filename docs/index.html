@@ -249,7 +249,7 @@
     <div class="fidelity">
       <h3>An interactive form stops working — everywhere except Delete and Rotate</h3>
       <p><b>Flattened, by Watermark, OCR, Fill &amp; Sign, Compress, and Redact.</b> These re-emit each page, so a fillable AcroForm — text fields, checkboxes, dropdowns, signature fields — becomes part of the page picture. The saved copy looks and prints identically, but <b>nothing interactive remains</b>; values already filled in survive as visible text.</p>
-      <p><b>Orphaned, by Extract, Reorder, Crop, Merge, and Split.</b> These copy pages into a new document. The fields ride along and stay visible, complete with their values, but the catalog entry that binds them into a form does not — so <b>no reader will treat them as a fillable form again</b>. This one is easy to miss, because the file still <i>looks</i> like a form.</p>
+      <p><b>Orphaned, by Extract, Reorder, Crop, Merge, Split, and Password Protect's remove-password.</b> These copy pages into a new document. The fields ride along and stay visible, complete with their values, but the catalog entry that binds them into a form does not — so <b>no reader will treat them as a fillable form again</b>. This one is easy to miss, because the file still <i>looks</i> like a form.</p>
       <p>Either way: if you need the form to stay fillable, keep the original and share the rebuilt copy separately.</p>
     </div>
 
@@ -265,6 +265,8 @@
       <tr><td>Watermark, OCR, Fill &amp; Sign, Compress</td><td class="kept">kept</td><td class="kept">kept</td><td class="kept">kept</td><td class="no">flattened</td></tr>
       <tr><td>Redact</td><td class="kept">kept</td><td class="kept">kept</td><td class="no">dropped on marked pages</td><td class="no">flattened</td></tr>
       <tr><td>Merge, Split</td><td class="no">dropped</td><td class="kept">kept</td><td class="kept">kept</td><td class="no">orphaned</td></tr>
+      <tr><td>Password Protect — remove password</td><td class="kept">kept</td><td class="kept">kept</td><td class="kept">kept</td><td class="no">orphaned</td></tr>
+      <tr><td>Password Protect — add password</td><td class="kept">kept</td><td class="kept">kept</td><td class="kept">kept</td><td class="kept">kept</td></tr>
     </table>
   </div>
 </section>

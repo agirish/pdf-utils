@@ -1049,7 +1049,17 @@ public enum PDFToolkit {
         // Bookmarks and the info dictionary are restored; links deliberately are NOT — see
         // ``restoringCatalog(_:from:restoreLinks:)``. A link's URL can disclose the very value the
         // user painted over, and a live hotspot over a burned-in black box is recoverable content.
-        return restoringCatalog(data, from: source, restoreLinks: false)
+        //
+        // Only the MARKED pages were rasterized into display space; the rest are untouched copies
+        // that keep the source's box and `/Rotate`. Passing that set keeps each bookmark's
+        // destination in the space its own page actually uses — a blanket mapping moved bookmarks
+        // into unmarked, rotated or offset pages to the wrong spot.
+        return restoringCatalog(
+            data,
+            from: source,
+            restoreLinks: false,
+            displayMappedPages: Set(grouped.keys)
+        )
     }
 
     /// One-page PDF with explicit Core Graphics MediaBox and bitmap drawn into the full page rect.

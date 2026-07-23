@@ -66,13 +66,13 @@ a fillable AcroForm — text fields, checkboxes, dropdowns, signature fields —
 picture. The saved copy looks and prints identically, but **nothing interactive remains**; values
 already filled in survive as visible text.
 
-*Orphaned* — by **Extract, Reorder, Crop, Merge, and Split.** These copy pages into a new document.
+*Orphaned* — by **Extract, Reorder, Crop, Merge, Split, and Password Protect's remove-password.** These copy pages into a new document.
 The fields ride along and stay visible, complete with their values, but the catalog entry that binds
 them into a form does not — so **no reader will treat them as a fillable form again**. This one is
 easy to miss, because the file still *looks* like a form.
 
 Either way: if you need the form to stay fillable, keep the original and share the rebuilt copy
-separately. Only **Delete** and **Rotate** leave a form intact.
+separately. Only **Delete**, **Rotate**, and **adding** a password leave a form intact.
 
 **Bookmarks are not carried over by Merge or Split.** A merge concatenates pages from several
 documents, each with its own outline at shifting page offsets; a split cuts one outline across
@@ -92,6 +92,8 @@ disclose what you painted over — while unmarked pages keep theirs.
 | Watermark, OCR, Fill & Sign, Compress | kept | kept | kept | **flattened** |
 | Redact | kept | kept | dropped on marked pages | **flattened** |
 | Merge, Split | **dropped** | kept | kept | **orphaned** |
+| Password Protect — remove password | kept | kept | kept | **orphaned** |
+| Password Protect — add password | kept | kept | kept | kept |
 
 ---
 

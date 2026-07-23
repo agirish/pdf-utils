@@ -385,7 +385,7 @@ extension Tool {
                     "There is no password recovery — if you forget an Add-password password, the file cannot be opened.",
                     "In a batch, the one password you enter is applied to every file.",
                     "Removing a password only works on files you can already open with their current password.",
-                    "Removing a password rebuilds the file: pages and document info carry over, but bookmarks, attachments, and interactive form structure do not.",
+                    "Removing a password rebuilds the file: pages, bookmarks, and document info carry over, but attachments do not, and an interactive form stops working — the fields stay visible and keep their values, yet no reader will treat them as a fillable form again.",
                 ]
             )
         }

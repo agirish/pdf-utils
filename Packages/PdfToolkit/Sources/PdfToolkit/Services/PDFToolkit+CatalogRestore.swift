@@ -27,7 +27,19 @@ extension PDFToolkit {
     ///   pages. False for Redact, where a link's URL can itself disclose the value the user just
     ///   painted over — and where a live annotation sitting on top of a burned-in black box is
     ///   exactly the "recoverable content" the tool promises to destroy.
-    static func restoringCatalog(_ data: Data, from source: PDFDocument, restoreLinks: Bool) -> Data {
+    /// - Parameter displayMappedPages: which output pages were emitted in *display space* (upright,
+    ///   zero origin) rather than copied whole. `nil` — the default — means every page, which is
+    ///   true of the four uniform rebuilds. **Redact is the exception**: it rasterizes only the
+    ///   pages carrying marks and copies the rest untouched, so its output is mixed-space and a
+    ///   single blanket mapping is wrong for half of it (measured: a bookmark into an unmarked
+    ///   page with crop origin (50, 60) and `/Rotate 90` moved from (100, 400) to (340, 350) —
+    ///   the right answer for a rasterized page, the wrong one for a copied page).
+    static func restoringCatalog(
+        _ data: Data,
+        from source: PDFDocument,
+        restoreLinks: Bool,
+        displayMappedPages: Set<Int>? = nil
+    ) -> Data {
         let attributes = restorableAttributes(of: source)
         let links = restoreLinks ? sourceLinks(of: source) : [:]
         // Nothing worth carrying: skip the reopen-and-re-serialize entirely. This is the common case
@@ -44,6 +56,9 @@ extension PDFToolkit {
         // bookmark into a rotated (or non-zero-origin) page therefore has to go through the same
         // display mapping the page content did, or it scrolls the reader to the wrong place.
         reattachOutline(from: source, to: rebuilt) { pageIndex, point in
+            // A page that was copied whole keeps the source's box and `/Rotate`, so its destinations
+            // are already in the right space — mapping them would move the bookmark off its anchor.
+            guard displayMappedPages?.contains(pageIndex) ?? true else { return point }
             guard let page = source.page(at: pageIndex) else { return point }
             return displayPoint(point, cropBox: page.bounds(for: .cropBox), rotation: normalizedRotation(page.rotation))
         }

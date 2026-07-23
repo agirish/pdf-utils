@@ -93,7 +93,14 @@ struct ProtectToolView: View {
             // Protect is the one tool whose sidebar can actually fix a locked file, so its
             // placeholder points at the field on the left instead of at another tool.
             lockedPreviewMessage: "This PDF is password-protected. Enter its password on the left, then remove it to preview and unlock the file.",
-            runSingle: { url in await run(url) }
+            runSingle: { url in await run(url) },
+            // Adding a password serializes the document in place and keeps an interactive form;
+            // removing one rebuilds by copying pages, which orphans it (verified empirically).
+            detectFidelityWarning: { [mode] urls in
+                guard mode == .remove else { return nil }
+                return OutputFidelityWarning.detect(in: urls, formLoss: .formOrphaned, checksBookmarks: false)
+            },
+            fidelityRefreshToken: mode == .protect ? "protect" : "remove"
         ) {
             // The banner is a single-file receipt; don't let it linger once the queue is a batch.
             if let saveSummary, runner.items.count <= 1 {

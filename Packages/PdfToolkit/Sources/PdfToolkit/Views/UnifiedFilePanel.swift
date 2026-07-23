@@ -59,6 +59,10 @@ struct UnifiedFilePanel<Config: View>: View {
     /// and makes both run buttons route through a confirmation first. Defaulted, so tools that opt
     /// out compile unchanged.
     var detectFidelityWarning: (@Sendable ([URL]) -> OutputFidelityWarning?)? = nil
+    /// Extra state the detector depends on beyond the file paths, so a tool whose *mode* changes what
+    /// it loses can re-detect. Protect passes its mode: adding a password serializes in place and
+    /// keeps a form, removing one rebuilds by copying pages and orphans it.
+    var fidelityRefreshToken: String = ""
     /// The tool's configuration cards, count-aware if it needs to be (Rotate swaps page-scope for an
     /// all-pages note once there's more than one file).
     @ViewBuilder var config: () -> Config
@@ -127,7 +131,9 @@ struct UnifiedFilePanel<Config: View>: View {
     /// Re-detects the fidelity warning whenever the file SET changes (not just the first file, since
     /// a many-file run is warned about too).
     private var fidelityPathKey: String {
-        detectFidelityWarning == nil ? "" : runner.items.map(\.url.path).joined(separator: "\u{1}")
+        detectFidelityWarning == nil
+            ? ""
+            : ([fidelityRefreshToken] + runner.items.map(\.url.path)).joined(separator: "\u{1}")
     }
 
     /// Runs the host's detector on the PDF serial queue — it opens documents, which must not happen

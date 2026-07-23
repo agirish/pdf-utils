@@ -186,6 +186,64 @@ struct PDFToolkitCatalogRestoreTests {
         #expect(PDFToolkit.restoringCatalog(produced, from: source, restoreLinks: true) == produced)
     }
 
+    /// A bookmark's destination POINT is stored in the source's unrotated user space, but a rebuild
+    /// emits every page upright at a zero origin — so a bookmark into a /Rotate 90 page has to go
+    /// through the same display mapping the page content and the link bounds do. It used to be
+    /// copied raw, landing the reader at the wrong spot (here: past the rebuilt page's height).
+    @Test func restoredBookmarkPointIsMappedIntoTheRebuiltPagesSpace() throws {
+        let dir = FixtureDir()
+        let base = dir.url("base.pdf"), src = dir.url("rotated.pdf")
+        try PDFFixtures.writePDF(pageCount: 1, to: base)
+        let doc = try #require(PDFDocument(url: base))
+        let page = try #require(doc.page(at: 0))
+        page.rotation = 90
+        let root = PDFOutline()
+        let mark = PDFOutline()
+        mark.label = "Top"
+        // Top-left of the unrotated page: (0, 792) on a 612×792 crop box.
+        mark.destination = PDFDestination(page: page, at: CGPoint(x: 0, y: PDFFixtures.letter.height))
+        root.insertChild(mark, at: 0)
+        doc.outlineRoot = root
+        #expect(doc.write(to: src))
+
+        var options = WatermarkOptions(text: "DRAFT", fontSize: 40, opacity: 0.3,
+                                       rotationDegrees: 0, red: 1, green: 0, blue: 0, tiled: false)
+        options.pageScope = .all
+        let out = try #require(PDFDocument(data: try PDFToolkit.watermarkData(inputURL: src, options: options)))
+        let restored = try #require(out.outlineRoot?.child(at: 0)?.destination)
+        // The rebuilt page is 792×612 (rotation flattened). Display-mapping (0, 792) under 90°
+        // gives (792, 612) — the far corner — which then clamps into the page box, so the point
+        // stays ON the page. The raw point's y of 792 would sit above a 612-tall page.
+        let box = try #require(restored.page).bounds(for: .cropBox)
+        #expect(box.size == CGSize(width: 792, height: 612))
+        #expect(restored.point.y <= box.maxY)
+        #expect(restored.point == PDFToolkit.displayPoint(
+            CGPoint(x: 0, y: PDFFixtures.letter.height),
+            cropBox: CGRect(origin: .zero, size: PDFFixtures.letter),
+            rotation: 90))
+    }
+
+    /// A bookmark that opens a WEB page carries a `PDFActionURL` and no destination. The rebuild
+    /// used to copy only the label, silently turning every such bookmark into dead text.
+    @Test func rebuildKeepsURLOnlyBookmarks() throws {
+        let dir = FixtureDir()
+        let base = dir.url("base.pdf"), src = dir.url("weblink.pdf")
+        try PDFFixtures.writePDF(pageCount: 2, to: base)
+        let doc = try #require(PDFDocument(url: base))
+        let root = PDFOutline()
+        let web = PDFOutline()
+        web.label = "Our site"
+        web.action = PDFActionURL(url: try #require(URL(string: "https://example.com/docs")))
+        root.insertChild(web, at: 0)
+        doc.outlineRoot = root
+        #expect(doc.write(to: src))
+
+        let out = try #require(PDFDocument(data: try PDFToolkit.compressData(inputURL: src, quality: 0.7)))
+        let kept = try #require(out.outlineRoot?.child(at: 0))
+        #expect(kept.label == "Our site")
+        #expect((kept.action as? PDFActionURL)?.url?.absoluteString == "https://example.com/docs")
+    }
+
     /// A rebuild whose page count doesn't match the source is left alone rather than mangled.
     @Test func mismatchedPageCountLeavesTheOutputUntouched() throws {
         let dir = FixtureDir()

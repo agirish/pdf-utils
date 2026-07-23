@@ -75,11 +75,24 @@ extension PDFToolkit {
     /// page's top edge) can then fall OUTSIDE the trimmed box, scrolling a bookmark to a blank margin
     /// in viewers that don't clamp. Rebuild each destination on the matching output page with its
     /// point clamped into that page's new crop box, so the bookmark lands on a visible spot. A node
-    /// with no explicit destination (an action, a nil page) keeps its label + children but drops the
-    /// destination. Subset/reorder paths remap differently (see `PDFToolkit.remapOutline`).
+    /// with no resolvable destination keeps its label + children; if it carried a non-GoTo *action*
+    /// (a web link, the common "open a URL" bookmark) that action is carried across too — dropping
+    /// it would silently turn a working link into dead label text. Subset/reorder paths remap
+    /// differently (see `PDFToolkit.remapOutline`).
+    ///
+    /// - Parameter mappingPoint: converts a source destination point on the given page index into
+    ///   the output page's space. Identity for the crop paths, which copy pages whole and keep their
+    ///   `/Rotate`. The catalog-restore path passes a display-space mapping instead, because its
+    ///   rebuilt pages are emitted upright with rotation flattened — the same mapping the link
+    ///   bounds go through in `sourceLinks`. Without it, every bookmark into a rotated page lands at
+    ///   the wrong spot (or off the page).
     ///
     /// An interactive `/AcroForm` is not restored by this copy-and-rebuild — out of scope here.
-    static func reattachOutline(from source: PDFDocument, to output: PDFDocument) {
+    static func reattachOutline(
+        from source: PDFDocument,
+        to output: PDFDocument,
+        mappingPoint: (Int, CGPoint) -> CGPoint = { _, point in point }
+    ) {
         guard let sourceRoot = source.outlineRoot else { return }
 
         func rebuild(_ node: PDFOutline, into parent: PDFOutline) {
@@ -91,14 +104,26 @@ extension PDFToolkit {
                     let index = source.index(for: destPage)
                     if index != NSNotFound, let outPage = output.page(at: index) {
                         let box = outPage.bounds(for: .cropBox)
+                        // A "Fit"-style destination carries the unspecified sentinel in one or both
+                        // coordinates; mixing that through a rotation mapping (which swaps x and y)
+                        // would turn it into a nonsense real coordinate, so map only real points.
+                        let p = isUnspecifiedDestinationPoint(dest.point)
+                            ? dest.point
+                            : mappingPoint(index, dest.point)
                         kept.destination = PDFDestination(
                             page: outPage,
                             at: CGPoint(
-                                x: clampedDestinationCoordinate(dest.point.x, low: box.minX, high: box.maxX),
-                                y: clampedDestinationCoordinate(dest.point.y, low: box.minY, high: box.maxY)
+                                x: clampedDestinationCoordinate(p.x, low: box.minX, high: box.maxX),
+                                y: clampedDestinationCoordinate(p.y, low: box.minY, high: box.maxY)
                             )
                         )
                     }
+                }
+                if kept.destination == nil, let action = child.action, !(action is PDFActionGoTo) {
+                    // A GoTo action is deliberately excluded: it points at a *source* page object,
+                    // which means nothing in `output`. Everything else (URL, named, remote GoTo)
+                    // is page-independent and survives the copy intact.
+                    kept.action = action
                 }
                 parent.insertChild(kept, at: parent.numberOfChildren)
                 rebuild(child, into: kept)
@@ -123,6 +148,12 @@ extension PDFToolkit {
     /// `(3.4e+38, 3.4e+38)` becoming `(582, 762)` on a 30 pt trim of US Letter. Recognizing the
     /// sentinel keeps a Fit bookmark a Fit bookmark, while a real point still gets clamped into the
     /// visible region (the reason the clamp exists).
+    /// True when either coordinate is PDFKit's "unspecified" sentinel — i.e. the destination is a
+    /// "fit the page" one with no real scroll position to transform.
+    static func isUnspecifiedDestinationPoint(_ point: CGPoint) -> Bool {
+        point.x == CGFloat(kPDFDestinationUnspecifiedValue) || point.y == CGFloat(kPDFDestinationUnspecifiedValue)
+    }
+
     static func clampedDestinationCoordinate(_ value: CGFloat, low: CGFloat, high: CGFloat) -> CGFloat {
         guard value != CGFloat(kPDFDestinationUnspecifiedValue) else { return value }
         return min(max(value, low), high)

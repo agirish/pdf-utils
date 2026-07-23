@@ -39,7 +39,14 @@ extension PDFToolkit {
               rebuilt.pageCount == source.pageCount
         else { return data }
 
-        reattachOutline(from: source, to: rebuilt)
+        // Destination points, like the link bounds in `sourceLinks`, are stored in the source's
+        // unrotated user space while the rebuilt pages are emitted upright at a zero origin. A
+        // bookmark into a rotated (or non-zero-origin) page therefore has to go through the same
+        // display mapping the page content did, or it scrolls the reader to the wrong place.
+        reattachOutline(from: source, to: rebuilt) { pageIndex, point in
+            guard let page = source.page(at: pageIndex) else { return point }
+            return displayPoint(point, cropBox: page.bounds(for: .cropBox), rotation: normalizedRotation(page.rotation))
+        }
         if !attributes.isEmpty {
             rebuilt.documentAttributes = attributes
         }
@@ -129,10 +136,17 @@ extension PDFToolkit {
                 guard let target, let targetPage = target.page else { return nil }
                 let targetIndex = source.index(for: targetPage)
                 guard targetIndex != NSNotFound else { return nil }
+                // The destination point needs the same display mapping as the bounds above — but
+                // against the *target* page's box and rotation, not this link's page.
+                let targetPoint = displayPoint(
+                    target.point,
+                    cropBox: targetPage.bounds(for: .cropBox),
+                    rotation: normalizedRotation(targetPage.rotation)
+                )
                 return SourceLink(
                     bounds: bounds,
                     url: nil,
-                    destination: (targetIndex, target.point)
+                    destination: (targetIndex, targetPoint)
                 )
             }
             if !links.isEmpty { result[index] = links }

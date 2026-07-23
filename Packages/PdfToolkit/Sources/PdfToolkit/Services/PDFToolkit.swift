@@ -411,9 +411,14 @@ public enum PDFToolkit {
     /// is correct. For a subset or reorder the indices shift, and only rebuilt destinations point
     /// where the reader expects — never a dangling or misdirected bookmark.
     ///
+    /// A *structural* node — a grouping folder with no destination of its own — is kept whenever any
+    /// of its descendants survive, so a well-organized outline keeps its shape instead of being
+    /// flattened into a single level (the same rule ``pruneOutlineForDeletion`` applies for delete).
+    /// It is dropped only when nothing beneath it survived, rather than left as an empty folder.
+    ///
     /// Bookmarks expressed as GoTo *actions* (rather than an explicit `destination`) carry no
-    /// `destination` here and are dropped; explicit destinations are the common case and the one
-    /// the tools produce.
+    /// `destination` here. A node with a destination whose target page wasn't retained is dropped;
+    /// explicit destinations are the common case and the one the tools produce.
     private static func remapOutline(
         from source: PDFDocument,
         to output: PDFDocument,
@@ -440,8 +445,24 @@ public enum PDFToolkit {
                     kept.destination = PDFDestination(page: outPage, at: point)
                     parent.insertChild(kept, at: parent.numberOfChildren)
                     appendRemapped(of: child, into: kept)
+                } else if child.destination == nil {
+                    // No destination of its own. Two cases worth keeping: a page-independent action
+                    // (a web-link bookmark — dropping it would leave dead label text), and a
+                    // structural folder whose descendants survived. A folder with nothing left under
+                    // it and no action of its own is dropped rather than kept as an empty row.
+                    let folder = PDFOutline()
+                    folder.label = child.label
+                    let action = child.action.flatMap { $0 is PDFActionGoTo ? nil : $0 }
+                    appendRemapped(of: child, into: folder)
+                    if folder.numberOfChildren > 0 || action != nil {
+                        parent.insertChild(folder, at: parent.numberOfChildren)
+                        // Set AFTER insertion: PDFKit drops an action assigned to a node that isn't
+                        // yet attached to the tree being written.
+                        folder.action = action
+                    }
                 } else {
-                    // Dropped node: keep walking so retained descendants aren't lost with it.
+                    // Bookmark whose target page wasn't retained: drop it, but keep walking so
+                    // retained descendants are promoted rather than lost with it.
                     appendRemapped(of: child, into: parent)
                 }
             }
@@ -838,6 +859,12 @@ public enum PDFToolkit {
     /// Maps a PDF-user-space rect into displayed-page coordinates (origin at the displayed crop
     /// box's corner, /Rotate applied, width/height swapped for 90°/270°) — the space the on-screen
     /// editor and `PDFAnnotation.draw` work in. Internal so geometry tests can pin the mapping.
+    /// ``displayRect(_:cropBox:rotation:)`` for a bare point (a bookmark or GoTo destination). A
+    /// zero-size rect maps corner-to-corner under every rotation, so the mapping stays in one place.
+    static func displayPoint(_ point: CGPoint, cropBox: CGRect, rotation: Int) -> CGPoint {
+        displayRect(CGRect(origin: point, size: .zero), cropBox: cropBox, rotation: rotation).origin
+    }
+
     static func displayRect(_ rect: CGRect, cropBox: CGRect, rotation: Int) -> CGRect {
         let r = normalizedRotation(rotation)
         switch r {

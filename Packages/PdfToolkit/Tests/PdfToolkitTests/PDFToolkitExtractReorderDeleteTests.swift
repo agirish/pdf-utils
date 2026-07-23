@@ -343,6 +343,84 @@ import PDFKit
         #expect(bookmarks.map(\.pageIndex) == [0])
     }
 
+    /// A grouping FOLDER — a node with children and no destination of its own — is how most
+    /// well-organized PDFs structure their outline. It used to be treated as an orphan and dropped,
+    /// flattening every surviving bookmark up a level; the hierarchy must survive instead.
+    @Test func extractKeepsStructuralFoldersWhoseChildrenSurvive() throws {
+        let dir = FixtureDir()
+        let base = dir.url("base.pdf"), src = dir.url("src.pdf"), out = dir.url("out.pdf")
+        try PDFFixtures.writePDF(pageCount: 3, to: base)
+        let doc = try #require(PDFDocument(url: base))
+        let root = PDFOutline()
+        let folder = PDFOutline()          // no destination — a pure grouping node
+        folder.label = "Part One"
+        let child = PDFOutline()
+        child.label = "Child"
+        child.destination = PDFDestination(page: try #require(doc.page(at: 2)), at: CGPoint(x: 0, y: PDFFixtures.letter.height))
+        folder.insertChild(child, at: 0)
+        root.insertChild(folder, at: 0)
+        doc.outlineRoot = root
+        #expect(doc.write(to: src))
+
+        try PDFToolkit.extract(inputURL: src, outputURL: out, pageIndices: [2])
+
+        let outDoc = try #require(PDFDocument(url: out))
+        let keptFolder = try #require(outDoc.outlineRoot?.child(at: 0))
+        #expect(keptFolder.label == "Part One")
+        #expect(keptFolder.destination == nil)
+        let keptChild = try #require(keptFolder.child(at: 0))
+        #expect(keptChild.label == "Child")
+        #expect(outDoc.index(for: try #require(keptChild.destination?.page)) == 0)
+    }
+
+    /// The other half of the folder rule: a folder with nothing left under it is dropped, not kept
+    /// as an empty row the reader can't do anything with.
+    @Test func extractDropsAStructuralFolderWithNoSurvivingChildren() throws {
+        let dir = FixtureDir()
+        let base = dir.url("base.pdf"), src = dir.url("src.pdf"), out = dir.url("out.pdf")
+        try PDFFixtures.writePDF(pageCount: 3, to: base)
+        let doc = try #require(PDFDocument(url: base))
+        let root = PDFOutline()
+        let folder = PDFOutline()
+        folder.label = "Part One"
+        let child = PDFOutline()
+        child.label = "Child"
+        child.destination = PDFDestination(page: try #require(doc.page(at: 0)), at: CGPoint(x: 0, y: PDFFixtures.letter.height))
+        folder.insertChild(child, at: 0)
+        root.insertChild(folder, at: 0)
+        doc.outlineRoot = root
+        #expect(doc.write(to: src))
+
+        try PDFToolkit.extract(inputURL: src, outputURL: out, pageIndices: [2])
+
+        // Page 0 is gone, so nothing under the folder survived — no outline at all.
+        #expect(try PDFFixtures.outlineBookmarks(at: out).isEmpty)
+    }
+
+    /// A web-link bookmark has an action and no destination; extract used to drop it silently.
+    @Test func extractKeepsURLOnlyBookmarks() throws {
+        let dir = FixtureDir()
+        let base = dir.url("base.pdf"), src = dir.url("src.pdf"), out = dir.url("out.pdf")
+        try PDFFixtures.writePDF(pageCount: 2, to: base)
+        let doc = try #require(PDFDocument(url: base))
+        let root = PDFOutline()
+        let web = PDFOutline()
+        web.label = "Our site"
+        web.action = PDFActionURL(url: try #require(URL(string: "https://example.com/docs")))
+        root.insertChild(web, at: 0)
+        doc.outlineRoot = root
+        #expect(doc.write(to: src))
+
+        try PDFToolkit.extract(inputURL: src, outputURL: out, pageIndices: [1])
+
+        // The document must stay alive in a local: a PDFOutline read off a temporary document
+        // loses its action the moment that document deallocates.
+        let outDoc = try #require(PDFDocument(url: out))
+        let kept = try #require(outDoc.outlineRoot?.child(at: 0))
+        #expect(kept.label == "Our site")
+        #expect((kept.action as? PDFActionURL)?.url?.absoluteString == "https://example.com/docs")
+    }
+
     @Test func removePasswordKeepsBookmarksPointingAtTheRightPages() throws {
         // Remove-password rebuilds the pages into a fresh, unencrypted document (the only way to shed
         // the encryption); all pages are copied in order, so reattaching the source outline keeps each

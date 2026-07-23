@@ -308,7 +308,7 @@ final class HelperAppDelegate: NSObject, NSApplicationDelegate, UNUserNotificati
                     let output = Self.uniqueOutput(for: input, suffix: "compressed")
                     do {
                         try PDFToolkit.compress(inputURL: input, outputURL: output, quality: Self.defaultCompressionQuality())
-                        Self.stripMetadataIfEnabled(output)
+                        Self.stripMetadataIfEnabled(output, log: log)
                         revealed.append(output)
                         log.recordSaved(Tool.compress.title, to: output, bytes: Self.fileSize(of: output))
                     } catch {
@@ -328,7 +328,7 @@ final class HelperAppDelegate: NSObject, NSApplicationDelegate, UNUserNotificati
                 let output = Self.uniqueOutput(inDirectory: inputs[0].deletingLastPathComponent(), name: "Merged")
                 do {
                     try PDFToolkit.merge(inputURLs: inputs, outputURL: output)
-                    Self.stripMetadataIfEnabled(output)
+                    Self.stripMetadataIfEnabled(output, log: log)
                     log.recordSaved(Tool.merge.title, to: output, bytes: Self.fileSize(of: output), detail: "\(inputs.count) files")
                     finish(id: "pdfutils.merge", title: "Merge PDFs", revealed: [output], failed: [])
                 } catch {
@@ -347,11 +347,17 @@ final class HelperAppDelegate: NSObject, NSApplicationDelegate, UNUserNotificati
                 var failed: [String] = []
                 var firstFailure: String?
                 for input in inputs {
-                    let count = PDFToolkit.pageCount(at: input) ?? 0
                     let output = Self.uniqueOutput(for: input, suffix: "rotated")
                     do {
+                        // A nil/zero page count means PDFKit couldn't read the file (or it has no
+                        // pages). Rotating an empty index set would happily reserialize it under a
+                        // "-rotated" name and report success, handing the user an unrotated copy —
+                        // fail the file instead, the way every other unreadable input fails.
+                        guard let count = PDFToolkit.pageCount(at: input), count > 0 else {
+                            throw PDFOperationError.couldNotOpen(input)
+                        }
                         try PDFToolkit.rotate(inputURL: input, outputURL: output, pageIndices: Array(0..<count), quarterTurns: turns)
-                        Self.stripMetadataIfEnabled(output)
+                        Self.stripMetadataIfEnabled(output, log: log)
                         revealed.append(output)
                         log.recordSaved(Tool.rotate.title, to: output, bytes: Self.fileSize(of: output))
                     } catch {
@@ -459,6 +465,9 @@ final class HelperAppDelegate: NSObject, NSApplicationDelegate, UNUserNotificati
     }
 
     private func unlockOne(_ input: URL) async -> UnlockOutcome {
+        // Captured here on the main actor, like the batch handlers do: the work-queue block below
+        // logs, and `.shared` is main-actor isolated while the logging methods are not.
+        let log = ActivityLog.shared
         for attempt in 0..<3 {
             guard let password = promptPassword(for: input.lastPathComponent, wrongPrevious: attempt > 0) else {
                 return .cancelled
@@ -473,7 +482,7 @@ final class HelperAppDelegate: NSObject, NSApplicationDelegate, UNUserNotificati
                     let output = Self.uniqueOutput(for: input, suffix: "unlocked")
                     do {
                         try PDFToolkit.removePassword(inputURL: input, outputURL: output, password: password)
-                        Self.stripMetadataIfEnabled(output)
+                        Self.stripMetadataIfEnabled(output, log: log)
                         continuation.resume(returning: .success(output))
                     } catch {
                         continuation.resume(returning: .failure(error))
@@ -565,7 +574,7 @@ final class HelperAppDelegate: NSObject, NSApplicationDelegate, UNUserNotificati
             let output = Self.uniqueOutput(for: input, suffix: "pages")
             do {
                 try PDFToolkit.extract(inputURL: input, outputURL: output, pageIndices: indices)
-                Self.stripMetadataIfEnabled(output)
+                Self.stripMetadataIfEnabled(output, log: log)
                 log.recordSaved(Tool.extract.title, to: output, bytes: Self.fileSize(of: output), detail: "\(indices.count) pages")
                 finish(id: "pdfutils.extract", title: "Extract Pages", revealed: [output], failed: [])
             } catch {
@@ -630,13 +639,24 @@ final class HelperAppDelegate: NSObject, NSApplicationDelegate, UNUserNotificati
     }
 
     /// When "Strip metadata on export" is on, rewrite the produced `url` in place with its metadata
-    /// cleared (Info dictionary + catalog XMP). Best-effort — a read/strip/write failure leaves the
-    /// file as produced rather than failing the operation. Call ON THE WORK QUEUE right after the op
-    /// writes: `strippingAllMetadata` builds a `PDFDocument`, which must stay on the single serial
-    /// queue like every other PDF operation here. A no-op setting returns before touching the file.
-    private nonisolated static func stripMetadataIfEnabled(_ url: URL) {
-        guard stripMetadataOnExportEnabled(), let data = try? Data(contentsOf: url) else { return }
-        try? PDFToolkit.strippingAllMetadata(from: data).write(to: url, options: .atomic)
+    /// cleared (Info dictionary + catalog XMP). The operation itself still succeeds if the strip
+    /// fails — the produced file is valid, just not scrubbed — but the failure is NEVER silent: the
+    /// setting is a privacy promise, and a user who enabled it must not learn from the recipient
+    /// that author/creator metadata shipped anyway. Failures land in the Activity Log as warnings.
+    /// Call ON THE WORK QUEUE right after the op writes: `strippingAllMetadata` builds a
+    /// `PDFDocument`, which must stay on the single serial queue like every other PDF operation
+    /// here. A no-op setting returns before touching the file.
+    /// `log` is the ``ActivityLog`` captured on the main actor by the caller — same reason the
+    /// operation handlers capture it: `.shared` is main-actor isolated, the logging methods aren't.
+    private nonisolated static func stripMetadataIfEnabled(_ url: URL, log: ActivityLog) {
+        guard stripMetadataOnExportEnabled() else { return }
+        do {
+            let data = try Data(contentsOf: url)
+            try PDFToolkit.strippingAllMetadata(from: data).write(to: url, options: .atomic)
+        } catch {
+            log.warning(
+                "Could not strip metadata from \(url.lastPathComponent): \(error.localizedDescription) — the file was saved with its original metadata intact")
+        }
     }
 
     private nonisolated func startBody(_ count: Int) -> String {

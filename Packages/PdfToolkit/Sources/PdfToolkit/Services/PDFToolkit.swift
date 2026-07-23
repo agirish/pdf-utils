@@ -11,6 +11,15 @@ struct PDFRedactionExportOptions: Sendable {
     /// Target length in **pixels** of the page’s longest edge when rasterizing a redacted page (higher = sharper, larger files and slower export).
     /// Unlike compression, this **supersamples** past 1× PDF points so text stays crisp (e.g. 4000 ≈ ~5× on US Letter height).
     var maxPixelDimension: CGFloat
+    /// Zero-based pages to rasterize even though they carry no marks, destroying their text layer.
+    ///
+    /// Find & redact can match a value it cannot place a box on (no selection geometry, or the match
+    /// clips into a cropped-out margin). Such a page would otherwise be copied through as vector and
+    /// keep the matched text verbatim — detected, reported, and still readable in the export. The
+    /// user is shown which pages are affected and chooses; when they choose removal, those indices
+    /// arrive here. Never inferred: rasterizing a page the user never marked costs text selection,
+    /// accessibility and file size, and produces no visible black box explaining why.
+    var forceRasterizePages: Set<Int> = []
 
     static let `default` = PDFRedactionExportOptions(
         stripAnnotationsFromUnredactedPages: false,
@@ -1001,7 +1010,11 @@ public enum PDFToolkit {
                 }
                 let rectsForPage = (grouped[pageIndex] ?? []).map(\.rect)
 
-                if rectsForPage.isEmpty {
+                // A force-rasterized page has no fills — nothing is painted black, and visually it
+                // comes out identical. The point is the side effect the fills usually bring along:
+                // the page is re-emitted as an image, so the text a mark could not be placed over
+                // stops being extractable.
+                if rectsForPage.isEmpty && !options.forceRasterizePages.contains(pageIndex) {
                     try Self.insertUnredactedPage(
                         into: output,
                         from: page,

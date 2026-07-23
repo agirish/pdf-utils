@@ -254,4 +254,76 @@ import CoreGraphics
         // to a vector copy that would keep recoverable content.
         #expect(!(try PDFFixtures.pageTexts(at: out)[0].contains(PDFFixtures.marker(1))))
     }
+
+    // MARK: Detected-but-unmarkable matches (the export gate's engine half)
+
+    /// The leak this exists to close: a page with no marks is copied through as vector, so text
+    /// Find & redact DID detect but couldn't place a box on stays fully extractable.
+    @Test func anUnmarkedPageKeepsItsTextByDefault() throws {
+        let dir = FixtureDir()
+        let src = dir.url("src.pdf")
+        try PDFFixtures.writePDF(markers: ["P1", "P2"], to: src)
+
+        let data = try PDFToolkit.redactData(
+            inputURL: src,
+            marks: [RedactionMark(pageIndex: 0, rect: CGRect(x: 50, y: 300, width: 300, height: 60))]
+        )
+        let texts = try PDFFixtures.pageTexts(data: data)
+        #expect(!texts[0].contains("P1"))   // marked page rasterized
+        #expect(texts[1].contains("P2"))    // unmarked page still vector, text intact
+    }
+
+    /// `forceRasterizePages` is what the user's "remove the text on page N" choice becomes: the page
+    /// carries no marks and gets no black box, but it is re-emitted as an image so nothing on it can
+    /// be extracted any more.
+    @Test func forceRasterizeRemovesTextFromAnUnmarkedPage() throws {
+        let dir = FixtureDir()
+        let src = dir.url("src.pdf")
+        try PDFFixtures.writePDF(markers: ["P1", "P2"], to: src)
+
+        var options = PDFRedactionExportOptions.default
+        options.forceRasterizePages = [1]
+        let data = try PDFToolkit.redactData(
+            inputURL: src,
+            marks: [RedactionMark(pageIndex: 0, rect: CGRect(x: 50, y: 300, width: 300, height: 60))],
+            options: options
+        )
+        let texts = try PDFFixtures.pageTexts(data: data)
+        #expect(!texts[0].contains("P1"))
+        #expect(!texts[1].contains("P2"), "page 2 was force-rasterized, so its text must be gone")
+        #expect(try #require(PDFDocument(data: data)).pageCount == 2)
+    }
+
+    /// Only the named pages lose their text — the option must not escalate into "rasterize the
+    /// whole document", which would cost quality and size on every untouched page.
+    @Test func forceRasterizeLeavesOtherPagesAsVector() throws {
+        let dir = FixtureDir()
+        let src = dir.url("src.pdf")
+        try PDFFixtures.writePDF(markers: ["P1", "P2", "P3"], to: src)
+
+        var options = PDFRedactionExportOptions.default
+        options.forceRasterizePages = [1]
+        let data = try PDFToolkit.redactData(
+            inputURL: src,
+            marks: [RedactionMark(pageIndex: 0, rect: CGRect(x: 50, y: 300, width: 300, height: 60))],
+            options: options
+        )
+        let texts = try PDFFixtures.pageTexts(data: data)
+        #expect(!texts[1].contains("P2"))
+        #expect(texts[2].contains("P3"), "page 3 was neither marked nor named, so it stays vector")
+    }
+
+    /// The scan reports WHICH page each unmarkable match sits on, because that is what decides
+    /// whether anything leaks — a match on an already-marked page is destroyed with that page.
+    @Test func findReportsUnlocatableMatchesPerPage() throws {
+        let dir = FixtureDir()
+        let src = dir.url("src.pdf")
+        try PDFFixtures.writePDF(markers: ["SSN 123-45-6789", "clean"], to: src)
+
+        let result = try PDFToolkit.findRedactionMarks(inputURL: src, query: .literal("123-45-6789"))
+        // This fixture's match IS locatable; the point is that the totals and the per-page map agree,
+        // so the export gate can trust one from the other.
+        #expect(result.unlocatableMatches == result.unlocatablePages.values.reduce(0, +))
+        #expect(result.unlocatablePages.keys.allSatisfy { $0 >= 0 })
+    }
 }

@@ -131,9 +131,15 @@ struct FindRedactResult: Sendable {
     var pagesWithoutText: [Int]
     /// Occurrences whose text was matched but whose on-page rectangle came back empty — PDFKit gave
     /// no selection geometry, or the match clipped entirely into a cropped-out margin — so no box
-    /// could be placed. Surfaced to the user rather than dropped silently: a redaction tool must not
-    /// hide a match it couldn't mark.
-    var unlocatableMatches: Int = 0
+    /// could be placed. Keyed by zero-based page index, because WHICH page carries one decides
+    /// whether anything leaks: a page with marks is rasterized anyway (its text layer is destroyed
+    /// with the rest), while a page with none is copied through as vector and keeps the matched text
+    /// verbatim. The export gate uses this to tell the user which pages actually need rasterizing.
+    var unlocatablePages: [Int: Int] = [:]
+
+    /// Total occurrences that couldn't be marked. Surfaced rather than dropped silently: a redaction
+    /// tool must not hide a match it couldn't mark.
+    var unlocatableMatches: Int { unlocatablePages.values.reduce(0, +) }
 
     /// Occurrences found (an occurrence spanning two lines still counts once).
     var matchCount: Int { matches.count }
@@ -177,7 +183,7 @@ extension PDFToolkit {
 
         var matches: [FindRedactMatch] = []
         var pagesWithoutText: [Int] = []
-        var unlocatable = 0
+        var unlocatable: [Int: Int] = [:]
 
         for pageIndex in 0..<source.pageCount {
             progress?(pageIndex + 1, source.pageCount)
@@ -197,14 +203,14 @@ extension PDFToolkit {
                     // Matched in the text layer but no on-page rectangle (no selection geometry, or the
                     // match clips wholly into a cropped-out margin) — can't place a box. Count it so the
                     // tool warns instead of silently under-marking a value it did find.
-                    unlocatable += 1
+                    unlocatable[pageIndex, default: 0] += 1
                 } else {
                     matches.append(FindRedactMatch(pageIndex: pageIndex, rects: rects))
                 }
             }
         }
 
-        return FindRedactResult(matches: matches, pagesWithoutText: pagesWithoutText, unlocatableMatches: unlocatable)
+        return FindRedactResult(matches: matches, pagesWithoutText: pagesWithoutText, unlocatablePages: unlocatable)
     }
 
     /// A match's character range → the covering rectangle(s) in PDF user space, one per visual line.

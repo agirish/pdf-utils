@@ -273,6 +273,14 @@ enum PDFFixtures {
         }
     }
 
+    /// ``pageTexts(at:)`` for bytes that were never written to disk — the in-memory `*Data` cores.
+    static func pageTexts(data: Data) throws -> [String] {
+        let doc = try #require(PDFDocument(data: data))
+        return (0..<doc.pageCount).map { i in
+            doc.page(at: i)?.string?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        }
+    }
+
     /// The `PDFPage.rotation` of every page, in document order.
     static func pageRotations(at url: URL) throws -> [Int] {
         let doc = try #require(PDFDocument(url: url))

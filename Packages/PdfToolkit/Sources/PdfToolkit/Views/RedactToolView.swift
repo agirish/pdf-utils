@@ -38,6 +38,15 @@ struct RedactToolView: View {
     @State private var saveSummary: ToolSaveSummary?
     @State private var pendingSaveSummary: ToolSaveSummary?
 
+    /// Matches Find & redact detected but could not place a box on, by zero-based page index (see
+    /// `FindRedactResult.unlocatablePages`). Kept on the screen — not just inside the find summary —
+    /// because the export gate needs it after the summary line has scrolled out of mind.
+    @State private var unlocatablePages: [Int: Int] = [:]
+    /// Raised when an export would ship detected-but-unmarked text. Cleared by either choice.
+    @State private var confirmingUnlocatable = false
+    /// Pages the user chose to rasterize on the way through the gate, consumed by the next export.
+    @State private var forceRasterizePages: Set<Int> = []
+
     // MARK: Find & redact
     @State private var searchText = ""
     @State private var searching = false
@@ -59,9 +68,11 @@ struct RedactToolView: View {
         /// Marks actually added after de-duping against ones already present.
         let addedCount: Int
         let pagesWithoutText: Int
-        /// Occurrences matched in the text but with no placeable on-page rectangle (see
-        /// `FindRedactResult.unlocatableMatches`) — surfaced so the user can mark them by hand.
-        let unlocatableMatches: Int
+        /// Occurrences matched in the text but with no placeable on-page rectangle, by page (see
+        /// `FindRedactResult.unlocatablePages`) — surfaced so the user can mark them by hand, and
+        /// gated at export so their text can't ship unnoticed.
+        let unlocatablePages: [Int: Int]
+        var unlocatableMatches: Int { unlocatablePages.values.reduce(0, +) }
     }
 
     private var autoMarkCount: Int {
@@ -210,13 +221,39 @@ struct RedactToolView: View {
                     canRun: inputURL != nil && pdfDocument != nil && !marks.isEmpty && !searching
                 ) {
                     guard fidelity.shouldProceed() else { return }
-                    Task { await runRedact() }
+                    startExport()
                 }
             }
             .padding(16)
             .toolActionBar()
             .outputFidelityConfirmation(fidelity, toolTitle: Tool.redact.title) {
-                Task { await runRedact() }
+                startExport()
+            }
+            // Detected-but-unmarked text is the one thing this tool can ship that the user believes
+            // it removed, so neither way out of here is silent: both buttons are an explicit choice.
+            .confirmationDialog(
+                unlocatableConfirmTitle,
+                isPresented: $confirmingUnlocatable,
+                titleVisibility: .visible
+            ) {
+                if !pagesNeedingRasterize.isEmpty {
+                    Button("Remove the text on \(pageListPhrase(pagesNeedingRasterize))", role: .destructive) {
+                        forceRasterizePages = Set(pagesNeedingRasterize)
+                        Task { await runRedact() }
+                    }
+                    Button("Export without removing it") {
+                        forceRasterizePages = []
+                        Task { await runRedact() }
+                    }
+                } else {
+                    Button("Export") {
+                        forceRasterizePages = []
+                        Task { await runRedact() }
+                    }
+                }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text(unlocatableConfirmMessage)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -595,16 +632,87 @@ struct RedactToolView: View {
                 .fixedSize(horizontal: false, vertical: true)
             }
             if summary.unlocatableMatches > 0 {
+                // Amber and stated in terms of consequence, not mechanism. This used to be a dim
+                // tertiary caption saying only that a box couldn't be placed, which reads as a
+                // cosmetic nag — while the actual outcome is that a value the tool DID find stays
+                // readable in the exported file. The export gate repeats it; this makes it visible
+                // early enough to mark the page by hand instead.
                 Label(
-                    "\(summary.unlocatableMatches) match\(summary.unlocatableMatches == 1 ? "" : "es") couldn't be placed as a box (no readable position) — find and mark \(summary.unlocatableMatches == 1 ? "it" : "them") by hand.",
-                    systemImage: "exclamationmark.triangle"
+                    unlocatableWarningText(summary),
+                    systemImage: "exclamationmark.triangle.fill"
                 )
-                .font(.caption2)
-                .foregroundStyle(.tertiary)
+                .font(.caption.weight(.medium))
+                .foregroundStyle(Color.fieldWarning)
                 .fixedSize(horizontal: false, vertical: true)
             }
         }
         .fixedSize(horizontal: false, vertical: true)
+    }
+
+    private var unlocatableConfirmTitle: String {
+        let n = unlocatablePages.values.reduce(0, +)
+        return "\(n) detected match\(n == 1 ? "" : "es") couldn't be marked"
+    }
+
+    /// The one door to the burn. Any match Find & redact could not place a box on has to be
+    /// acknowledged first — the user either removes that page's text or accepts shipping it — because
+    /// it is the single case where the tool found sensitive content and the export keeps it readable
+    /// anyway. With nothing outstanding this is a straight pass-through to the export.
+    private func startExport() {
+        guard !unlocatablePages.isEmpty else {
+            forceRasterizePages = []
+            Task { await runRedact() }
+            return
+        }
+        confirmingUnlocatable = true
+    }
+
+    /// The pages where an unlocatable match genuinely leaks: ones carrying NO redaction mark, so the
+    /// export copies them through as vector with the matched text intact. A page that already has a
+    /// mark is rasterized regardless, which destroys its whole text layer — the unlocatable match on
+    /// it is dealt with as a side effect, and rasterizing is not "needed" there.
+    private var pagesNeedingRasterize: [Int] {
+        let marked = Set(marks.map(\.pageIndex))
+        return unlocatablePages.keys.filter { !marked.contains($0) }.sorted()
+    }
+
+    /// "page 3" / "pages 3 and 7" / "pages 3, 7 and 11" — 1-based, the way the page controls read.
+    private func pageListPhrase(_ indices: [Int]) -> String {
+        let numbers = indices.map { String($0 + 1) }
+        let noun = numbers.count == 1 ? "page" : "pages"
+        switch numbers.count {
+        case 0: return ""
+        case 1: return "\(noun) \(numbers[0])"
+        case 2: return "\(noun) \(numbers[0]) and \(numbers[1])"
+        default:
+            return "\(noun) \(numbers.dropLast().joined(separator: ", ")) and \(numbers.last!)"
+        }
+    }
+
+    private func unlocatableWarningText(_ summary: FindSummary) -> String {
+        let n = summary.unlocatableMatches
+        let matches = "\(n) match\(n == 1 ? "" : "es")"
+        let leaking = pagesNeedingRasterize
+        guard !leaking.isEmpty else {
+            return "\(matches) couldn't be placed as a box, but \(n == 1 ? "it sits" : "they sit") on \(n == 1 ? "a page" : "pages") you're already redacting, so \(n == 1 ? "its" : "their") text is removed with the rest."
+        }
+        return "\(matches) couldn't be placed as a box (no readable position) on \(pageListPhrase(leaking)) — \(n == 1 ? "that text" : "that text") stays readable in the saved copy unless you mark \(n == 1 ? "it" : "them") by hand or remove the text on \(leaking.count == 1 ? "that page" : "those pages") when you export."
+    }
+
+    /// The export gate's message: what will happen, per page, in the two directions the user can go.
+    private var unlocatableConfirmMessage: String {
+        let n = unlocatablePages.values.reduce(0, +)
+        let matches = "\(n) match\(n == 1 ? "" : "es") that couldn't be marked"
+        let leaking = pagesNeedingRasterize
+        guard !leaking.isEmpty else {
+            return "Find & redact detected \(matches), but every one of them is on a page you're already redacting — those pages are rasterized, so the text goes with them. Nothing extra is needed."
+        }
+        return """
+        Find & redact detected \(matches) on \(pageListPhrase(leaking)). \
+        Export as-is and that text stays fully readable and searchable in the saved copy.
+        Removing it rasterizes \(leaking.count == 1 ? "that page" : "those pages"): the text can no longer be extracted, \
+        the page looks the same and gets no black box, but it becomes an image — larger, and no longer selectable.
+        """
     }
 
     private func matchSummaryText(_ summary: FindSummary) -> String {
@@ -749,6 +857,12 @@ struct RedactToolView: View {
         lastFindSummary = nil
         searchProgressPage = 0
         searchProgressTotal = 0
+        // Findings belong to the document that was scanned. Carrying them (or a rasterize choice
+        // made against them) into a different file would gate — or silently rasterize — the wrong
+        // pages entirely.
+        unlocatablePages = [:]
+        forceRasterizePages = []
+        confirmingUnlocatable = false
     }
 
     /// Runs one scan on the serial queue and folds the found regions into `marks` as reviewable
@@ -803,8 +917,12 @@ struct RedactToolView: View {
                 pageCount: result.pageCount,
                 addedCount: added,
                 pagesWithoutText: result.pagesWithoutText.count,
-                unlocatableMatches: result.unlocatableMatches
+                unlocatablePages: result.unlocatablePages
             )
+            // The gate reads this after the summary line is long forgotten, and a fresh scan
+            // re-arms it: a previously acknowledged export must not carry over to new findings.
+            unlocatablePages = result.unlocatablePages
+            forceRasterizePages = []
             ActivityLog.shared.info(
                 "\(Tool.redact.title): found \(result.matchCount) match\(result.matchCount == 1 ? "" : "es") for \(query.describedTarget); \(added) region\(added == 1 ? "" : "s") marked for review."
             )
@@ -867,16 +985,24 @@ struct RedactToolView: View {
         suggestedName = fileURL.deletingPathExtension().lastPathComponent + "-redacted.pdf"
         let marksSnapshot = marks
         let strip = stripAnnotationsFromOtherPages
+        let forced = forceRasterizePages
         let options = PDFRedactionExportOptions(
             stripAnnotationsFromUnredactedPages: strip,
-            maxPixelDimension: CGFloat(min(max(rasterLongEdge, 2400), 7200))
+            maxPixelDimension: CGFloat(min(max(rasterLongEdge, 2400), 7200)),
+            forceRasterizePages: forced
         )
         // Snapshot the receipt numbers from the same marks the burn runs on, so the confirmation is
         // exact: N regions, across the M distinct pages they touch.
         let counts = Self.redactionCounts(for: marksSnapshot)
+        // The receipt names the force-rasterized pages too: the user approved removing text there,
+        // and unlike a mark it leaves no black box behind, so the confirmation is the only evidence
+        // it happened.
+        let forcedDetail = forced.isEmpty
+            ? ""
+            : " Text was also removed from \(pageListPhrase(forced.sorted())), where matches couldn't be marked."
         let summary = ToolSaveSummary(
             title: "\(counts.regions) region\(counts.regions == 1 ? "" : "s") redacted across \(counts.pages) page\(counts.pages == 1 ? "" : "s")",
-            detail: "The marked content was permanently removed from the saved copy.",
+            detail: "The marked content was permanently removed from the saved copy." + forcedDetail,
             url: nil
         )
 

@@ -1,0 +1,368 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PDF Utils — a native macOS PDF toolkit</title>
+<meta name="description" content="PDF Utils is a native macOS app with 15 focused PDF tools — compress, merge, split, redact, OCR, sign and more. Everything runs on your Mac. No uploads, no accounts.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='22' fill='%230A84FF'/%3E%3Ctext x='50' y='68' font-size='54' text-anchor='middle' fill='white' font-family='system-ui'%3EP%3C/text%3E%3C/svg%3E">
+<style>
+  :root{
+    --bg:#0b0f17; --bg2:#0e1420; --panel:rgba(255,255,255,.045); --panel-brd:rgba(255,255,255,.09);
+    --ink:#f2f5fa; --ink-dim:#a7b0c0; --ink-faint:#727d90;
+    --accent:#0A84FF; --hero-glow:rgba(10,132,255,.28);
+    --shadow:0 18px 50px -20px rgba(0,0,0,.7);
+    --shot-brd:rgba(255,255,255,.10);
+  }
+  html[data-theme="light"]{
+    --bg:#f5f7fb; --bg2:#eaeef6; --panel:rgba(10,20,40,.03); --panel-brd:rgba(10,20,40,.10);
+    --ink:#0f1524; --ink-dim:#4a5566; --ink-faint:#8a93a3;
+    --accent:#0A6CFF; --hero-glow:rgba(10,108,255,.16);
+    --shadow:0 18px 44px -22px rgba(20,40,80,.35);
+    --shot-brd:rgba(10,20,40,.12);
+  }
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{
+    margin:0; font-family:-apple-system,BlinkMacSystemFont,"SF Pro Text","Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    color:var(--ink); background:var(--bg);
+    background-image:radial-gradient(1200px 600px at 78% -8%, var(--hero-glow), transparent 60%),
+      linear-gradient(180deg, var(--bg2), var(--bg) 40%);
+    -webkit-font-smoothing:antialiased; line-height:1.55;
+  }
+  a{color:inherit}
+  .wrap{max-width:1120px; margin:0 auto; padding:0 24px}
+
+  /* Nav */
+  nav{position:sticky; top:0; z-index:40; backdrop-filter:saturate(1.4) blur(14px);
+    background:color-mix(in srgb, var(--bg) 72%, transparent); border-bottom:1px solid var(--panel-brd)}
+  .nav-in{display:flex; align-items:center; gap:18px; height:60px}
+  .brand{display:flex; align-items:center; gap:10px; font-weight:700; letter-spacing:-.01em}
+  .brand .logo{width:26px; height:26px; border-radius:7px; background:linear-gradient(135deg,#0A84FF,#5E5CE6);
+    display:grid; place-items:center; color:#fff; font-weight:800; font-size:15px}
+  .nav-links{margin-left:auto; display:flex; gap:22px; align-items:center; font-size:14px; color:var(--ink-dim)}
+  .nav-links a{text-decoration:none; transition:color .15s}
+  .nav-links a:hover{color:var(--ink)}
+  .nav-links .ghlink{color:var(--ink)}
+  .theme-btn{cursor:pointer; border:1px solid var(--panel-brd); background:var(--panel); color:var(--ink);
+    width:34px; height:34px; border-radius:9px; display:grid; place-items:center; font-size:15px}
+  @media(max-width:640px){.nav-links a[data-collapse]{display:none}}
+
+  /* Hero */
+  header.hero{padding:80px 0 40px; text-align:center}
+  .pill{display:inline-flex; gap:8px; align-items:center; font-size:12.5px; color:var(--ink-dim);
+    border:1px solid var(--panel-brd); background:var(--panel); padding:6px 13px; border-radius:999px; margin-bottom:22px}
+  .pill .dot{width:7px;height:7px;border-radius:50%;background:#34C759}
+  h1{font-size:clamp(34px,5.4vw,60px); line-height:1.04; letter-spacing:-.03em; margin:.1em 0 .18em;
+    font-weight:800}
+  h1 .grad{background:linear-gradient(120deg,#0A84FF,#5E5CE6 55%,#AF52DE);-webkit-background-clip:text;background-clip:text;color:transparent}
+  .sub{font-size:clamp(16px,2.2vw,20px); color:var(--ink-dim); max-width:640px; margin:0 auto 28px}
+  .cta{display:flex; gap:14px; justify-content:center; flex-wrap:wrap}
+  .btn{display:inline-flex;align-items:center;gap:9px;padding:12px 22px;border-radius:12px;font-weight:600;
+    font-size:15px;text-decoration:none;transition:transform .12s,box-shadow .2s;border:1px solid transparent}
+  .btn-primary{background:linear-gradient(135deg,#0A84FF,#4A6CFF);color:#fff;box-shadow:0 10px 26px -10px rgba(10,132,255,.7)}
+  .btn-primary:hover{transform:translateY(-1px)}
+  .btn-ghost{background:var(--panel);border-color:var(--panel-brd);color:var(--ink)}
+  .btn-ghost:hover{border-color:var(--accent)}
+
+  .hero-shot{margin:46px auto 0; max-width:940px; border-radius:16px; overflow:hidden;
+    border:1px solid var(--shot-brd); box-shadow:var(--shadow); position:relative}
+  .hero-shot img{display:block;width:100%}
+  .metrics{display:flex; gap:34px; justify-content:center; flex-wrap:wrap; margin:44px 0 6px}
+  .metric{text-align:center}
+  .metric b{display:block;font-size:26px;font-weight:800;letter-spacing:-.02em}
+  .metric span{font-size:13px;color:var(--ink-faint)}
+
+  /* Sections */
+  section{padding:56px 0}
+  .sec-head{text-align:center; max-width:640px; margin:0 auto 40px}
+  .sec-head .eyebrow{font-size:13px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--accent)}
+  .sec-head h2{font-size:clamp(26px,3.6vw,38px);letter-spacing:-.025em;margin:.28em 0 .3em;font-weight:800}
+  .sec-head p{color:var(--ink-dim);font-size:16.5px;margin:0}
+
+  .cat{margin-bottom:14px}
+  .cat-title{display:flex;align-items:center;gap:12px;margin:40px 0 20px;font-size:14px;font-weight:700;
+    letter-spacing:.05em;text-transform:uppercase;color:var(--ink-dim)}
+  .cat-title::after{content:"";flex:1;height:1px;background:var(--panel-brd)}
+  .cat-title .cdot{width:9px;height:9px;border-radius:50%}
+
+  /* Layout showcase */
+  .layouts{display:grid;grid-template-columns:repeat(3,1fr);gap:20px}
+  .layout{margin:0}
+  .layout .thumb{border-radius:14px;overflow:hidden;border:1px solid var(--shot-brd);box-shadow:var(--shadow);
+    background:#000;cursor:zoom-in;aspect-ratio:1200/820;transition:transform .16s,border-color .16s}
+  .layout .thumb:hover{transform:translateY(-3px);border-color:var(--accent)}
+  .layout .thumb img{display:block;width:100%;height:100%;object-fit:cover;object-position:top left}
+  .layout figcaption{margin-top:12px;font-size:13.5px;color:var(--ink-faint);text-align:center}
+  .layout figcaption b{color:var(--ink)}
+  @media(max-width:820px){.layouts{grid-template-columns:1fr;max-width:460px;margin:0 auto}}
+
+  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(330px,1fr));gap:20px}
+  .card{background:var(--panel);border:1px solid var(--panel-brd);border-radius:16px;overflow:hidden;
+    display:flex;flex-direction:column;transition:transform .16s,border-color .16s,box-shadow .16s}
+  .card:hover{transform:translateY(-3px);border-color:color-mix(in srgb,var(--tint) 55%,var(--panel-brd));
+    box-shadow:var(--shadow)}
+  .card .thumb{position:relative;cursor:zoom-in;background:#000;aspect-ratio:1200/820;overflow:hidden;
+    border-bottom:1px solid var(--panel-brd)}
+  .card .thumb img{display:block;width:100%;height:100%;object-fit:cover;object-position:top left}
+  .card .body{padding:16px 18px 20px}
+  .card .body h3{margin:0 0 4px;font-size:17.5px;letter-spacing:-.01em;display:flex;align-items:center;gap:9px}
+  .card .body h3 .tag{width:10px;height:10px;border-radius:3px;background:var(--tint);flex:none}
+  .card .body .st{color:var(--ink-dim);font-size:13.5px;font-weight:600;margin-bottom:8px}
+  .card .body p{color:var(--ink-faint);font-size:13.5px;margin:0}
+
+  /* Feature list */
+  .feat-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:18px}
+  .feat{background:var(--panel);border:1px solid var(--panel-brd);border-radius:14px;padding:20px 20px 22px}
+  .feat .ic{font-size:22px;margin-bottom:10px}
+  .feat h3{margin:0 0 6px;font-size:16px;letter-spacing:-.01em}
+  .feat h3 kbd{font:inherit;font-size:11.5px;background:color-mix(in srgb,var(--accent) 16%,transparent);
+    color:var(--accent);padding:2px 7px;border-radius:6px;font-weight:700;margin-left:6px;vertical-align:middle}
+  .feat p{margin:0;color:var(--ink-faint);font-size:13.5px}
+
+  .privacy{background:var(--panel);border:1px solid var(--panel-brd);border-radius:20px;padding:40px;
+    display:grid;grid-template-columns:1.1fr 1fr;gap:36px;align-items:center}
+  .privacy h2{font-size:28px;letter-spacing:-.02em;margin:0 0 14px}
+  .privacy ul{margin:0;padding:0;list-style:none;display:grid;gap:14px}
+  .privacy li{display:flex;gap:12px;font-size:14.5px;color:var(--ink-dim)}
+  .privacy li b{color:var(--ink)}
+  .privacy .check{color:#34C759;font-weight:800;flex:none}
+  .code{background:color-mix(in srgb,var(--ink) 6%,transparent);border:1px solid var(--panel-brd);
+    border-radius:14px;padding:18px 20px;font-family:"SF Mono",ui-monospace,Menlo,monospace;font-size:13px;
+    color:var(--ink);overflow-x:auto;white-space:pre;line-height:1.7}
+  .code .c{color:var(--ink-faint)}
+  .code .k{color:var(--accent)}
+  @media(max-width:760px){.privacy{grid-template-columns:1fr;padding:28px}}
+
+  footer{border-top:1px solid var(--panel-brd);padding:38px 0;margin-top:40px;text-align:center;color:var(--ink-faint);font-size:13.5px}
+  footer a{color:var(--ink-dim);text-decoration:none}
+  footer a:hover{color:var(--ink)}
+
+  /* Lightbox */
+  .lb{position:fixed;inset:0;z-index:100;background:rgba(0,0,0,.86);backdrop-filter:blur(6px);
+    display:none;align-items:center;justify-content:center;padding:30px;cursor:zoom-out}
+  .lb.open{display:flex}
+  .lb img{max-width:100%;max-height:100%;border-radius:12px;box-shadow:0 30px 80px -20px rgba(0,0,0,.8)}
+  .lb .cap{position:absolute;bottom:22px;left:0;right:0;text-align:center;color:#e8ecf3;font-size:14px}
+</style>
+</head>
+<body>
+
+<nav>
+  <div class="wrap nav-in">
+    <div class="brand"><span class="logo">P</span> PDF Utils</div>
+    <div class="nav-links">
+      <a href="#tools" data-collapse>Tools</a>
+      <a href="#features" data-collapse>Features</a>
+      <a href="#privacy" data-collapse>Privacy</a>
+      <a class="ghlink" href="https://github.com/agirish/pdf-utils">GitHub ↗</a>
+      <div class="theme-btn" id="themeBtn" title="Toggle theme" aria-label="Toggle light/dark theme">◐</div>
+    </div>
+  </div>
+</nav>
+
+<header class="hero">
+  <div class="wrap">
+    <div class="pill"><span class="dot"></span> Runs entirely on your Mac · No uploads · No accounts</div>
+    <h1>Every PDF task,<br><span class="grad">native to macOS.</span></h1>
+    <p class="sub">A tidy toolkit of <strong>15 focused tools</strong> — compress, merge, split, redact, OCR, sign and more — built with SwiftUI and PDFKit. Pick a file, get a result. Nothing ever leaves your machine.</p>
+    <div class="cta">
+      <a class="btn btn-primary" href="https://github.com/agirish/pdf-utils">⭐ View on GitHub</a>
+      <a class="btn btn-ghost" href="#tools">Explore the tools ↓</a>
+    </div>
+    <div class="hero-shot">
+      <img data-shot="dashboard" alt="PDF Utils dashboard showing all 15 tools">
+    </div>
+    <div class="metrics">
+      <div class="metric"><b>15</b><span>focused tools</span></div>
+      <div class="metric"><b>0</b><span>network calls</span></div>
+      <div class="metric"><b>100%</b><span>on-device</span></div>
+      <div class="metric"><b>SwiftUI</b><span>+ PDFKit</span></div>
+    </div>
+  </div>
+</header>
+
+<section id="layouts">
+  <div class="wrap">
+    <div class="sec-head">
+      <div class="eyebrow">Your dashboard, your way</div>
+      <h2>Three ways to arrange the shelf</h2>
+      <p>Switch the dashboard between a flat <strong>Grid</strong>, tidy <strong>Categories</strong>, or a compact <strong>List</strong> — pin favorites and drag to reorder in any of them. Click to enlarge.</p>
+    </div>
+    <div class="layouts">
+      <figure class="layout"><div class="thumb" data-slug="dashboard" data-name="Grid layout"><img data-shot="dashboard" loading="lazy" alt="Grid layout"></div><figcaption><b>Grid</b> — every tool, one flat wall of tiles</figcaption></figure>
+      <figure class="layout"><div class="thumb" data-slug="dashboard-categories" data-name="Categories layout"><img data-shot="dashboard-categories" loading="lazy" alt="Categories layout"></div><figcaption><b>Categories</b> — grouped by what you're doing</figcaption></figure>
+      <figure class="layout"><div class="thumb" data-slug="dashboard-list" data-name="List layout"><img data-shot="dashboard-list" loading="lazy" alt="List layout"></div><figcaption><b>List</b> — a compact, scannable row per tool</figcaption></figure>
+    </div>
+  </div>
+</section>
+
+<section id="tools">
+  <div class="wrap">
+    <div class="sec-head">
+      <div class="eyebrow">The toolkit</div>
+      <h2>Fifteen tools, one dashboard</h2>
+      <p>Grouped the way you think about a document — optimize it, organize its pages, edit what's on them, or lock it down. Click any screenshot to enlarge.</p>
+    </div>
+    <div id="catalog"></div>
+  </div>
+</section>
+
+<section id="features">
+  <div class="wrap">
+    <div class="sec-head">
+      <div class="eyebrow">Beyond the tools</div>
+      <h2>Built to get out of your way</h2>
+      <p>The details that make it feel like a real Mac app, not a web page in a window.</p>
+    </div>
+    <div class="feat-grid">
+      <div class="feat"><div class="ic">⚡️</div><h3>Batch mode</h3><p>Drop several PDFs into a whole-document tool and it runs across every file in one pass.</p></div>
+      <div class="feat"><div class="ic">⌨️</div><h3>Command palette <kbd>⌘K</kbd></h3><p>A fuzzy launcher that jumps straight to any tool, Settings, or the activity log.</p></div>
+      <div class="feat"><div class="ic">🎛️</div><h3>Customizable dashboard</h3><p>Categories, Grid, or List layouts. Pin favorites to the top and drag to reorder tools and sections.</p></div>
+      <div class="feat"><div class="ic">🖱️</div><h3>Finder integration</h3><p>Right-click a PDF for Compress, Remove Password, Rotate, Extract — or Merge across a selection.</p></div>
+      <div class="feat"><div class="ic">🪟</div><h3>Liquid-glass UI</h3><p>A tunable translucent look with Light, Dark, and System theming that reaches every panel.</p></div>
+      <div class="feat"><div class="ic">🧾</div><h3>Activity log <kbd>⇧⌘L</kbd></h3><p>Every saved file is recorded with its path and size — a clean trace, written only to a local file.</p></div>
+      <div class="feat"><div class="ic">❓</div><h3>In-app help <kbd>⌘?</kbd></h3><p>A built-in help book with per-tool guidance and cross-links, always a keystroke away.</p></div>
+      <div class="feat"><div class="ic">🔒</div><h3>On-device by design</h3><p>Security-scoped file access, work off the main thread, and a clear error when macOS says no.</p></div>
+    </div>
+  </div>
+</section>
+
+<section id="privacy">
+  <div class="wrap">
+    <div class="privacy">
+      <div>
+        <h2>Your PDFs never leave your Mac</h2>
+        <ul>
+          <li><span class="check">✓</span><span><b>No network calls, no analytics</b> anywhere in the codebase.</span></li>
+          <li><span class="check">✓</span><span><b>No uploads, no accounts.</b> You choose files with the system dialog and save results back to disk.</span></li>
+          <li><span class="check">✓</span><span><b>The activity log is a local file</b> — <code>~/pdf-utils.log</code>. Nothing is sent anywhere.</span></li>
+          <li><span class="check">✓</span><span><b>Passwords are never stored</b> or transmitted — encryption happens locally.</span></li>
+        </ul>
+      </div>
+      <div class="code">
+<span class="c"># Build & run from source</span>
+<span class="k">swift</span> build
+<span class="k">swift</span> run PdfUtils
+
+<span class="c"># Assemble a full .app (Finder ext + helper)</span>
+scripts/build-app.sh
+
+<span class="c"># Run the test suite</span>
+<span class="k">swift</span> test --package-path Packages/PdfToolkit
+      </div>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    <p><strong>PDF Utils</strong> · a native macOS PDF toolkit · requires macOS 15+</p>
+    <p><a href="https://github.com/agirish/pdf-utils">github.com/agirish/pdf-utils</a> · Built with SwiftUI &amp; PDFKit</p>
+  </div>
+</footer>
+
+<div class="lb" id="lb"><img id="lbimg" alt=""><div class="cap" id="lbcap"></div></div>
+
+<script>
+const TOOLS = [
+  {cat:"Optimize", cdot:"#FF9500", items:[
+    {slug:"compress", name:"Compress PDF", tint:"#FF9500", st:"Shrink file size for sharing",
+     desc:"Rebuilds pages as images to cut size — by strength or a target MB. Batch a whole folder at once."},
+    {slug:"ocr", name:"OCR PDF", tint:"#64D2FF", st:"Make scanned pages searchable",
+     desc:"On-device text recognition lays an invisible, selectable layer behind the scan. The image is untouched."},
+  ]},
+  {cat:"Organize pages", cdot:"#AF52DE", items:[
+    {slug:"merge", name:"Merge PDF", tint:"#AF52DE", st:"Combine PDFs, whole or by page",
+     desc:"Stack files top-to-bottom, take page ranges per file, and drop stray pages from the combined preview."},
+    {slug:"split", name:"Split PDF", tint:"#5E5CE6", st:"Break one PDF into several files",
+     desc:"Fixed chunks of N pages, or custom ranges where each comma group becomes its own file."},
+    {slug:"extract", name:"Extract PDF Pages", tint:"#30B0C7", st:"Save selected pages as a new PDF",
+     desc:"Pull chosen pages into a new file in exactly the order you type — great for chapters or attachments."},
+    {slug:"reorder", name:"Reorder Pages", tint:"#00C7BE", st:"Rearrange pages, drop any you don't need",
+     desc:"Drag pages into place and trash extras. The preview follows the new order; the original is untouched."},
+    {slug:"deletePages", name:"Delete PDF Pages", tint:"#FF2D55", st:"Remove unwanted pages",
+     desc:"Write a new PDF without the pages you list. The original file on disk is never modified."},
+    {slug:"rotate", name:"Rotate PDF", tint:"#0A84FF", st:"Turn pages 90° at a time",
+     desc:"Rotate all pages or a range by 90° / 180° / 270°, across one file or a whole batch."},
+  ]},
+  {cat:"Edit & annotate", cdot:"#A3C738", items:[
+    {slug:"crop", name:"Crop PDF", tint:"#A3C738", st:"Trim margins by hand or automatically",
+     desc:"Type a trim per edge, drag a box on the page, or auto-detect content bounds. Nothing is deleted."},
+    {slug:"watermark", name:"Watermark PDF", tint:"#A2845E", st:"Stamp text or a logo across pages",
+     desc:"Text or your own logo, centered or tiled — with font, color, size, angle and opacity. Text stays vector."},
+    {slug:"fillSign", name:"Fill & Sign", tint:"#FF7366", st:"Add text and a signature to a PDF",
+     desc:"Type onto a flat form, then draw or type a signature and place it. The signature bakes in as vector ink."},
+    {slug:"imagesToPdf", name:"Images to PDF", tint:"#FFD60A", st:"Turn photos and scans into one PDF",
+     desc:"JPG, PNG or HEIC → one page per image. Choose a paper size and whether pictures fit or fill the page."},
+  ]},
+  {cat:"Secure & clean", cdot:"#C7292F", items:[
+    {slug:"redact", name:"Redact PDF", tint:"#C7292F", st:"Permanently black out sensitive areas",
+     desc:"⇧-drag over regions — or Find & redact every match of a word or pattern. Rebuilt as solid black. Irreversible."},
+    {slug:"protect", name:"Password Protect", tint:"#34C759", st:"Encrypt a PDF, or remove its password",
+     desc:"Add an open password, or strip one you can already open. Standard PDF encryption, applied on your Mac."},
+    {slug:"metadata", name:"Clean Metadata", tint:"#7A87F0", st:"View, edit, or strip hidden document info",
+     desc:"Inspect title, author, keywords, producer and dates — then edit any field or scrub them all before sharing."},
+  ]},
+];
+
+function theme(){ return document.documentElement.getAttribute("data-theme"); }
+function shotSrc(slug){ return `assets/screenshots/${slug}-${theme()}.png`; }
+
+function renderCatalog(){
+  const root = document.getElementById("catalog");
+  root.innerHTML = "";
+  TOOLS.forEach(group=>{
+    const t = document.createElement("div"); t.className="cat";
+    t.innerHTML = `<div class="cat-title"><span class="cdot" style="background:${group.cdot}"></span>${group.cat}</div>`;
+    const grid = document.createElement("div"); grid.className="grid";
+    group.items.forEach(it=>{
+      const c = document.createElement("div"); c.className="card"; c.style.setProperty("--tint", it.tint);
+      c.innerHTML = `
+        <div class="thumb" data-slug="${it.slug}" data-name="${it.name}">
+          <img data-shot="${it.slug}" loading="lazy" alt="${it.name} screenshot">
+        </div>
+        <div class="body">
+          <h3><span class="tag"></span>${it.name}</h3>
+          <div class="st" style="color:${it.tint}">${it.st}</div>
+          <p>${it.desc}</p>
+        </div>`;
+      grid.appendChild(c);
+    });
+    t.appendChild(grid); root.appendChild(t);
+  });
+}
+
+function refreshShots(){
+  document.querySelectorAll("img[data-shot]").forEach(img=>{
+    img.src = shotSrc(img.getAttribute("data-shot"));
+  });
+}
+
+// Lightbox
+const lb=document.getElementById("lb"), lbimg=document.getElementById("lbimg"), lbcap=document.getElementById("lbcap");
+document.addEventListener("click", e=>{
+  const th = e.target.closest(".thumb");
+  if(th){ lbimg.src = shotSrc(th.getAttribute("data-slug")); lbcap.textContent = th.getAttribute("data-name"); lb.classList.add("open"); }
+  else if(e.target.closest("#lb")){ lb.classList.remove("open"); }
+});
+document.addEventListener("keydown", e=>{ if(e.key==="Escape") lb.classList.remove("open"); });
+
+// Theme
+const THEME_KEY="pdfutils-site-theme";
+function applyTheme(t){ document.documentElement.setAttribute("data-theme", t); refreshShots(); if(lb.classList.contains("open")) lbimg.src=lbimg.src.replace(/-(dark|light)\.png/, "-"+t+".png"); }
+document.getElementById("themeBtn").addEventListener("click", ()=>{
+  const next = theme()==="dark" ? "light" : "dark";
+  localStorage.setItem(THEME_KEY, next); applyTheme(next);
+});
+(function initTheme(){
+  const saved = localStorage.getItem(THEME_KEY);
+  const prefLight = window.matchMedia && window.matchMedia("(prefers-color-scheme: light)").matches;
+  applyTheme(saved || (prefLight ? "light" : "dark"));
+})();
+
+renderCatalog();
+refreshShots();
+</script>
+</body>
+</html>

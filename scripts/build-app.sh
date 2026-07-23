@@ -37,10 +37,28 @@ cp MacApp/Info.plist "$APP/Contents/Info.plist"
 /usr/libexec/PlistBuddy -c "Set :CFBundleExecutable PdfUtils" "$APP/Contents/Info.plist" 2>/dev/null || true
 /usr/libexec/PlistBuddy -c "Set :CFBundleIdentifier com.pdfutils.PdfUtils" "$APP/Contents/Info.plist" 2>/dev/null || true
 
-# Reuse an already-built icon if one is installed (cosmetic; skipped if absent).
-if [ -f "/Applications/PDF Utils.app/Contents/Resources/AppIcon.icns" ]; then
-  cp "/Applications/PDF Utils.app/Contents/Resources/AppIcon.icns" "$APP/Contents/Resources/AppIcon.icns"
-fi
+# Icon. SwiftPM never runs actool, so compile the asset catalog ourselves: it emits both
+# Assets.car (what CFBundleIconName resolves against) and AppIcon.icns (what the older
+# CFBundleIconFile key names). Both keys must be present — LaunchServices/Spotlight fell
+# back to the generic bundle icon when only CFBundleIconName was set with no Assets.car.
+xcrun actool MacApp/Assets.xcassets \
+  --compile "$APP/Contents/Resources" \
+  --app-icon AppIcon \
+  --platform macosx \
+  --minimum-deployment-target 13.0 \
+  --output-partial-info-plist "$APP/Contents/Resources/.actool-partial.plist" > /dev/null
+# actool's partial plist is exactly the icon keys Xcode would merge in; apply them.
+/usr/libexec/PlistBuddy -c "Merge '$APP/Contents/Resources/.actool-partial.plist'" "$APP/Contents/Info.plist"
+rm -f "$APP/Contents/Resources/.actool-partial.plist"
+# actool's .icns is only a 16/128 legacy stub — it parks the large representations in
+# Assets.car. Anything reading the .icns directly (the helper below, older callers) would
+# get a blurry icon, so overwrite it with a full 16→512@2x one built from the same PNGs.
+# The .appiconset filenames already follow iconutil's iconset naming.
+ICONSET="$(mktemp -d)/AppIcon.iconset"
+mkdir -p "$ICONSET"
+cp MacApp/Assets.xcassets/AppIcon.appiconset/icon_*.png "$ICONSET/"
+iconutil -c icns -o "$APP/Contents/Resources/AppIcon.icns" "$ICONSET"
+rm -rf "$(dirname "$ICONSET")"
 
 echo "==> Assembling Finder Sync extension at $EXT"
 cp .build/release/PdfUtilsFinder "$EXT/Contents/MacOS/PdfUtilsFinder"

@@ -228,6 +228,30 @@ extension PDFToolkit {
         return data
     }
 
+    /// A display-only copy of `source` for the drag-to-crop marquee's live `PDFView`: every page is
+    /// copied into a *fresh* document with its annotations removed.
+    ///
+    /// The marquee only needs a page to draw a rectangle on — it reads geometry from the crop box and
+    /// maps through `pdfView.convert`, and the actual crop re-opens the original file. Handing the raw
+    /// document to a `PDFView` is what made a heavy form (e.g. a scanned government form with hundreds
+    /// of fields) hang the app: PDFKit spun up a per-field `formFillingQueue` thread storm (measured at
+    /// 500+ threads, ~2.6 GB) plus a Vision Live-Text pass, none of which cropping uses. Rebuilding into
+    /// a fresh `PDFDocument` drops the catalog `/AcroForm`, and removing each page's widgets drops the
+    /// annotations the copy would otherwise keep — so the view has nothing to form-fill. Page copies
+    /// preserve bounds and `/Rotate`, so the marquee's page↔view math is unchanged.
+    static func interactivePreviewDocument(from source: PDFDocument) -> PDFDocument {
+        let output = PDFDocument()
+        for i in 0..<source.pageCount {
+            guard let page = source.page(at: i), let copy = page.copy() as? PDFPage else { continue }
+            for annotation in copy.annotations {
+                copy.removeAnnotation(annotation)
+            }
+            output.insert(copy, at: output.pageCount)
+        }
+        carryDocumentAttributes(from: source, to: output)
+        return output
+    }
+
     // MARK: Geometry
 
     /// Applies displayed-edge insets to a stored (unrotated) box, mapping each visual edge onto the

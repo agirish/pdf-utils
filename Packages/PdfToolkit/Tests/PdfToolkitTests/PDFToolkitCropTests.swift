@@ -37,6 +37,66 @@ import Testing
                 == PDFToolkit.insetRect(rect, rotation: 270, by: insets))
     }
 
+    // MARK: Interactive marquee preview (form/annotation strip)
+
+    @Test func interactivePreviewStripsAnnotationsButKeepsGeometry() throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let url = dir.appendingPathComponent("annotated.pdf")
+
+        let crop = CGRect(x: 30, y: 40, width: 500, height: 600)
+        try PDFFixtures.writePDF(
+            markers: ["content"],
+            rotations: [0: 90],
+            cropFirstPageTo: crop,
+            greenSquareOnFirstPage: CGRect(x: 50, y: 60, width: 100, height: 100),
+            to: url
+        )
+        let source = try #require(PDFDocument(url: url))
+        #expect(source.page(at: 0)?.annotations.isEmpty == false)
+
+        let preview = PDFToolkit.interactivePreviewDocument(from: source)
+        // Same pages, no annotations — nothing for a live PDFView to form-fill or analyze.
+        #expect(preview.pageCount == source.pageCount)
+        let previewPage = try #require(preview.page(at: 0))
+        #expect(previewPage.annotations.isEmpty)
+        // Geometry the marquee maps through is untouched: crop box and intrinsic rotation survive.
+        #expect(previewPage.bounds(for: .cropBox) == crop)
+        #expect(previewPage.rotation == 90)
+    }
+
+    @MainActor
+    @Test func disableLiveTextAnalysisTurnsOffDocumentAnalysis() throws {
+        let pdfView = PDFView()
+        // The private getter mirrors the setter the helper drives — if a future macOS drops either,
+        // this fails loudly rather than letting the Vision Live-Text hang silently return.
+        let getter = NSSelectorFromString("isDocumentAnalysisEnabled")
+        try #require(pdfView.responds(to: getter))
+        pdfView.disableLiveTextAnalysis()
+        typealias GetBool = @convention(c) (NSObject, Selector) -> Bool
+        let enabled = unsafeBitCast(pdfView.method(for: getter), to: GetBool.self)(pdfView, getter)
+        #expect(enabled == false)
+    }
+
+    @Test func previewLoadCountsAnnotationsAndFlagsHeavy() throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let url = dir.appendingPathComponent("one-annotation.pdf")
+        try PDFFixtures.writePDF(
+            markers: ["content"],
+            greenSquareOnFirstPage: CGRect(x: 50, y: 60, width: 100, height: 100),
+            to: url
+        )
+        let doc = try #require(PDFDocument(url: url))
+
+        let load = InteractivePreviewLoad(document: doc)
+        #expect(load.pageCount == 1)
+        #expect(load.annotationCount == 1)
+        #expect(load.isHeavy == false)
+    }
+
     @Test func insetsFromSelectionInvertInsetRectUnderEveryRotation() {
         // A crop box with a NON-zero origin — the case origin-zero fixtures have hidden before.
         let cropBox = CGRect(x: 30, y: 40, width: 500, height: 600)

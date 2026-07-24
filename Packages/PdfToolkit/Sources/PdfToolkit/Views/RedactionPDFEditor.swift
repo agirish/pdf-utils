@@ -42,6 +42,7 @@ struct RedactionPDFEditor: NSViewRepresentable {
         container.translatesAutoresizingMaskIntoConstraints = false
 
         let pdfView = PDFView()
+        pdfView.disableLiveTextAnalysis()
         pdfView.translatesAutoresizingMaskIntoConstraints = false
         pdfView.autoScales = true
         pdfView.displayMode = .singlePageContinuous

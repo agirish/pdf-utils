@@ -788,9 +788,21 @@ struct FillSignToolView: View {
             // PDFDocument(url:) here directly beachballed the UI on slow volumes (the
             // "Opening PDF…" state could never render) and ran PDFKit concurrently with
             // queue-side work — the exact access pattern the serialization invariant forbids.
-            let box = try await PDFBackgroundWork.run {
-                try url.withSecurityScopedAccess { PDFDocumentBox(document: PDFDocument(url: url)) }
+            let result = try await PDFBackgroundWork.run { () -> (PDFDocumentBox, InteractivePreviewLoad?) in
+                try url.withSecurityScopedAccess {
+                    let document = PDFDocument(url: url)
+                    // Count the load on the serial queue; the summary is logged on the main actor below.
+                    let load = (document.map { $0.isLocked == false && $0.pageCount > 0 } == true)
+                        ? document.map(InteractivePreviewLoad.init) : nil
+                    return (PDFDocumentBox(document: document), load)
+                }
             }
+            let box = result.0
+            // Breadcrumb before the live-PDFView mount: a heavy annotation/form load is what can wedge
+            // PDFKit, and this leaves a traceable line in ~/pdf-utils.log naming the file even if the
+            // app has to be force-quit. Fill & Sign needs the form fields, so it can't strip them the
+            // way Crop's marquee does.
+            result.1?.log(tool: Tool.fillSign.title, url: url, stripped: false)
             guard !Task.isCancelled else { return }
             if box.document == nil {
                 alertMessage = PDFOperationError.couldNotOpen(url).localizedDescription

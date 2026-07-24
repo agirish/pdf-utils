@@ -558,11 +558,23 @@ struct CropToolView: View {
         dragPageIndex = 0
         guard let url = inputURL else { return }
         do {
-            let box = try await PDFBackgroundWork.run {
-                try url.withSecurityScopedAccess { PDFDocumentBox(document: PDFDocument(url: url)) }
+            // Hand the marquee a display-only copy: forms and annotations stripped so a heavy
+            // scanned form can't set off PDFKit's form-filling thread storm + Vision Live-Text pass
+            // (which wedged the app at 500+ threads / ~2.6 GB). Cropping ignores annotations and the
+            // real crop re-opens the original file, so nothing is lost. Building the copy is PDFKit
+            // work, so it runs on the serial queue; the load is logged first, so a hang is traceable.
+            let result = try await PDFBackgroundWork.run { () -> (PDFDocumentBox, InteractivePreviewLoad?) in
+                try url.withSecurityScopedAccess {
+                    guard let source = PDFDocument(url: url), source.isLocked == false, source.pageCount > 0 else {
+                        return (PDFDocumentBox(document: nil), nil)
+                    }
+                    let load = InteractivePreviewLoad(document: source)
+                    return (PDFDocumentBox(document: PDFToolkit.interactivePreviewDocument(from: source)), load)
+                }
             }
             guard !Task.isCancelled else { return }
-            if let doc = box.document, doc.isLocked == false, doc.pageCount > 0 {
+            result.1?.log(tool: Tool.crop.title, url: url, stripped: true)
+            if let doc = result.0.document, doc.pageCount > 0 {
                 pdfDocument = doc
             }
         } catch is CancellationError {

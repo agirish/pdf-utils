@@ -119,13 +119,13 @@ extension Tool {
                     "Compression rebuilds each page as an image and wraps it in a new PDF—best for scan- and photo-heavy documents; pure text PDFs may not shrink much. Pick a strength and see the size it will produce before you commit, or name a target size and let the tool work the quality down until the file fits.",
                 steps: [
                     "Choose or drop a PDF (add several to compress a whole batch at once).",
-                    "In By quality, pick Basic, Balanced, or Strong—each card previews the size it will produce—or open Fine-tune quality for the exact slider.",
+                    "In By quality, pick Best Quality, Balanced, or Smallest File—each card previews the size it will produce—or open Fine-tune quality for the exact slider.",
                     "Or switch to By target size and type a size in MB; the tool lowers quality until the file fits under it.",
                     "Click Compress & save…. Afterwards a before/after card shows how much smaller the file got, with Reveal in Finder.",
                 ],
                 controls: [
                     ("By quality / By target size", "Two ways to compress: pick a named strength, or name a size in MB to fit under."),
-                    ("Basic / Balanced / Strong", "Three one-tap strengths, lightest to strongest. Each card shows a live estimate of the file it will produce; tap one to select it."),
+                    ("Best Quality / Balanced / Smallest File", "Three one-tap strengths, lightest to strongest. Each card shows a live estimate of the file it will produce; tap one to select it."),
                     ("Fine-tune quality", "Reveals the exact quality slider (0.2–1) when a card isn't precise enough; the slider still highlights whichever card its value falls in."),
                     ("By target size", "Type a size in MB; the tool sweeps progressively lower quality and writes the highest-quality file that fits under it. Projected output previews the result."),
                     ("Compress & save… / Run on N files", "Compresses the one file through the save sheet, or every queued file at once following your Save location."),

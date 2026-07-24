@@ -25,9 +25,9 @@ struct CompressionStrength: Identifiable {
     /// Ordered gentlest → strongest. The quality points sit at the centres of the same three buckets the
     /// quality label and the Settings default already use, so cards, slider, and Settings speak one language.
     static let all: [CompressionStrength] = [
-        CompressionStrength(id: "basic", title: "Basic", subtitle: "Good quality, light savings", quality: 0.85),
+        CompressionStrength(id: "basic", title: "Best Quality", subtitle: "Light savings", quality: 0.85),
         CompressionStrength(id: "balanced", title: "Balanced", subtitle: "Smaller file, still sharp", quality: 0.6),
-        CompressionStrength(id: "strong", title: "Strong", subtitle: "Smallest, slight quality loss", quality: 0.35),
+        CompressionStrength(id: "strong", title: "Smallest File", subtitle: "Some quality loss", quality: 0.35),
     ]
 
     /// Which card a given quality reads as — the same thresholds as `qualityLabel`, so any slider value
@@ -422,9 +422,9 @@ struct CompressToolView: View {
 
     private var qualityLabel: String {
         switch quality {
-        case ..<0.45: return "Smaller file"
+        case ..<0.45: return "Smallest file"
         case ..<0.75: return "Balanced"
-        default: return "Higher quality"
+        default: return "Best quality"
         }
     }
 

@@ -561,9 +561,9 @@ struct AdvancedSettingsTab: View {
 
     private var compressionLabel: String {
         switch compressionQuality {
-        case ..<0.45: return "Smaller file"
+        case ..<0.45: return "Smallest file"
         case ..<0.75: return "Balanced"
-        default: return "Higher quality"
+        default: return "Best quality"
         }
     }
 

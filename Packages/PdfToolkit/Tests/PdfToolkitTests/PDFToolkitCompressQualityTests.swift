@@ -13,7 +13,8 @@ import PDFKit
     // MARK: - Strength bucket boundaries
 
     @Test func selectedIDBucketsAroundTheStrongBalancedThreshold() {
-        // Everything below 0.45 is Strong; 0.45 itself crosses into Balanced (half-open `..<0.45`).
+        // Everything below 0.45 is `strong` (Smallest File); 0.45 itself crosses into `balanced`
+        // (half-open `..<0.45`).
         #expect(CompressionStrength.selectedID(for: 0.0) == "strong")
         #expect(CompressionStrength.selectedID(for: 0.2) == "strong")
         #expect(CompressionStrength.selectedID(for: 0.449) == "strong")
@@ -21,7 +22,7 @@ import PDFKit
     }
 
     @Test func selectedIDBucketsAroundTheBalancedBasicThreshold() {
-        // [0.45, 0.75) is Balanced; 0.75 itself crosses into Basic. The default 0.72 stays Balanced,
+        // [0.45, 0.75) is `balanced`; 0.75 itself crosses into `basic` (Best Quality). The default 0.72 stays balanced,
         // which the disclosed slider and the Settings default both rely on.
         #expect(CompressionStrength.selectedID(for: 0.45) == "balanced")
         #expect(CompressionStrength.selectedID(for: 0.72) == "balanced")

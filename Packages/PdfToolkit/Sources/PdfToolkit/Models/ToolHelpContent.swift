@@ -125,7 +125,7 @@ extension Tool {
                 ],
                 controls: [
                     ("By quality / By target size", "Two ways to compress: pick a named strength, or name a size in MB to fit under."),
-                    ("Best Quality / Balanced / Smallest File", "Three one-tap strengths, lightest to strongest. Each card shows a live estimate of the file it will produce; tap one to select it."),
+                    ("Best Quality / Balanced / Smallest File", "Three one-tap strengths, lightest to strongest—roughly 225, 180, and 135 dpi. Each card shows a live estimate of the file it will produce; tap one to select it. Pages are never rendered above the resolution the source actually holds, so a low-resolution scan won't grow."),
                     ("Fine-tune quality", "Reveals the exact quality slider (0.2–1) when a card isn't precise enough; the slider still highlights whichever card its value falls in."),
                     ("By target size", "Type a size in MB; the tool sweeps progressively lower quality and writes the highest-quality file that fits under it. Projected output previews the result."),
                     ("Compress & save… / Run on N files", "Compresses the one file through the save sheet, or every queued file at once following your Save location."),

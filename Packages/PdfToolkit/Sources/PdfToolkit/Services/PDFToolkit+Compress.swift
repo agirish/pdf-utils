@@ -178,13 +178,77 @@ extension PDFToolkit {
     /// PDFPage(image:) landed within ~8% of an explicit 0.85 encode, probed) — and eases down to ~0.33
     /// at the bottom.
     ///
-    /// Encoding quality is deliberately a *second* size lever alongside raster resolution: resolution
-    /// downsampling caps at 1 pt/px (`rasterGeometry(allowUpscale: false)`), so on a standard-size page
-    /// — whose long edge is already below every quality's `maxPixel` — resolution alone is identical at
-    /// every setting and the quality slider would do nothing. Varying the JPEG factor makes quality
-    /// (and the strength cards that front it) actually change the output size on ordinary pages too.
+    /// Encoding quality is deliberately a *second* size lever alongside raster resolution
+    /// (`compressedPageDPI`): the two move together so the rungs stay well separated in size, and so
+    /// a page that is already at its native resolution — where the DPI lever is capped out and does
+    /// nothing — still gets smaller as the user asks for more compression.
     private static func compressedPageJPEGFactor(for quality: Double) -> Double {
         min(0.85, max(0.3, 0.30 + 0.55 * quality))
+    }
+
+    /// Raster resolution, in DPI, for a rebuilt page at `quality`.
+    ///
+    /// Compression used to cap the raster at 1 pixel per PDF point — 72 dpi — for every page whose
+    /// long edge fell under the quality's pixel budget, which is every ordinary page size. A 600-dpi
+    /// scan therefore came back at 72 dpi at *every* setting, including the highest, and the quality
+    /// lever only changed how hard that already-destroyed bitmap was JPEG'd. Text at 72 dpi is mush.
+    ///
+    /// Resolution is now the primary lever and is expressed in the unit that actually governs
+    /// legibility: 225 dpi at the top (comfortably sharp text), easing to ~110 dpi at the bottom,
+    /// where a page is still readable but small. `PDFToolkitCompressResolutionTests` pins that the
+    /// top of the range renders a 613 × 868 pt page well above its point size.
+    private static func compressedPageDPI(for quality: Double) -> CGFloat {
+        72 + 180 * CGFloat(min(1, max(0, quality)))
+    }
+
+    /// Absolute pixel ceiling for a rebuilt page's long edge, so an oversized page (a poster, a
+    /// plotter sheet) can't turn a DPI target into a gigapixel render. Ordinary page sizes are far
+    /// below this at every quality — a Letter page at 225 dpi is ~2475 px.
+    private static let compressedPageMaxPixel: CGFloat = 5000
+
+    /// The page's own image resolution in pixels per point, if it is image-backed — the ceiling
+    /// past which rendering bigger adds bytes but no detail.
+    ///
+    /// A 72-dpi scan asked for 225 dpi would triple in size to re-encode pixels that were never
+    /// there. Enumerates the page's image XObjects (nested form XObjects are not walked — an
+    /// unrecognized page simply gets no cap, which is the pre-existing behavior) and reports the
+    /// largest against the page's long edge. `nil` means "no image found": vector/text pages have
+    /// no native resolution and are rendered at the full DPI target, which is where the extra
+    /// resolution pays off most.
+    private static func nativePixelsPerPoint(of cgPage: CGPDFPage, longestPointEdge: CGFloat) -> CGFloat? {
+        guard longestPointEdge > 0,
+              let pageDict = cgPage.dictionary
+        else { return nil }
+        var resources: CGPDFDictionaryRef?
+        guard CGPDFDictionaryGetDictionary(pageDict, "Resources", &resources), let resources else { return nil }
+        var xobjects: CGPDFDictionaryRef?
+        guard CGPDFDictionaryGetDictionary(resources, "XObject", &xobjects), let xobjects else { return nil }
+
+        // CGPDFDictionaryApplyFunction hands each entry to a C function, so the running maximum
+        // travels through an unmanaged box rather than a capturing closure.
+        final class Box { var maxPixels: CGFloat = 0 }
+        let box = Box()
+        CGPDFDictionaryApplyFunction(xobjects, { _, object, info in
+            guard let info else { return }
+            let box = Unmanaged<Box>.fromOpaque(info).takeUnretainedValue()
+            var stream: CGPDFStreamRef?
+            guard CGPDFObjectGetValue(object, .stream, &stream), let stream,
+                  let dict = CGPDFStreamGetDictionary(stream)
+            else { return }
+            var subtype: UnsafePointer<Int8>?
+            guard CGPDFDictionaryGetName(dict, "Subtype", &subtype), let subtype,
+                  String(cString: subtype) == "Image"
+            else { return }
+            var width: CGPDFInteger = 0
+            var height: CGPDFInteger = 0
+            guard CGPDFDictionaryGetInteger(dict, "Width", &width),
+                  CGPDFDictionaryGetInteger(dict, "Height", &height)
+            else { return }
+            box.maxPixels = max(box.maxPixels, CGFloat(max(width, height)))
+        }, Unmanaged.passUnretained(box).toOpaque())
+
+        guard box.maxPixels > 0 else { return nil }
+        return box.maxPixels / longestPointEdge
     }
 
     /// Rebuilds every page as a bitmap at the resolution implied by `quality` and returns the new PDF
@@ -203,7 +267,7 @@ extension PDFToolkit {
         isCancelled: (@Sendable () -> Bool)? = nil
     ) throws -> Data {
         let q = min(1, max(0.05, quality))
-        let maxPixel = CGFloat(600 + (2400 - 600) * q)
+        let targetScale = compressedPageDPI(for: q) / 72
 
         let pdfData = NSMutableData()
         guard let consumer = CGDataConsumer(data: pdfData as CFMutableData),
@@ -229,8 +293,17 @@ extension PDFToolkit {
                     // guard right below and throw, so a page that can't be rebuilt is an error.
                     throw PDFOperationError.compressionFailed
                 }
+                // Resolution budget for this page: the quality's DPI target, held under the page's
+                // own native image resolution (no bytes spent re-encoding detail the source never
+                // had) and under the absolute pixel ceiling. `rasterGeometry` divides the budget by
+                // the long edge, so handing it a pixel count is how a scale is requested; upscaling
+                // past 1 px/pt is exactly the point here, so `allowUpscale` is on.
+                let longest = max(page.bounds(for: .cropBox).width, page.bounds(for: .cropBox).height)
+                let nativeScale = nativePixelsPerPoint(of: cgPage, longestPointEdge: longest)
+                let scale = min(targetScale, nativeScale ?? targetScale)
+                let maxPixel = min(longest * scale, compressedPageMaxPixel)
                 guard
-                    let geometry = rasterGeometry(for: page, maxPixelDimension: maxPixel, allowUpscale: false),
+                    let geometry = rasterGeometry(for: page, maxPixelDimension: maxPixel, allowUpscale: true),
                     let bitmap = renderBitmap(page, cgPage: cgPage, geometry: geometry, redactionFills: []),
                     let jpeg = NSBitmapImageRep(cgImage: bitmap)
                         .representation(using: .jpeg, properties: [.compressionFactor: compressedPageJPEGFactor(for: q)]),

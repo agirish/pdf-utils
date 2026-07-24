@@ -179,6 +179,12 @@ Tests live in the sub-package:
 swift test --package-path Packages/PdfToolkit
 ```
 
+Most fixtures are written at run time, but a small committed corpus of real PDFs
+— a browser-produced document, a genuine fillable form inside a compressed
+cross-reference stream, a nested outline, rotated pages cropped off the origin, a
+scan, and both shapes of encryption — covers the corner cases Apple's own writer
+cannot produce. See [docs/testing-corpus.md](docs/testing-corpus.md).
+
 ## Repository layout
 
 ```
@@ -187,9 +193,11 @@ MacApp/                    # App target: entry point, dashboard, root shell, ass
 Packages/PdfToolkit/       # Shared library: tool UIs, PDF operations, settings, help
   Sources/PdfToolkit/
   Tests/PdfToolkitTests/   # The test suite (run with --package-path)
+    Corpus/                # Committed real PDFs — see docs/testing-corpus.md
 FinderExtension/           # Sandboxed FinderSync extension (right-click menu)
 Helper/                    # Unsandboxed menu-bar helper the extension hands work to
 scripts/build-app.sh       # Assembles + signs the full .app bundle
+scripts/corpus/            # Regenerates the committed real-PDF test corpus
 docs/                      # GitHub Pages site + screenshots
 ```
 

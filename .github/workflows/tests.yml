@@ -35,6 +35,27 @@ jobs:
           xcode-select -p
           swift --version
 
+      # The real-PDF corpus is committed, not generated at test time (see
+      # docs/testing-corpus.md) — CI must not depend on Chrome being installed.
+      # A file missing from the bundle would otherwise surface as an opaque
+      # fatalError deep inside the runner, so check it up front and say which.
+      - name: Check the real-PDF corpus is present
+        run: |
+          corpus=Packages/PdfToolkit/Tests/PdfToolkitTests/Corpus
+          expected="acroform-xrefstream.pdf chrome-article.pdf encrypted-user.pdf
+                    outline-nested.pdf owner-restricted.pdf rotated-cropped.pdf
+                    scanned-receipt.pdf"
+          missing=0
+          for f in $expected; do
+            if [[ -s "$corpus/$f" ]]; then
+              printf '  ok  %-28s %s bytes\n' "$f" "$(stat -f%z "$corpus/$f")"
+            else
+              echo "  MISSING or empty: $corpus/$f"
+              missing=1
+            fi
+          done
+          exit $missing
+
       # arch -arm64: the agent runs as the osx-x64 build under Rosetta (macOS 26
       # fork-bug dodge, see docs/ci.md); swift test inherits x86_64 from it and
       # then exits 1 despite every test passing. Forcing the payload native fixes

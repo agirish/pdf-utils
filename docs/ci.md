@@ -7,9 +7,14 @@ against).
 
 ## Scope
 
-- One package: `Packages/PdfToolkit` (606 tests across 58 suites as of this
+- One package: `Packages/PdfToolkit` (720 tests across 74 suites as of this
   writing) — the app's only test target. `swift test --package-path
   Packages/PdfToolkit`.
+- The **real-PDF corpus** (`docs/testing-corpus.md`) ships as a committed test
+  resource, so `RealCorpusTests` runs in CI like everything else — no Chrome, no
+  network, no generation step. A `Check the real-PDF corpus is present` step runs
+  before the suite so a file missing from the bundle names itself instead of
+  surfacing as an opaque `fatalError` inside the runner.
 - **No app-target step** (unlike SyncCloud's CI). The root `Package.swift` — the
   `PdfUtils` app plus the `PdfUtilsFinder` extension and `PdfUtilsHelper`
   executables — has no test target, and the app can't be built with

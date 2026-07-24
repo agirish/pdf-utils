@@ -66,6 +66,35 @@ import Testing
         #expect(previewPage.rotation == 90)
     }
 
+    @Test func loupeSourceRenderCarriesActualPageContent() throws {
+        // The loupe magnifies a PDFKit render of the page. It used to snapshot the PDFView with
+        // `cacheDisplay(in:to:)`, which cannot capture PDFView's CALayer-drawn page — the loupe showed
+        // an empty circle. Pin that the render path actually produces inked pixels.
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let url = dir.appendingPathComponent("content.pdf")
+        try PDFFixtures.writePDF(markers: ["LOUPE"], to: url)
+        let page = try #require(PDFDocument(url: url)?.page(at: 0))
+
+        let bounds = page.bounds(for: .cropBox)
+        let image = page.thumbnail(
+            of: NSSize(width: bounds.width * 2.5, height: bounds.height * 2.5),
+            for: .cropBox
+        )
+        #expect(image.size.width > 1 && image.size.height > 1)
+
+        let rep = try #require(image.tiffRepresentation.flatMap(NSBitmapImageRep.init(data:)))
+        var inked = 0
+        for x in stride(from: 0, to: rep.pixelsWide, by: 7) {
+            for y in stride(from: 0, to: rep.pixelsHigh, by: 7) {
+                guard let c = rep.colorAt(x: x, y: y)?.usingColorSpace(.deviceRGB) else { continue }
+                if c.redComponent + c.greenComponent + c.blueComponent < 2.7 { inked += 1 }
+            }
+        }
+        #expect(inked > 0, "the loupe's page render is blank — it would magnify nothing")
+    }
+
     @Test func topAndRightEdgeHandlesAreGrabbableOnlyAfterExpandingTheGrabRegion() {
         // The marquee's top and right handles sit exactly on the page's max edges. `CGRect.contains`
         // excludes the max-X/max-Y edges, so the old "press must be inside the page" gate rejected a

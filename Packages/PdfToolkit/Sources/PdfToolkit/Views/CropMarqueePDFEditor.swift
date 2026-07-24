@@ -149,6 +149,8 @@ struct CropMarqueePDFEditor: NSViewRepresentable {
             case resize(CropHandle)
         }
         private var dragKind: DragKind?
+        /// Cached loupe render, keyed by the page and its on-screen size — see `loupeSourceImage()`.
+        private var loupeSource: (page: PDFPage, size: CGSize, image: NSImage)?
         private var dragStartMouse: CGPoint = .zero
         private var dragStartRectView: CGRect = .zero
         /// True from a drag's `.began` to its `.ended`; suppresses the field→box sync so a live drag
@@ -245,9 +247,9 @@ struct CropMarqueePDFEditor: NSViewRepresentable {
                 // Bring up the loupe for edge/corner work: snapshot the page once (it doesn't move
                 // during a crop drag) and mark the point being dragged. Skipped for a whole-box move,
                 // where there's no single edge to zoom in on.
-                if loupeFocus(kind: hit, mouse: loc) != nil {
-                    overlay.loupeSnapshot = capturePageSnapshot()
-                    overlay.loupeFocusPoint = loupeFocus(kind: hit, mouse: loc)
+                if let focus = loupeFocus(kind: hit, mouse: loc) {
+                    overlay.loupeSnapshot = loupeSourceImage()
+                    overlay.loupeFocusPoint = focus
                 }
 
             case .changed:
@@ -290,14 +292,29 @@ struct CropMarqueePDFEditor: NSViewRepresentable {
             }
         }
 
-        /// A one-shot bitmap of the PDFView as displayed, so the loupe magnifies the page under the
-        /// handle without re-rendering per frame — the page is static for the length of a crop drag.
-        private func capturePageSnapshot() -> NSImage? {
-            guard let pdfView, pdfView.bounds.width > 1, pdfView.bounds.height > 1,
-                  let rep = pdfView.bitmapImageRepForCachingDisplay(in: pdfView.bounds) else { return nil }
-            pdfView.cacheDisplay(in: pdfView.bounds, to: rep)
-            let image = NSImage(size: pdfView.bounds.size)
-            image.addRepresentation(rep)
+        /// The page rendered for the loupe to magnify, cached across drags.
+        ///
+        /// Rendered with PDFKit rather than snapshotted off the `PDFView`: PDFView draws its page
+        /// through CALayer content, which `cacheDisplay(in:to:)` does not capture, so snapshotting
+        /// produced a blank bitmap and the loupe showed an empty circle. `thumbnail(of:for:.cropBox)`
+        /// renders the page exactly as displayed (rotation and crop applied), so it lines up 1:1 with
+        /// the page rect in view space. Rendered at the loupe's magnification so the zoom stays sharp,
+        /// and reused until the page or its on-screen size changes — a crop drag never changes either.
+        private func loupeSourceImage() -> NSImage? {
+            guard let pdfView, let page = activePage else { return nil }
+            let pageRect = pdfView.convert(page.bounds(for: .cropBox), from: page)
+            guard pageRect.width > 1, pageRect.height > 1 else { return nil }
+            if let cached = loupeSource, cached.page === page,
+               abs(cached.size.width - pageRect.width) < 0.5,
+               abs(cached.size.height - pageRect.height) < 0.5 {
+                return cached.image
+            }
+            let scale = CropMarqueeOverlayView.loupeMagnification
+            let image = page.thumbnail(
+                of: NSSize(width: pageRect.width * scale, height: pageRect.height * scale),
+                for: .cropBox
+            )
+            loupeSource = (page, pageRect.size, image)
             return image
         }
 
@@ -404,7 +421,8 @@ fileprivate final class CropMarqueeOverlayView: PDFViewSyncedOverlay {
     static let handleHitRadius: CGFloat = 18
 
     private static let loupeRadius: CGFloat = 58
-    private static let loupeMagnification: CGFloat = 2.5
+    /// Also the scale the loupe's page render is produced at, so magnifying it stays sharp.
+    static let loupeMagnification: CGFloat = 2.5
 
     weak var page: PDFPage?
     /// The selection in stored page space; the one source of truth the coordinator writes and reads.
@@ -454,14 +472,14 @@ fileprivate final class CropMarqueeOverlayView: PDFViewSyncedOverlay {
         }
 
         if let snapshot = loupeSnapshot, let focus = loupeFocusPoint {
-            drawLoupe(snapshot: snapshot, focus: focus, selView: selView)
+            drawLoupe(snapshot: snapshot, focus: focus, selView: selView, pageView: pageView)
         }
     }
 
     /// A circular magnifier of the page under the handle being dragged: the zoomed content, the crop
     /// edges (with the trimmed side dimmed, mirroring the main marquee), and a crosshair on the exact
     /// point — so the user can seat a crop right on the content instead of guessing at the page edge.
-    private func drawLoupe(snapshot: NSImage, focus: CGPoint, selView: CGRect) {
+    private func drawLoupe(snapshot: NSImage, focus: CGPoint, selView: CGRect, pageView: CGRect) {
         guard let ctx = NSGraphicsContext.current?.cgContext else { return }
         let r = Self.loupeRadius
         let mag = Self.loupeMagnification
@@ -481,12 +499,14 @@ fileprivate final class CropMarqueeOverlayView: PDFViewSyncedOverlay {
         NSColor.white.setFill()
         NSBezierPath(rect: circle).fill()
 
-        // Magnified page: map the focus point onto the loupe centre at `mag`.
+        // Magnified page: map the focus point onto the loupe centre at `mag`. The render covers exactly
+        // the page's on-screen rect, so drawing it there puts page content under the same view
+        // coordinates the handles use — the focus point then lands on the content it points at.
         ctx.saveGState()
         ctx.translateBy(x: lc.x, y: lc.y)
         ctx.scaleBy(x: mag, y: mag)
         ctx.translateBy(x: -focus.x, y: -focus.y)
-        snapshot.draw(in: CGRect(origin: .zero, size: snapshot.size), from: .zero, operation: .sourceOver, fraction: 1)
+        snapshot.draw(in: pageView, from: .zero, operation: .sourceOver, fraction: 1)
         ctx.restoreGState()
 
         // The selection mapped into the loupe: dim the trimmed side, stroke the crop edges, magnified.

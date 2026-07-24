@@ -2,6 +2,18 @@ import AppKit
 import PDFKit
 import SwiftUI
 
+/// `PDFPage` / `NSImage` aren't `Sendable`, but the loupe render hands a page to the PDF serial queue
+/// and an image back — single-threaded by that queue, so the transfer is safe (same pattern as
+/// `PDFDocumentBox` / `PDFPageThumbnail`).
+private struct LoupePageBox: @unchecked Sendable {
+    let page: PDFPage
+    init(_ page: PDFPage) { self.page = page }
+}
+private struct LoupeImageBox: @unchecked Sendable {
+    let image: NSImage
+    init(_ image: NSImage) { self.image = image }
+}
+
 /// The eight resize handles of a crop marquee, and the edges each one moves.
 private enum CropHandle: CaseIterable {
     case topLeft, top, topRight, right, bottomRight, bottom, bottomLeft, left
@@ -149,7 +161,7 @@ struct CropMarqueePDFEditor: NSViewRepresentable {
             case resize(CropHandle)
         }
         private var dragKind: DragKind?
-        /// Cached loupe render, keyed by the page and its on-screen size — see `loupeSourceImage()`.
+        /// Cached loupe render, keyed by the page and its on-screen size — see `refreshLoupeImage()`.
         private var loupeSource: (page: PDFPage, size: CGSize, image: NSImage)?
         private var dragStartMouse: CGPoint = .zero
         private var dragStartRectView: CGRect = .zero
@@ -194,13 +206,20 @@ struct CropMarqueePDFEditor: NSViewRepresentable {
 
         private func kind(at loc: CGPoint) -> DragKind {
             if let selView = selectionViewRect() {
-                // Nearest handle within grab range wins, so overlapping targets at a tiny selection
-                // resolve to the corner the press is actually closest to rather than iteration order.
+                // A press well inside the box moves it; the large grab radius would otherwise swallow
+                // the whole interior of a medium box and make it un-draggable. Boxes too small to have
+                // an interior (≲2× the grab radius per side) stay resize-only, which is fine — there's
+                // nothing to move there.
+                let radius = CropMarqueeOverlayView.handleHitRadius
+                let interior = selView.insetBy(dx: radius, dy: radius)
+                if interior.width > 0, interior.height > 0, interior.contains(loc) { return .move }
+                // Otherwise the nearest handle within grab range wins, so overlapping targets resolve
+                // to the corner the press is actually closest to rather than iteration order.
                 var best: (handle: CropHandle, distance: CGFloat)?
                 for handle in CropHandle.allCases {
                     let c = handle.center(in: selView)
                     let d = hypot(loc.x - c.x, loc.y - c.y)
-                    if d <= CropMarqueeOverlayView.handleHitRadius, d < (best?.distance ?? .greatestFiniteMagnitude) {
+                    if d <= radius, d < (best?.distance ?? .greatestFiniteMagnitude) {
                         best = (handle, d)
                     }
                 }
@@ -244,12 +263,11 @@ struct CropMarqueePDFEditor: NSViewRepresentable {
                 } else {
                     dragStartRectView = selectionViewRect() ?? CGRect(origin: loc, size: .zero)
                 }
-                // Bring up the loupe for edge/corner work: snapshot the page once (it doesn't move
-                // during a crop drag) and mark the point being dragged. Skipped for a whole-box move,
-                // where there's no single edge to zoom in on.
+                // Bring up the loupe for edge/corner work: mark the point being dragged and render the
+                // page (off-main, cached). Skipped for a whole-box move — no single edge to zoom in on.
                 if let focus = loupeFocus(kind: hit, mouse: loc) {
-                    overlay.loupeSnapshot = loupeSourceImage()
                     overlay.loupeFocusPoint = focus
+                    refreshLoupeImage()
                 }
 
             case .changed:
@@ -258,7 +276,8 @@ struct CropMarqueePDFEditor: NSViewRepresentable {
                 let newView = resolvedRect(kind: kind, current: loc, page: pageView)
                 let pageRect = pdfView.convert(newView, to: page)
                 overlay.selectionPageRect = pageRect
-                if overlay.loupeSnapshot != nil {
+                // Track the focus even before the render lands, so a late image uses the current point.
+                if overlay.loupeFocusPoint != nil {
                     overlay.loupeFocusPoint = loupeFocus(kind: kind, mouse: loc, selView: newView)
                 }
                 overlay.needsDisplay = true
@@ -292,30 +311,45 @@ struct CropMarqueePDFEditor: NSViewRepresentable {
             }
         }
 
-        /// The page rendered for the loupe to magnify, cached across drags.
+        /// Installs the loupe's magnified page image on the overlay, rendering it off the main thread.
         ///
-        /// Rendered with PDFKit rather than snapshotted off the `PDFView`: PDFView draws its page
-        /// through CALayer content, which `cacheDisplay(in:to:)` does not capture, so snapshotting
-        /// produced a blank bitmap and the loupe showed an empty circle. `thumbnail(of:for:.cropBox)`
-        /// renders the page exactly as displayed (rotation and crop applied), so it lines up 1:1 with
-        /// the page rect in view space. Rendered at the loupe's magnification so the zoom stays sharp,
-        /// and reused until the page or its on-screen size changes — a crop drag never changes either.
-        private func loupeSourceImage() -> NSImage? {
-            guard let pdfView, let page = activePage else { return nil }
+        /// The image is a PDFKit render of the page — NOT a `PDFView` snapshot: PDFView draws through
+        /// CALayer content that `cacheDisplay(in:to:)` can't capture, so snapshotting gave a blank
+        /// circle. `thumbnail(of:for:.cropBox)` renders the page exactly as displayed (rotation and
+        /// crop applied), so it lines up 1:1 with the page rect in view space, and is produced at the
+        /// loupe's magnification to stay sharp.
+        ///
+        /// A cached render for the current page/size is used immediately. Otherwise the render runs on
+        /// the `PDFBackgroundWork` serial queue — never the main thread, where a full-page
+        /// `thumbnail` at drag `.began` hitched the gesture and broke the "all PDFKit work is
+        /// serialized" invariant — and is installed when it lands, if a drag is still showing the
+        /// loupe. The page is static during a crop, so it's one render per page/zoom, reused after.
+        private func refreshLoupeImage() {
+            guard let overlay, let pdfView, let page = activePage else { return }
             let pageRect = pdfView.convert(page.bounds(for: .cropBox), from: page)
-            guard pageRect.width > 1, pageRect.height > 1 else { return nil }
+            guard pageRect.width > 1, pageRect.height > 1 else { return }
             if let cached = loupeSource, cached.page === page,
                abs(cached.size.width - pageRect.width) < 0.5,
                abs(cached.size.height - pageRect.height) < 0.5 {
-                return cached.image
+                overlay.loupeSnapshot = cached.image
+                return
             }
             let scale = CropMarqueeOverlayView.loupeMagnification
-            let image = page.thumbnail(
-                of: NSSize(width: pageRect.width * scale, height: pageRect.height * scale),
-                for: .cropBox
-            )
-            loupeSource = (page, pageRect.size, image)
-            return image
+            let size = NSSize(width: pageRect.width * scale, height: pageRect.height * scale)
+            let recordSize = pageRect.size
+            let pageBox = LoupePageBox(page)
+            Task { [weak self] in
+                guard let rendered = try? await PDFBackgroundWork.run({
+                    LoupeImageBox(pageBox.page.thumbnail(of: size, for: .cropBox))
+                }) else { return }
+                guard let self, self.activePage === pageBox.page else { return }
+                self.loupeSource = (pageBox.page, recordSize, rendered.image)
+                // Surface it only if a drag is still up (focus point set); a released drag clears it.
+                if self.overlay?.loupeFocusPoint != nil {
+                    self.overlay?.loupeSnapshot = rendered.image
+                    self.overlay?.needsDisplay = true
+                }
+            }
         }
 
         // MARK: Keyboard editing

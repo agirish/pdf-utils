@@ -125,6 +125,40 @@ import Testing
         #expect(enabled == false)
     }
 
+    @Test func interactivePreviewKeepsPageCountSoIndicesStayAlignedWithTheOriginal() throws {
+        // The marquee's page index is applied to the ORIGINAL file at crop time, so the preview copy
+        // must have exactly the same page count — a short copy would crop the wrong page.
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let url = dir.appendingPathComponent("multi.pdf")
+        _ = try PDFFixtures.writePDF(pageCount: 5, to: url)
+        let source = try #require(PDFDocument(url: url))
+
+        let preview = PDFToolkit.interactivePreviewDocument(from: source)
+        #expect(preview.pageCount == source.pageCount)
+    }
+
+    @Test func previewLoadCapsAnnotationCountingAtTheHeavyThreshold() throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let url = dir.appendingPathComponent("heavy.pdf")
+        try PDFFixtures.writePDF(markers: ["x"], to: url)
+        let doc = try #require(PDFDocument(url: url))
+        let page = try #require(doc.page(at: 0))
+        for i in 0..<400 {
+            let a = PDFAnnotation(bounds: CGRect(x: CGFloat(i), y: 0, width: 2, height: 2), forType: .square, withProperties: nil)
+            page.addAnnotation(a)
+        }
+
+        let load = InteractivePreviewLoad(document: doc)
+        // Counting stops once the threshold is crossed rather than tallying all 400.
+        #expect(load.isHeavy)
+        #expect(load.annotationCountCapped)
+        #expect(load.annotationCount >= 250)
+    }
+
     @Test func previewLoadCountsAnnotationsAndFlagsHeavy() throws {
         let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)

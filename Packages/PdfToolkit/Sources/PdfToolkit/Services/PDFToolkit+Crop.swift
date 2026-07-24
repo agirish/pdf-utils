@@ -242,7 +242,13 @@ extension PDFToolkit {
     static func interactivePreviewDocument(from source: PDFDocument) -> PDFDocument {
         let output = PDFDocument()
         for i in 0..<source.pageCount {
-            guard let page = source.page(at: i), let copy = page.copy() as? PDFPage else { continue }
+            guard let page = source.page(at: i), let copy = page.copy() as? PDFPage else {
+                // A page we can't copy would leave the preview SHORTER than the source, and the crop
+                // maps the marquee's page index onto the ORIGINAL file — so a dropped page would crop
+                // the wrong page. Correctness beats the strip here: fall back to the source document
+                // (the form/annotation cost the strip avoids is moot on an already-degenerate file).
+                return source
+            }
             for annotation in copy.annotations {
                 copy.removeAnnotation(annotation)
             }

@@ -192,24 +192,32 @@ struct CropMarqueePDFEditor: NSViewRepresentable {
 
         private func kind(at loc: CGPoint) -> DragKind {
             if let selView = selectionViewRect() {
+                // Nearest handle within grab range wins, so overlapping targets at a tiny selection
+                // resolve to the corner the press is actually closest to rather than iteration order.
+                var best: (handle: CropHandle, distance: CGFloat)?
                 for handle in CropHandle.allCases {
                     let c = handle.center(in: selView)
-                    let hit = CGRect(x: c.x - CropMarqueeOverlayView.handleSide,
-                                     y: c.y - CropMarqueeOverlayView.handleSide,
-                                     width: CropMarqueeOverlayView.handleSide * 2,
-                                     height: CropMarqueeOverlayView.handleSide * 2)
-                    if hit.contains(loc) { return .resize(handle) }
+                    let d = hypot(loc.x - c.x, loc.y - c.y)
+                    if d <= CropMarqueeOverlayView.handleHitRadius, d < (best?.distance ?? .greatestFiniteMagnitude) {
+                        best = (handle, d)
+                    }
                 }
+                if let best { return .resize(best.handle) }
                 if selView.contains(loc) { return .move }
             }
             return .create
         }
 
         func gestureRecognizerShouldBegin(_ gestureRecognizer: NSGestureRecognizer) -> Bool {
-            // Only start a marquee when the press lands on the page itself, never in the grey margin.
             guard let pdfView, let page = activePage else { return false }
+            let loc = gestureRecognizer.location(in: pdfView)
+            // A press on a handle must start the drag even when it lands a hair off the page — the
+            // top and right handles sit exactly on the page's max edges, which `CGRect.contains`
+            // treats as outside, so grabbing them was impossible. Accept the whole page grown by the
+            // handle grab radius so every edge and corner handle is reachable from the page boundary.
             let pageView = pdfView.convert(page.bounds(for: .cropBox), from: page)
-            return pageView.contains(gestureRecognizer.location(in: pdfView))
+            return pageView.insetBy(dx: -CropMarqueeOverlayView.handleHitRadius,
+                                    dy: -CropMarqueeOverlayView.handleHitRadius).contains(loc)
         }
 
         @objc func handlePan(_ g: NSPanGestureRecognizer) {
@@ -234,6 +242,13 @@ struct CropMarqueePDFEditor: NSViewRepresentable {
                 } else {
                     dragStartRectView = selectionViewRect() ?? CGRect(origin: loc, size: .zero)
                 }
+                // Bring up the loupe for edge/corner work: snapshot the page once (it doesn't move
+                // during a crop drag) and mark the point being dragged. Skipped for a whole-box move,
+                // where there's no single edge to zoom in on.
+                if loupeFocus(kind: hit, mouse: loc) != nil {
+                    overlay.loupeSnapshot = capturePageSnapshot()
+                    overlay.loupeFocusPoint = loupeFocus(kind: hit, mouse: loc)
+                }
 
             case .changed:
                 guard let kind = dragKind else { return }
@@ -241,18 +256,49 @@ struct CropMarqueePDFEditor: NSViewRepresentable {
                 let newView = resolvedRect(kind: kind, current: loc, page: pageView)
                 let pageRect = pdfView.convert(newView, to: page)
                 overlay.selectionPageRect = pageRect
+                if overlay.loupeSnapshot != nil {
+                    overlay.loupeFocusPoint = loupeFocus(kind: kind, mouse: loc, selView: newView)
+                }
                 overlay.needsDisplay = true
                 parent.insets = PDFToolkit.insets(from: pageRect, rotation: page.rotation, in: page.bounds(for: .cropBox))
 
             case .ended, .cancelled:
                 isDragging = false
                 dragKind = nil
+                overlay.loupeSnapshot = nil
+                overlay.loupeFocusPoint = nil
+                overlay.needsDisplay = true
                 // Flip LAST — the tool commits the settled drag when this goes false.
                 parent.isInteracting = false
 
             default:
                 break
             }
+        }
+
+        // MARK: Loupe
+
+        /// The point the loupe magnifies for a drag: the corner/edge handle being dragged, or the live
+        /// corner of a freshly drawn box. Nil for a whole-box move — there's no single edge to zoom.
+        private func loupeFocus(kind: DragKind, mouse loc: CGPoint, selView: CGRect? = nil) -> CGPoint? {
+            switch kind {
+            case .move: return nil
+            case .create: return loc
+            case .resize(let handle):
+                let rect = selView ?? selectionViewRect()
+                return rect.map { handle.center(in: $0) } ?? loc
+            }
+        }
+
+        /// A one-shot bitmap of the PDFView as displayed, so the loupe magnifies the page under the
+        /// handle without re-rendering per frame — the page is static for the length of a crop drag.
+        private func capturePageSnapshot() -> NSImage? {
+            guard let pdfView, pdfView.bounds.width > 1, pdfView.bounds.height > 1,
+                  let rep = pdfView.bitmapImageRepForCachingDisplay(in: pdfView.bounds) else { return nil }
+            pdfView.cacheDisplay(in: pdfView.bounds, to: rep)
+            let image = NSImage(size: pdfView.bounds.size)
+            image.addRepresentation(rep)
+            return image
         }
 
         // MARK: Keyboard editing
@@ -351,12 +397,24 @@ struct CropMarqueePDFEditor: NSViewRepresentable {
 /// outside the selection, the selection border, and the eight resize handles. Hit-testing passes
 /// through so the `PDFView`'s pan recognizer receives every event (the coordinator drives edits).
 fileprivate final class CropMarqueeOverlayView: PDFViewSyncedOverlay {
-    static let handleSide: CGFloat = 6
+    /// Half-size of a drawn knob.
+    static let handleSide: CGFloat = 7
+    /// Grab radius for hit-testing — far larger than the knob so corners and edges (including the
+    /// ones flush with the page boundary) are easy to catch. See `Coordinator.kind(at:)`.
+    static let handleHitRadius: CGFloat = 18
+
+    private static let loupeRadius: CGFloat = 58
+    private static let loupeMagnification: CGFloat = 2.5
 
     weak var page: PDFPage?
     /// The selection in stored page space; the one source of truth the coordinator writes and reads.
     var selectionPageRect: CGRect?
     var accent: NSColor = .systemGreen
+
+    /// While a corner/edge drag is live: a still of the page to magnify, and the point to centre on.
+    /// Both nil at rest and during a whole-box move, so the loupe shows only when trimming an edge.
+    var loupeSnapshot: NSImage?
+    var loupeFocusPoint: CGPoint?
 
     override func hitTest(_ point: NSPoint) -> NSView? { nil }
     override var isFlipped: Bool { false }
@@ -394,5 +452,70 @@ fileprivate final class CropMarqueeOverlayView: PDFViewSyncedOverlay {
             path.lineWidth = 1.5
             path.stroke()
         }
+
+        if let snapshot = loupeSnapshot, let focus = loupeFocusPoint {
+            drawLoupe(snapshot: snapshot, focus: focus, selView: selView)
+        }
+    }
+
+    /// A circular magnifier of the page under the handle being dragged: the zoomed content, the crop
+    /// edges (with the trimmed side dimmed, mirroring the main marquee), and a crosshair on the exact
+    /// point — so the user can seat a crop right on the content instead of guessing at the page edge.
+    private func drawLoupe(snapshot: NSImage, focus: CGPoint, selView: CGRect) {
+        guard let ctx = NSGraphicsContext.current?.cgContext else { return }
+        let r = Self.loupeRadius
+        let mag = Self.loupeMagnification
+        let gap: CGFloat = 26
+        let margin: CGFloat = 10
+
+        // Park the loupe off the focus so the cursor never hides it; flip and clamp to stay on-screen.
+        var lc = CGPoint(x: focus.x - (r + gap), y: focus.y + (r + gap))
+        if lc.x - r < margin { lc.x = focus.x + (r + gap) }
+        if lc.y + r > bounds.maxY - margin { lc.y = focus.y - (r + gap) }
+        lc.x = min(max(lc.x, r + margin), bounds.maxX - r - margin)
+        lc.y = min(max(lc.y, r + margin), bounds.maxY - r - margin)
+        let circle = CGRect(x: lc.x - r, y: lc.y - r, width: 2 * r, height: 2 * r)
+
+        ctx.saveGState()
+        NSBezierPath(ovalIn: circle).addClip()
+        NSColor.white.setFill()
+        NSBezierPath(rect: circle).fill()
+
+        // Magnified page: map the focus point onto the loupe centre at `mag`.
+        ctx.saveGState()
+        ctx.translateBy(x: lc.x, y: lc.y)
+        ctx.scaleBy(x: mag, y: mag)
+        ctx.translateBy(x: -focus.x, y: -focus.y)
+        snapshot.draw(in: CGRect(origin: .zero, size: snapshot.size), from: .zero, operation: .sourceOver, fraction: 1)
+        ctx.restoreGState()
+
+        // The selection mapped into the loupe: dim the trimmed side, stroke the crop edges, magnified.
+        let tsel = CGRect(x: lc.x + mag * (selView.minX - focus.x),
+                          y: lc.y + mag * (selView.minY - focus.y),
+                          width: selView.width * mag,
+                          height: selView.height * mag)
+        let dim = NSBezierPath(rect: circle)
+        dim.append(NSBezierPath(rect: tsel))
+        dim.windingRule = .evenOdd
+        NSColor(calibratedWhite: 0, alpha: 0.4).setFill()
+        dim.fill()
+        accent.setStroke()
+        let edges = NSBezierPath(rect: tsel)
+        edges.lineWidth = 1.5
+        edges.stroke()
+        ctx.restoreGState()  // drop the circular clip
+
+        // Crosshair on the exact focus, then a white halo + accent ring so the loupe reads over anything.
+        accent.withAlphaComponent(0.9).setStroke()
+        let cross = NSBezierPath()
+        cross.move(to: CGPoint(x: lc.x - 8, y: lc.y)); cross.line(to: CGPoint(x: lc.x + 8, y: lc.y))
+        cross.move(to: CGPoint(x: lc.x, y: lc.y - 8)); cross.line(to: CGPoint(x: lc.x, y: lc.y + 8))
+        cross.lineWidth = 1
+        cross.stroke()
+
+        NSColor.white.withAlphaComponent(0.9).setStroke()
+        let halo = NSBezierPath(ovalIn: circle.insetBy(dx: -1, dy: -1)); halo.lineWidth = 2; halo.stroke()
+        accent.setStroke()
+        let ring = NSBezierPath(ovalIn: circle.insetBy(dx: 0.75, dy: 0.75)); ring.lineWidth = 2; ring.stroke()
     }
 }

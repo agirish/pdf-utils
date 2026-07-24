@@ -66,6 +66,23 @@ import Testing
         #expect(previewPage.rotation == 90)
     }
 
+    @Test func topAndRightEdgeHandlesAreGrabbableOnlyAfterExpandingTheGrabRegion() {
+        // The marquee's top and right handles sit exactly on the page's max edges. `CGRect.contains`
+        // excludes the max-X/max-Y edges, so the old "press must be inside the page" gate rejected a
+        // grab right on those handles — the bug behind "crop doesn't work from the top-left/right".
+        let page = CGRect(x: 0, y: 0, width: 100, height: 200)
+        let topRight = CGPoint(x: page.maxX, y: page.maxY)
+        #expect(page.contains(topRight) == false)
+
+        // Growing the page by the handle grab radius (18 pt, CropMarqueeOverlayView.handleHitRadius)
+        // makes every edge and corner handle reachable, including from a hair off the page.
+        let grabRadius: CGFloat = 18
+        let grabbable = page.insetBy(dx: -grabRadius, dy: -grabRadius)
+        #expect(grabbable.contains(topRight))
+        #expect(grabbable.contains(CGPoint(x: page.minX, y: page.maxY)))   // top-left
+        #expect(grabbable.contains(CGPoint(x: page.maxX, y: page.midY)))   // right-mid
+    }
+
     @MainActor
     @Test func disableLiveTextAnalysisTurnsOffDocumentAnalysis() throws {
         let pdfView = PDFView()

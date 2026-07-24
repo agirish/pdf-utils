@@ -51,6 +51,11 @@ struct CropToolView: View {
     // Drag-to-crop: a full document loaded on demand (only this mode needs an interactive PDFView),
     // the page the marquee is drawn on, and the fit-to-view zoom.
     @State private var pdfDocument: PDFDocument?
+    /// The file path whose display copy is currently mounted in the marquee. Guards the load against
+    /// re-running for a file already loaded: `.task(id:)` can fire repeatedly, and rebuilding a fresh
+    /// `PDFDocument` each time swapped the live `PDFView`'s document ~20×/s, which never let SwiftUI
+    /// layout settle — a 100%-CPU spin that left the pane stuck on "Opening…".
+    @State private var loadedInteractivePath: String?
     @State private var dragPageIndex = 0
     @State private var dragZoom: CGFloat = 1
 
@@ -554,9 +559,19 @@ struct CropToolView: View {
     /// previous document. A locked/corrupt file is left for the thumbnail loader and the save path to
     /// report — this pane just stays on its "Opening…"/empty state rather than double-alerting.
     private func loadInteractiveDoc() async {
+        guard let url = inputURL else {
+            pdfDocument = nil
+            loadedInteractivePath = nil
+            dragPageIndex = 0
+            return
+        }
+        // Already showing this file's display copy: don't rebuild it. `.task(id:)` can re-fire while
+        // the pane is up, and each rebuild swapped the PDFView's document and retriggered a layout
+        // pass — 20+ times a second on a heavy scan, a spin that never settled. Load once per file.
+        if loadedInteractivePath == url.path, pdfDocument != nil { return }
         pdfDocument = nil
+        loadedInteractivePath = nil
         dragPageIndex = 0
-        guard let url = inputURL else { return }
         do {
             // Hand the marquee a display-only copy: forms and annotations stripped so a heavy
             // scanned form can't set off PDFKit's form-filling thread storm + Vision Live-Text pass
@@ -576,6 +591,7 @@ struct CropToolView: View {
             result.1?.log(tool: Tool.crop.title, url: url, stripped: true)
             if let doc = result.0.document, doc.pageCount > 0 {
                 pdfDocument = doc
+                loadedInteractivePath = url.path
             }
         } catch is CancellationError {
             // Superseded by another selection; the newer load owns the state.

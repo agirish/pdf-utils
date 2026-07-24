@@ -137,4 +137,11 @@ import Foundation
         #expect(pw == "open")
         #expect(BatchOperation.removePasswordConfig(currentPassword: "") == nil)
     }
+
+    @Test func removePasswordRunsWithNoEntryWhenThePasswordIsUnused() {
+        // Restrictions-only files hide the field entirely, so an empty entry must still be runnable.
+        guard case .removePassword = BatchOperation.removePasswordConfig(currentPassword: "", passwordUnused: true) else {
+            Issue.record("expected .removePassword"); return
+        }
+    }
 }

@@ -377,7 +377,7 @@ extension Tool {
                 controls: [
                     ("Add password / Remove password", "Switches between encrypting a PDF and stripping the password from one."),
                     ("New / Confirm password", "The password required to open the file, entered twice to catch typos."),
-                    ("Current password", "The password that currently opens the PDF you're unlocking."),
+                    ("Current password", "The password that currently opens the PDF you're unlocking. It disappears for a file that only restricts editing — that file already opens without a password, so none is asked for or checked."),
                     ("Protect & save… / Remove password & save…", "Writes the encrypted or decrypted copy; the original file is unchanged."),
                     ("Run on N files", "Applies the same password to every queued PDF at once; results follow your Save location, and Show in Finder reveals them."),
                 ],
@@ -385,6 +385,7 @@ extension Tool {
                     "There is no password recovery — if you forget an Add-password password, the file cannot be opened.",
                     "In a batch, the one password you enter is applied to every file.",
                     "Removing a password only works on files you can already open with their current password.",
+                    "Restrict-editing protection is different: the PDF format leaves those restrictions up to each reader to honor, so they aren't enforced by encryption. Any PDF app can lift them, and Remove password does so without asking for the owner password — there is no way to check one on a file that already opens.",
                     "Removing a password rebuilds the file: pages, bookmarks, and document info carry over, but attachments do not, and an interactive form stops working — the fields stay visible and keep their values, yet no reader will treat them as a fillable form again.",
                 ]
             )

@@ -70,6 +70,25 @@ extension ProtectionOptions {
     }
 }
 
+/// How a file on disk is protected, as far as removing that protection is concerned.
+///
+/// The distinction matters because the two states are enforced very differently. A `lockedToOpen`
+/// file is genuinely encrypted against the reader: without the user password its content can't be
+/// decoded at all, so Remove-password must verify the secret before it can do anything. A
+/// `restrictedOnly` file — what Add-password's "Restrict editing" style writes — opens and decodes
+/// with no password; the permission bits are a *request* to conforming readers, not encryption. Any
+/// PDF reader can already read, copy and re-emit those pages, and PDFKit offers no way to check an
+/// owner password on a document that isn't locked. So Remove-password can't verify anything there,
+/// and the UI says so rather than asking for a password it will silently ignore.
+enum PDFEncryptionState: Sendable {
+    /// No encryption dictionary — there is nothing to remove.
+    case none
+    /// A user password is required to open the file (PDFKit reports `isLocked`).
+    case lockedToOpen
+    /// Encrypted, but it opens without a password: owner restrictions only, which are advisory.
+    case restrictedOnly
+}
+
 /// A decoded logo carried by value so ``WatermarkOptions`` stays `Sendable` across the PDF serial
 /// queue and can be snapshotted into a batch operation. The `CGImage` is immutable and only ever
 /// read (drawn), so `@unchecked Sendable` is safe — nothing mutates it after decode.
@@ -708,9 +727,24 @@ public enum PDFToolkit {
         try writeOutput(try removePasswordData(inputURL: inputURL, password: password), to: outputURL)
     }
 
-    /// In-memory core of ``removePassword(inputURL:outputURL:password:)``. If the source is locked
-    /// it is unlocked with `password` first (wrong password → `incorrectPassword`); a source that
-    /// isn't encrypted at all throws `notEncrypted` so the tool can say there's nothing to remove.
+    /// The protection state of the file at `inputURL`, or ``PDFEncryptionState/none`` if it can't be
+    /// opened at all (callers surface the real failure when they go to do the work).
+    static func encryptionState(of inputURL: URL) -> PDFEncryptionState {
+        guard let doc = PDFDocument(url: inputURL) else { return .none }
+        if doc.isLocked { return .lockedToOpen }
+        return doc.isEncrypted ? .restrictedOnly : .none
+    }
+
+    /// In-memory core of ``removePassword(inputURL:outputURL:password:)``. A source that isn't
+    /// encrypted at all throws `notEncrypted` so the tool can say there's nothing to remove.
+    ///
+    /// `password` is only consulted for a ``PDFEncryptionState/lockedToOpen`` source, where it has to
+    /// decrypt the content (wrong password → `incorrectPassword`). For a ``PDFEncryptionState/restrictedOnly``
+    /// source it is **ignored, by necessity**: the document already opened without it, and PDFKit has
+    /// no API to verify an owner password on an unlocked document. Nothing is being circumvented —
+    /// owner restrictions are advisory and any reader can already do this — but the caller must not
+    /// present the field as if it were checked. See ``PDFEncryptionState``, and the disclosure in
+    /// `ProtectToolView`.
     internal static func removePasswordData(inputURL: URL, password: String) throws -> Data {
         guard let doc = PDFDocument(url: inputURL) else {
             throw PDFOperationError.couldNotOpen(inputURL)

@@ -70,8 +70,12 @@ extension BatchOperation {
     }
 
     /// Protect · Remove password: `nil` until a current password is entered. Mirrors `ProtectToolView`.
-    static func removePasswordConfig(currentPassword: String) -> BatchOperation? {
-        guard !currentPassword.isEmpty else { return nil }
+    ///
+    /// `passwordUnused` is the one exception: when every queued file carries owner restrictions only
+    /// (``PDFEncryptionState/restrictedOnly``), no password can be verified or is needed, the tool
+    /// hides the field, and an empty entry must still be runnable.
+    static func removePasswordConfig(currentPassword: String, passwordUnused: Bool = false) -> BatchOperation? {
+        guard passwordUnused || !currentPassword.isEmpty else { return nil }
         return .removePassword(password: currentPassword)
     }
 }

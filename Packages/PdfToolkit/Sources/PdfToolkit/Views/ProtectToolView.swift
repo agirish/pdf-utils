@@ -45,6 +45,11 @@ struct ProtectToolView: View {
     /// password can be checked before it locks a file with no recovery.
     @State private var showPasswords = false
 
+    /// True once detection has confirmed every queued file is ``PDFEncryptionState/restrictedOnly``.
+    /// Those files open without a password, so Remove-password neither needs nor can verify one — the
+    /// field would be theater. Nil while detection hasn't run for the current queue.
+    @State private var passwordUnused: Bool?
+
     @State private var busy = false
     @State private var alertMessage: String?
     @State private var showExporter = false
@@ -73,7 +78,7 @@ struct ProtectToolView: View {
         case .protect:
             return .encryptConfig(restrictEditing: restrictEditing, newPassword: newPassword, confirmPassword: confirmPassword)
         case .remove:
-            return .removePasswordConfig(currentPassword: currentPassword)
+            return .removePasswordConfig(currentPassword: currentPassword, passwordUnused: passwordUnused == true)
         }
     }
 
@@ -221,8 +226,27 @@ struct ProtectToolView: View {
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             case .remove:
-                passwordField("Current password", text: $currentPassword, prompt: "The password that opens this PDF")
-                showPasswordToggle
+                // A restrictions-only file opens without a password, and PDFKit can't check an owner
+                // password on a document that isn't locked. Asking for one and then ignoring it would
+                // tell the user their entry was verified, so the field goes away and the banner
+                // explains what's actually being removed.
+                if passwordUnused == true {
+                    Label {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("No password needed")
+                                .font(.subheadline.weight(.semibold))
+                            Text("This PDF already opens without a password — it only carries editing restrictions, which the PDF format leaves up to each reader to honor. They can be removed without the owner password, so none is asked for or checked.")
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+                        }
+                    } icon: {
+                        Image(systemName: "info.circle")
+                    }
+                    .fixedSize(horizontal: false, vertical: true)
+                } else {
+                    passwordField("Current password", text: $currentPassword, prompt: "The password that opens this PDF")
+                    showPasswordToggle
+                }
                 Label("The saved copy will open without any password.", systemImage: "lock.open")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
@@ -230,6 +254,34 @@ struct ProtectToolView: View {
         }
         .padding(16)
         .formCard()
+        .task(id: removalDetectionKey) {
+            await refreshPasswordUsage()
+        }
+    }
+
+    /// Re-runs detection whenever the mode or the queued file set changes.
+    private var removalDetectionKey: String {
+        mode == .remove ? runner.items.map(\.url.path).joined(separator: "\u{1}") : ""
+    }
+
+    /// Classifies the queued files on the PDF serial queue (opening documents must not happen on the
+    /// main actor — see ``PDFBackgroundWork``). The password is only pointless when *every* file is
+    /// restrictions-only; a mixed queue still has a locked file that needs one.
+    private func refreshPasswordUsage() async {
+        guard mode == .remove, !runner.items.isEmpty else {
+            passwordUnused = nil
+            return
+        }
+        let urls = runner.items.map(\.url)
+        // A failed detection falls back to false: keep asking for the password rather than dropping
+        // the field on a file that may well need one.
+        let allRestricted = (try? await PDFBackgroundWork.run {
+            urls.allSatisfy { url in
+                (try? url.withSecurityScopedAccess { PDFToolkit.encryptionState(of: url) }) == .restrictedOnly
+            }
+        }) ?? false
+        guard !Task.isCancelled else { return }
+        passwordUnused = allRestricted
     }
 
     private var newPasswordLabel: String {
@@ -339,7 +391,11 @@ struct ProtectToolView: View {
                 ? ("Editing restricted", "The saved copy opens and prints freely; copying and editing need the password.")
                 : ("Password added", "The saved copy opens only with the password you set.")
         case .remove:
-            return ("Password removed", "The saved copy opens without any password.")
+            // Say what was actually taken off. On a restrictions-only file there was no password to
+            // remove, and claiming otherwise would overstate what the run did.
+            return passwordUnused == true
+                ? ("Restrictions removed", "The saved copy carries no editing restrictions.")
+                : ("Password removed", "The saved copy opens without any password.")
         }
     }
 }

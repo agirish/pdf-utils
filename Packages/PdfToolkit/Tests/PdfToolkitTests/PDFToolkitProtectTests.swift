@@ -161,6 +161,45 @@ import PDFKit
         }?.kind == "notEncrypted")
     }
 
+    // MARK: Encryption state (what Remove-password can actually verify)
+
+    /// Writes a file carrying owner restrictions only — it opens with no password.
+    private func makeRestricted(_ dir: FixtureDir) throws -> URL {
+        let plain = dir.url("plain.pdf"), restricted = dir.url("restricted.pdf")
+        try PDFFixtures.writePDF(pageCount: 2, to: plain)
+        try PDFToolkit.encryptData(inputURL: plain, options: .addPassword(restrictEditing: true, password: "owner"))
+            .write(to: restricted)
+        return restricted
+    }
+
+    @Test func encryptionStateSeparatesLockedFromRestrictionsOnly() throws {
+        let dir = FixtureDir()
+        let plain = dir.url("plain.pdf")
+        try PDFFixtures.writePDF(pageCount: 1, to: plain)
+        let (_, locked) = try makeLocked(dir, password: "secret")
+
+        #expect(PDFToolkit.encryptionState(of: plain) == PDFEncryptionState.none)
+        #expect(PDFToolkit.encryptionState(of: locked) == .lockedToOpen)
+        #expect(PDFToolkit.encryptionState(of: try makeRestricted(dir)) == .restrictedOnly)
+    }
+
+    @Test func removePasswordIgnoresTheSecretOnARestrictionsOnlyFile() throws {
+        // Pinning the honest truth rather than a guarantee: the file already opens without a
+        // password, and PDFKit can't verify an owner password on an unlocked document, so any entry
+        // (including none) does the same thing. The UI must therefore not ask for one — see
+        // `ProtectToolView`'s `passwordUnused`.
+        let dir = FixtureDir()
+        let restricted = try makeRestricted(dir)
+
+        for (name, secret) in [("empty", ""), ("wrong", "definitely-not-the-owner-password")] {
+            let out = dir.url("out-\(name).pdf")
+            try PDFToolkit.removePassword(inputURL: restricted, outputURL: out, password: secret)
+            let doc = try #require(PDFDocument(url: out))
+            #expect(!doc.isEncrypted)
+            #expect(doc.pageCount == 2)
+        }
+    }
+
     @Test func removePasswordCarriesTheInfoDictionaryIntoTheDecryptedCopy() throws {
         // The rebuild that sheds encryption must not shed the document info with it.
         let dir = FixtureDir()

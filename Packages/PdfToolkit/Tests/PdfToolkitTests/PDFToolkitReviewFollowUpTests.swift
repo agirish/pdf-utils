@@ -164,6 +164,33 @@ struct PDFToolkitReviewFollowUpTests {
         }
     }
 
+    /// The bound carries a margin: a save is either meaningfully smaller (under 95% of the source)
+    /// or it is the source, byte for byte. Nothing in between ships.
+    ///
+    /// "Not bigger than the input" alone let a pointless save through — a 600-dpi JPEG2000 scan
+    /// re-encoded at the top of the range came out 0.3% smaller and at less than half the linear
+    /// resolution, and was written anyway. Stated as an invariant rather than against one contrived
+    /// fixture, so it holds for whatever the ramp produces: a lean vector page (which inflates) and a
+    /// genuine raster page (which compresses well) must both land on one side or the other.
+    @Test func boundedCompressIsEitherWorthwhileOrTheOriginal() throws {
+        let dir = FixtureDir()
+        let lean = dir.url("lean.pdf")
+        let scan = dir.url("scan.pdf")
+        try PDFFixtures.writePDF(pageCount: 3, to: lean)
+        try PDFFixtures.rasterize(lean, to: scan, quality: 1.0)
+
+        for url in [lean, scan] {
+            let original = try Data(contentsOf: url)
+            for quality in [0.2, 0.5, 0.85, 1.0] {
+                let bounded = try PDFToolkit.compressDataBounded(inputURL: url, quality: quality)
+                if bounded == original { continue }
+                let detail = "\(url.lastPathComponent) at quality \(quality) saved a \(bounded.count)-byte "
+                    + "file over a \(original.count)-byte source — inside the margin, so the original should have won"
+                #expect(Double(bounded.count) < Double(original.count) * 0.95, Comment(rawValue: detail))
+            }
+        }
+    }
+
     @Test func boundedCompressPassesTheSourceThroughUnchangedWhenItWins() throws {
         let dir = FixtureDir()
         let url = dir.url("lean.pdf")

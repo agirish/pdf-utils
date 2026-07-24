@@ -32,7 +32,9 @@ extension PDFToolkit {
     }
 
     /// ``compressData(inputURL:quality:onProgress:isCancelled:)`` bounded by the input's size — the
-    /// variant every path that actually WRITES a file uses.
+    /// variant every path that actually WRITES a file uses. The bound has a margin
+    /// (`worthwhileCompressionRatio`): a result that isn't meaningfully smaller is not worth the
+    /// quality it costs, so the source passes through instead.
     ///
     /// Rasterizing a lean vector/text PDF can *inflate* it, so quality mode could hand back a
     /// "compressed" file larger than the original. `compressToTargetData` has always had this
@@ -55,11 +57,25 @@ extension PDFToolkit {
         )
         // The count, not the bytes: the source is only read when it actually wins.
         guard let sourceBytes = try? inputURL.resourceValues(forKeys: [.fileSizeKey]).fileSize,
-              compressed.count >= sourceBytes,
+              compressed.count >= Int(Double(sourceBytes) * worthwhileCompressionRatio),
               let original = try? Data(contentsOf: inputURL)
         else { return compressed }
         return original
     }
+
+    /// How much smaller a rasterized result must be for the save to be worth taking: it has to come
+    /// in under this fraction of the source, i.e. save at least 5%.
+    ///
+    /// A bare "never bigger than the input" bound isn't enough. A 600-dpi JPEG2000 scan re-encoded at
+    /// the top of the quality range measured 0.3% smaller than its source (1,852,933 vs 1,858,059
+    /// bytes) — a full rasterization that threw away more than half the linear resolution and bought
+    /// nothing. Under that bound it saved anyway, silently degrading the file. Anything inside this
+    /// margin now keeps the ORIGINAL bytes, which the screen already reports honestly as "Already
+    /// optimized" (output == input, so `shrank` is false).
+    ///
+    /// Only the save path is bounded — the strength cards call the unbounded core, so their estimates
+    /// still show what each rung would actually produce rather than collapsing onto the source size.
+    private static let worthwhileCompressionRatio = 0.95
 
     /// Compresses toward a byte budget by sweeping a bounded ladder of qualities from high to low,
     /// stopping at the first that lands under `targetBytes`. Writes the best attempt: the highest
@@ -161,7 +177,14 @@ extension PDFToolkit {
         // Rasterizing a lean vector/text PDF can *inflate* it past every rung. Never hand back a
         // "compressed" file bigger than the original — fall back to the source bytes, so the
         // output is bounded by the input even when the target is unreachable.
-        if chosen.count >= sourceBytes {
+        //
+        // When no rung fit at all, the same "not worth it" margin as the quality path applies: a
+        // result that misses the target AND barely undercuts the source is a pure quality loss, so
+        // keep the original. A rung that *did* fit is exempt — the user named a byte budget, and
+        // handing back a larger original because the budget was only a few percent under the source
+        // would ignore the request they actually made.
+        let floorBytes = fittingBest == nil ? Int(Double(sourceBytes) * worthwhileCompressionRatio) : sourceBytes
+        if chosen.count >= floorBytes {
             do {
                 chosen = try Data(contentsOf: inputURL)
             } catch {

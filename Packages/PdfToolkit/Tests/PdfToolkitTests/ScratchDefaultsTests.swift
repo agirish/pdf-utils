@@ -52,9 +52,12 @@ struct ScratchDefaultsTests {
         #expect(isScratchSuiteName(scratchSuiteName()))
         #expect(isScratchSuiteName("PDFExportCoordinatorTests-\(UUID().uuidString)"))
 
-        // The real app domain, the helper's, and anything else must never be wipeable.
-        #expect(!isScratchSuiteName("com.abhishekgirish.PdfUtils"))
-        #expect(!isScratchSuiteName("com.abhishekgirish.PdfUtils.Helper"))
+        // The domains that actually exist in ~/Library/Preferences for this app — the helper reads
+        // `com.pdfutils.PdfUtils` at runtime — plus a neighbouring project's, must never be wipeable.
+        #expect(!isScratchSuiteName("com.pdfutils.PdfUtils"))
+        #expect(!isScratchSuiteName("com.pdfutils.PdfUtilsPreview"))
+        #expect(!isScratchSuiteName("PdfUtils"))
+        #expect(!isScratchSuiteName("com.abhishekgirish.SyncCloud"))
         #expect(!isScratchSuiteName(".GlobalPreferences"))
         #expect(!isScratchSuiteName(""))
         // A separator would let a name escape ~/Library/Preferences.

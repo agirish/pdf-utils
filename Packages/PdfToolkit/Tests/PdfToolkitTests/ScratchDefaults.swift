@@ -30,7 +30,7 @@ import Foundation
 /// sweep. Safe to call more than once for the same suite.
 ///
 /// Only suites created by this test target are eligible; see `isScratchSuiteName`. Anything else —
-/// the real `com.abhishekgirish.PdfUtils` app domain above all — is ignored rather than deleted.
+/// the real `com.pdfutils.PdfUtils` app domain above all — is ignored rather than deleted.
 func wipeDefaultsSuite(_ name: String) {
     guard isScratchSuiteName(name) else {
         assertionFailure("refusing to wipe non-scratch defaults suite \(name)")

@@ -103,13 +103,13 @@ import Foundation
 
     /// A throwaway defaults domain so migration tests never touch the real app or each other.
     private func scratchDefaults() -> (UserDefaults, String) {
-        let name = "pdfutils.tests.\(UUID().uuidString)"
+        let name = scratchSuiteName()
         return (UserDefaults(suiteName: name)!, name)
     }
 
     @Test func migrationSeedsFrostedAndClearsTheRetiredIntensityKey() {
         let (defaults, name) = scratchDefaults()
-        defer { defaults.removePersistentDomain(forName: name) }
+        defer { wipeDefaultsSuite(name) }
         // A pre-GlassLevel install: an intensity value stored, no level yet.
         defaults.set(0.4, forKey: LiquidGlass.intensityKey)
 
@@ -121,7 +121,7 @@ import Foundation
 
     @Test func migrationIsANoOpOnceLevelIsSet() {
         let (defaults, name) = scratchDefaults()
-        defer { defaults.removePersistentDomain(forName: name) }
+        defer { wipeDefaultsSuite(name) }
         defaults.set(GlassLevel.solid.rawValue, forKey: LiquidGlass.levelKey)
 
         LiquidGlass.migrateLegacyAppearance(defaults)   // idempotent — safe to run every launch
@@ -150,7 +150,7 @@ import Foundation
     @MainActor
     @Test func resolvedAppearanceReadsTheKeyAndFallsBackToSystem() {
         let (defaults, name) = scratchDefaults()
-        defer { defaults.removePersistentDomain(forName: name) }
+        defer { wipeDefaultsSuite(name) }
 
         #expect(AppAppearance.resolved(defaults) == .system)               // unset → system
         defaults.set("dark", forKey: LiquidGlass.appearanceModeKey)

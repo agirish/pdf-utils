@@ -148,12 +148,9 @@ import Foundation
     }
 
     /// A throwaway `UserDefaults` suite so tests don't read or mutate the real preferences domain.
-    private static func scratchDefaults() -> UserDefaults {
-        let suite = "pdfutils.tests.\(UUID().uuidString)"
-        let defaults = UserDefaults(suiteName: suite)!
-        defaults.removePersistentDomain(forName: suite)
-        return defaults
-    }
+    /// Self-wiping: these callers keep the suite only for the length of a test body, with nowhere
+    /// to hang a `defer`, so cleanup rides on the returned object's lifetime.
+    private static func scratchDefaults() -> ScratchDefaults { ScratchDefaults() }
 
     // MARK: Persisted key contract
 

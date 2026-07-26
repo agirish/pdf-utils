@@ -105,9 +105,9 @@ import Foundation
 
     @MainActor
     @Test func persistedMinimumLevelReadsTheKeyAndDefaultsToInfo() {
-        let name = "pdfutils.tests.\(UUID().uuidString)"
+        let name = scratchSuiteName()
         let defaults = UserDefaults(suiteName: name)!
-        defer { defaults.removePersistentDomain(forName: name) }
+        defer { wipeDefaultsSuite(name) }
 
         #expect(ActivityLog.defaultMinimumLevel == .info)
         #expect(ActivityLog.persistedMinimumLevel(from: defaults) == .info)      // unset → info

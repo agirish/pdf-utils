@@ -56,7 +56,7 @@ import Testing
         // the global domain and the suites run in parallel.
         let suiteName = "PDFExportCoordinatorTests-\(UUID().uuidString)"
         let defaults = try #require(UserDefaults(suiteName: suiteName))
-        defer { defaults.removePersistentDomain(forName: suiteName) }
+        defer { wipeDefaultsSuite(suiteName) }
         defaults.set(true, forKey: SettingsKeys.stripMetadataOnExport)
 
         let base = try PDFFixtures.pdfData(markers: [PDFFixtures.marker(1)])
@@ -111,7 +111,7 @@ import Testing
     @Test func routeSavesBesideOriginalUnderTheSuffixedName() async throws {
         let suiteName = "PDFExportCoordinatorTests-beside-\(UUID().uuidString)"
         let defaults = try #require(UserDefaults(suiteName: suiteName))
-        defer { defaults.removePersistentDomain(forName: suiteName) }
+        defer { wipeDefaultsSuite(suiteName) }
         defaults.set(SaveLocation.besideOriginal.rawValue, forKey: SettingsKeys.saveLocation)
         defaults.set(true, forKey: SettingsKeys.appendFilenameSuffix)
         // A no-op after-export action keeps the run from stealing Finder focus. Reaching `.savedBeside`
@@ -153,7 +153,7 @@ import Testing
     @Test func routeSavesBesideOriginalNumbersTheOutputWhenSuffixIsOff() async throws {
         let suiteName = "PDFExportCoordinatorTests-beside-nosuffix-\(UUID().uuidString)"
         let defaults = try #require(UserDefaults(suiteName: suiteName))
-        defer { defaults.removePersistentDomain(forName: suiteName) }
+        defer { wipeDefaultsSuite(suiteName) }
         defaults.set(SaveLocation.besideOriginal.rawValue, forKey: SettingsKeys.saveLocation)
         defaults.set(false, forKey: SettingsKeys.appendFilenameSuffix)
         defaults.set(AfterExportAction.doNothing.rawValue, forKey: SettingsKeys.afterExportAction)

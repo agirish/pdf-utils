@@ -1,5 +1,6 @@
 import Foundation
 import PDFKit
+import PDFToolkitCore
 
 /// One whole-document operation the Batch tool can apply uniformly to every file in a queue.
 ///

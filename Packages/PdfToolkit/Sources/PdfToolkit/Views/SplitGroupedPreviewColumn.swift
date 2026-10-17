@@ -1,4 +1,5 @@
 import AppKit
+import PDFToolkitCore
 import SwiftUI
 
 /// Distinguishable per-file colors for the Split visual grid. Chosen to read as their own hue in both

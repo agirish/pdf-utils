@@ -1,5 +1,6 @@
 import Cocoa
 import PDFKit
+import PDFToolkitCore
 import ServiceManagement
 import UserNotifications
 import PdfToolkit

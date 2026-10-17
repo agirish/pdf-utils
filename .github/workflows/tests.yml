@@ -5,7 +5,9 @@
 # Helper executables) has NO test target, and xcodegen/xcodebuild can't build the
 # app here anyway (AppDelegate uses Bundle.module, which exists only under
 # SwiftPM). So there is deliberately no app-target test step: everything under
-# test lives in PdfToolkit, and `swift test` there covers it.
+# test lives in PdfToolkit, and `swift test` there covers it. The PDF operations
+# and their tests (with the real-PDF corpus) live in agirish/pdf-toolkit, which
+# this package resolves by version tag and which runs its own CI.
 
 name: tests
 
@@ -34,27 +36,6 @@ jobs:
         run: |
           xcode-select -p
           swift --version
-
-      # The real-PDF corpus is committed, not generated at test time (see
-      # docs/testing-corpus.md) — CI must not depend on Chrome being installed.
-      # A file missing from the bundle would otherwise surface as an opaque
-      # fatalError deep inside the runner, so check it up front and say which.
-      - name: Check the real-PDF corpus is present
-        run: |
-          corpus=Packages/PdfToolkit/Tests/PdfToolkitTests/Corpus
-          expected="acroform-xrefstream.pdf chrome-article.pdf encrypted-user.pdf
-                    outline-nested.pdf owner-restricted.pdf rotated-cropped.pdf
-                    scanned-receipt.pdf"
-          missing=0
-          for f in $expected; do
-            if [[ -s "$corpus/$f" ]]; then
-              printf '  ok  %-28s %s bytes\n' "$f" "$(stat -f%z "$corpus/$f")"
-            else
-              echo "  MISSING or empty: $corpus/$f"
-              missing=1
-            fi
-          done
-          exit $missing
 
       # arch -arm64: the agent runs as the osx-x64 build under Rosetta (macOS 26
       # fork-bug dodge, see docs/ci.md); swift test inherits x86_64 from it and

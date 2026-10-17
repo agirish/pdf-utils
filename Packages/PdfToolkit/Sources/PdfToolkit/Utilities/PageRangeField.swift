@@ -1,4 +1,5 @@
 import Foundation
+import PDFToolkitCore
 
 /// Live, best-effort validation of a page-range text field, surfaced inline under the field so a bad
 /// range shows up *before* the save dialog instead of after it — Extract and Delete previously only

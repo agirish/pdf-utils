@@ -1,4 +1,5 @@
 import Foundation
+import PDFToolkitCore
 
 /// Bridges the visual thumbnail selection (a set of 1-based page numbers) and the text range field
 /// that Split ("Custom ranges") and Extract already expose. The text field stays authoritative for

@@ -1,5 +1,6 @@
 import AppKit
 import PDFKit
+import PDFToolkitCore
 import SwiftUI
 
 /// A SwiftUI `Font` for a watermark family name (empty = the bold system font), resolved through the

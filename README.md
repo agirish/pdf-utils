@@ -179,31 +179,28 @@ Tests live in the sub-package:
 swift test --package-path Packages/PdfToolkit
 ```
 
-Most fixtures are written at run time, but a small committed corpus of real PDFs
-— a browser-produced document, a genuine fillable form inside a compressed
-cross-reference stream, a nested outline, rotated pages cropped off the origin, a
-scan, and both shapes of encryption — covers the corner cases Apple's own writer
-cannot produce. See [docs/testing-corpus.md](docs/testing-corpus.md).
+The PDF operations themselves — and their tests, including a small committed corpus
+of real PDFs covering the corner cases Apple's own writer cannot produce — live in
+[pdf-toolkit](https://github.com/agirish/pdf-toolkit), the `PDFToolkitCore` package
+this app depends on by version. Run `swift test` there for those.
 
 ## Repository layout
 
 ```
 Package.swift              # Swift package for the app — open this in Xcode
 MacApp/                    # App target: entry point, dashboard, root shell, assets
-Packages/PdfToolkit/       # Shared library: tool UIs, PDF operations, settings, help
-  Sources/PdfToolkit/
-  Tests/PdfToolkitTests/   # The test suite (run with --package-path)
-    Corpus/                # Committed real PDFs — see docs/testing-corpus.md
+Packages/PdfToolkit/       # Shared library: tool UIs, settings, help, batch runs
+  Sources/PdfToolkit/      #   (the PDF operations come from pdf-toolkit's PDFToolkitCore)
+  Tests/PdfToolkitTests/   # The app-side test suite (run with --package-path)
 FinderExtension/           # Sandboxed FinderSync extension (right-click menu)
 Helper/                    # Unsandboxed menu-bar helper the extension hands work to
 scripts/build-app.sh       # Assembles + signs the full .app bundle
-scripts/corpus/            # Regenerates the committed real-PDF test corpus
 docs/                      # GitHub Pages site + screenshots
 ```
 
 ### Architecture note — Finder integration
 
-A FinderSync extension must be sandboxed, and a sandboxed extension can see the selected file paths but can't read or write them. So the extension does no PDF work: it writes the requested `{action, paths}` to a command file and pings a resident, unsandboxed **menu-bar helper** (embedded as a login item) that reuses `PdfToolkit` to do the work and reveals the result in Finder.
+A FinderSync extension must be sandboxed, and a sandboxed extension can see the selected file paths but can't read or write them. So the extension does no PDF work: it writes the requested `{action, paths}` to a command file and pings a resident, unsandboxed **menu-bar helper** (embedded as a login item) that reuses `PdfToolkit` and `PDFToolkitCore` to do the work and reveals the result in Finder.
 
 ## License
 

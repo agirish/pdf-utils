@@ -13,6 +13,7 @@ let package = Package(
     ],
     dependencies: [
         .package(path: "Packages/PdfToolkit"),
+        .package(url: "https://github.com/agirish/pdf-toolkit", exact: "0.1.0"),
     ],
     targets: [
         .executableTarget(
@@ -60,6 +61,7 @@ let package = Package(
             name: "PdfUtilsHelper",
             dependencies: [
                 .product(name: "PdfToolkit", package: "PdfToolkit"),
+                .product(name: "PDFToolkitCore", package: "pdf-toolkit"),
             ],
             path: "Helper",
             exclude: ["Info.plist", "LaunchAgents"]

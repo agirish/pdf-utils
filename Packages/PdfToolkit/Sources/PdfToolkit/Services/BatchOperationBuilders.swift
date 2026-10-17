@@ -1,4 +1,5 @@
 import Foundation
+import PDFToolkitCore
 
 /// Pure translations from each in-tool "Multiple files" configuration to the ``BatchOperation`` the
 /// tool runs across its queue.

@@ -1,5 +1,6 @@
 import Foundation
 import PDFKit
+import PDFToolkitCore
 
 /// The single place tool output is finalized and saved, so every tool honors the Files-tab settings
 /// (strip metadata, filename suffix, save location, after-export action) identically instead of each
@@ -86,17 +87,9 @@ enum PDFExportCoordinator {
 
     /// `dir/filename`, or `dir/name 2.pdf`, `name 3.pdf`… if that already exists — so "beside original"
     /// never overwrites a prior output (and, with a suffix present, never the source either).
+    /// The rule itself lives in the engine, which Split also writes through.
     static func uniqueURL(inDirectory directory: URL, filename: String, fileManager: FileManager = .default) -> URL {
-        let base = (filename as NSString).deletingPathExtension
-        let ext = (filename as NSString).pathExtension
-        var candidate = directory.appendingPathComponent(filename)
-        var counter = 2
-        while fileManager.fileExists(atPath: candidate.path) {
-            let next = ext.isEmpty ? "\(base) \(counter)" : "\(base) \(counter).\(ext)"
-            candidate = directory.appendingPathComponent(next)
-            counter += 1
-        }
-        return candidate
+        PDFToolkit.uniqueURL(inDirectory: directory, filename: filename, fileManager: fileManager)
     }
 
     // MARK: Metadata

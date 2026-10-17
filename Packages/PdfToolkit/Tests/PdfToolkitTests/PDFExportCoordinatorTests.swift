@@ -1,5 +1,6 @@
 import Foundation
 import PDFKit
+import PDFToolkitCore
 import Testing
 @testable import PdfToolkit
 

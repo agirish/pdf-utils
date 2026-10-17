@@ -1,5 +1,6 @@
 import AppKit
 import PDFKit
+import PDFToolkitCore
 
 /// One rendered page thumbnail for preview grids (every grid, Merge's included, sizes via
 /// ``PDFPageThumbnailLoader/thumbnailBox(for:maxSide:)``).

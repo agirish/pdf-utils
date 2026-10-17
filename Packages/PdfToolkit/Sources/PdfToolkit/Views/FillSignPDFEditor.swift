@@ -1,5 +1,6 @@
 import AppKit
 import PDFKit
+import PDFToolkitCore
 import SwiftUI
 
 /// Size (points, view space) of the corner resize handle drawn on the selected item.

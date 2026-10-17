@@ -1,5 +1,6 @@
 import AppKit
 import PDFKit
+import PDFToolkitCore
 import SwiftUI
 
 /// `PDFPage` / `NSImage` aren't `Sendable`, but the loupe render hands a page to the PDF serial queue

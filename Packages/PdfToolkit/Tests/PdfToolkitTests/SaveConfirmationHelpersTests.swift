@@ -1,5 +1,6 @@
 import CoreGraphics
 import Foundation
+import PDFToolkitCore
 import Testing
 @testable import PdfToolkit
 

@@ -1,3 +1,4 @@
+import PDFToolkitCore
 import Testing
 import CoreGraphics
 import Foundation

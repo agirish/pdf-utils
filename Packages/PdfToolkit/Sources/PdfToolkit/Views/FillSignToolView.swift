@@ -1,4 +1,5 @@
 import PDFKit
+import PDFToolkitCore
 import SwiftUI
 import UniformTypeIdentifiers
 

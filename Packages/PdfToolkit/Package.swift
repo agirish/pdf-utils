@@ -10,7 +10,7 @@ let package = Package(
         .library(name: "PdfToolkit", targets: ["PdfToolkit"]),
     ],
     dependencies: [
-        .package(url: "https://github.com/agirish/pdf-toolkit", exact: "0.1.0"),
+        .package(url: "https://github.com/agirish/pdf-toolkit", exact: "0.1.1"),
     ],
     targets: [
         .target(
